@@ -30,7 +30,8 @@ type V1Router struct {
 	metrics       *metrics.Registry
 	authenticator auth.Authenticator
 	adminToken    string
-	transitMgr    *lifecycle.TransitKeyManager // BYOK 传输密钥管理
+	transitMgr    *lifecycle.TransitKeyManager
+	auditDir      string // 审计日志目录（查询用），可为空
 	mux           *http.ServeMux
 }
 
@@ -67,6 +68,9 @@ func (r *V1Router) register() {
 	r.mux.HandleFunc("/api/v1/keys/transit-pub", r.auditMiddleware("TransitKey", r.handleTransitPub))
 	r.mux.HandleFunc("/api/v1/keys/import", r.auditMiddleware("ImportKey", r.authAndSeal("ImportKey", r.handleImportKey)))
 	r.mux.HandleFunc("/api/v1/keys/", r.auditMiddleware("KeyOp", r.authAndSeal("KeyOp", r.handleKeyOps)))
+
+	// 审计日志查询。
+	r.mux.HandleFunc("/api/v1/audit/query", r.auditMiddleware("AuditQuery", r.handleAuditQuery))
 
 	// 密码学运算（需认证 + Unsealed）。
 	r.mux.HandleFunc("/api/v1/encrypt", r.auditMiddleware("Encrypt", r.authAndSeal("Encrypt", r.handleV1Encrypt)))
