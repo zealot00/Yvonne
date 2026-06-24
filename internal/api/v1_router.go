@@ -28,8 +28,9 @@ type V1Router struct {
 	auditLog      audit.Auditor
 	manager       *lifecycle.Manager
 	metrics       *metrics.Registry
-	authenticator auth.Authenticator // 可为 nil（Dev 模式跳过认证）
-	adminToken    string             // 紧急封印 Admin Token（可为空）
+	authenticator auth.Authenticator
+	adminToken    string
+	transitMgr    *lifecycle.TransitKeyManager // BYOK 传输密钥管理
 	mux           *http.ServeMux
 }
 
@@ -43,6 +44,7 @@ func NewV1Router(s seal.Unsealer, auditLog audit.Auditor, mgr *lifecycle.Manager
 		manager:       mgr,
 		metrics:       reg,
 		authenticator: authenticator,
+		transitMgr:    lifecycle.NewTransitKeyManager(),
 		mux:           http.NewServeMux(),
 	}
 	r.register()
@@ -62,6 +64,8 @@ func (r *V1Router) register() {
 
 	// 密钥生命周期（需认证 + Unsealed）。
 	r.mux.HandleFunc("/api/v1/keys", r.auditMiddleware("CreateKey", r.authAndSeal("CreateKey", r.handleCreateKey)))
+	r.mux.HandleFunc("/api/v1/keys/transit-pub", r.auditMiddleware("TransitKey", r.handleTransitPub))
+	r.mux.HandleFunc("/api/v1/keys/import", r.auditMiddleware("ImportKey", r.authAndSeal("ImportKey", r.handleImportKey)))
 	r.mux.HandleFunc("/api/v1/keys/", r.auditMiddleware("KeyOp", r.authAndSeal("KeyOp", r.handleKeyOps)))
 
 	// 密码学运算（需认证 + Unsealed）。
