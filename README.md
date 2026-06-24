@@ -1,253 +1,192 @@
 # 🧊 Yvonne KMS
 
+[English](#english) | [中文](#中文)
+
+---
+
+<a id="english"></a>
+
+## English
+
 Because paying a cloud vendor $500/month just to hold your secrets hostage is institutional extortion.
 
 Yvonne is a production-grade, paranoia-driven Key Management System (KMS) written in Go. She is cold, unforgiving, and explicitly designed for teams who trust absolutely no one—especially not their infrastructure providers, their garbage collector, or themselves.
 
 If you are tired of storing your database credentials as Base64 strings in a "secure" config map, or if your compliance auditor is breathing down your neck and you refuse to pay the "Cloud Mafia" tax, you've come to the right place.
 
-## 💀 Why Yvonne?
+### 💀 Why Yvonne?
 
 Most enterprise KMS solutions are either bloated black boxes that cost more than your engineering team's combined salary, or they are "managed services" that require you to blindly trust that some hyperscaler isn't keeping a backdoor copy of your master key.
 
 Yvonne was built from the ground up with **Absolute Zero Trust**. She doesn't trust the network, she doesn't trust the database, and she certainly doesn't trust Go's Garbage Collector.
 
-## 🔪 Core Features (or: How We Treat Your Data)
+### 🔪 Core Features
 
-### Alzheimer's for Secrets (Absolute Memory Guard)
-Go's Garbage Collector is a snitch that leaves your plaintext keys wandering around the heap. Yvonne violently murders memory slices using `clear()` and pins them with `runtime.KeepAlive()` to defeat Dead Code Elimination (DCE). When a key is done being used, its memory is zeroed out instantly. Memory dumps will yield nothing but ghosts.
+- **Alzheimer's for Secrets (Absolute Memory Guard)**: `clear()` + `runtime.KeepAlive()` defeats DCE. Memory dumps yield nothing but ghosts.
+- **Horcrux-Level Master Keys (Shamir's Secret Sharing)**: Master Key shattered into 5 shards across GF(2^8). 3 shards to resurrect.
+- **The Poor Man's Auto-Unseal (Local PKI)**: Zero-cost RSA-4096 unseal. Burn-after-reading: PEM file physically deleted after use.
+- **Digital Cremation (True Crypto-Shredding)**: `SELECT FOR UPDATE` → overwrite with NULL → DELETE row. Not an `is_deleted` flag.
+- **The Alibi Engine (Immutable Audit Chains)**: HMAC-SHA256 hash chain + daily file rotation + async syslog dual-write. Tamper = chain breaks.
+- **Cold Storage Shamir Backup**: Split Wrapped CMK to N USB drives. Lose some? No problem. Lose all? See disclaimer.
+- **Emergency Seal**: One API call wipes everything. Deep freeze until manual restart + Shamir unseal.
+- **Versioned Self-Routing Ciphertext**: `[uint32 version][nonce][ciphertext+tag]` — decrypt auto-routes to correct DEK version.
+- **RBAC + Policy Engine**: AppRole token + wildcard key matching + action allowlist. Default deny.
+- **Cluster Cache Sync**: Postgres LISTEN/NOTIFY for multi-node DEK cache invalidation.
 
-### Horcrux-Level Master Keys (Shamir's Secret Sharing)
-The Master Key is never stored intact. It is shattered into 5 cryptographic shards across a Galois Field GF(2^8). Distribute them to your executives. If the server reboots, 3 of them must provide their shards to resurrect Yvonne. If they forget their shards, congratulations, your data is mathematically sealed forever.
-
-### The Poor Man's Auto-Unseal (Local PKI)
-Because paying the cloud provider just to automatically unseal your Kubernetes pods at 3 AM is a scam. Yvonne supports a zero-cost local RSA-4096 unseal mechanism. She reads the private key, decrypts the Master Key, and immediately performs a "Burn After Reading"—wiping the key from memory and physically deleting the PEM file from the disk.
-
-### Digital Cremation (True Crypto-Shredding)
-When you rotate or destroy a Data Encryption Key (DEK), we don't just set an `is_deleted = true` flag like a coward. Yvonne issues a pessimistic lock (`SELECT FOR UPDATE`), physically overwrites the ciphertext with NULL or zeros in PostgreSQL, and then deletes the row. It is gone. Don't ask for it back.
-
-### The Alibi Engine (Immutable Audit Chains)
-To satisfy the most bureaucratic of compliance auditors (GxP, SOC2), every action is written to a daily-rotated, HMAC-SHA256 hashed chain, dual-written asynchronously to Syslog. If anyone tampers with a single byte of the log file, the cryptographic chain breaks. You will always be able to mathematically prove exactly which microservice screwed up.
-
-### Cold Storage Shamir Backup (USB Key Drives)
-Yvonne can split the Wrapped Master Key into N Shamir shards and write each to a separate USB drive. Lose a drive? No problem. Lose all of them? See the disclaimer below.
-
-### Emergency Seal (The Nuclear Option)
-One API call (`POST /api/v1/sys/panic`) instantly wipes the Master Key from memory, clears all shard caches, and puts Yvonne into a deep freeze. She will refuse every request until someone physically kills the process and performs a cold restart with Shamir unseal. There is no "undo."
-
-## ⚠️ Disclaimer: The "You're On Your Own" Guarantee
+### ⚠️ Disclaimer
 
 Cryptography is a loaded gun. Yvonne provides the safety mechanism, but if you point it at your foot and pull the trigger, she will not stop the bullet.
 
 - **Lose the Shamir shards?** Your data is gone.
 - **Delete the PostgreSQL database without a backup?** Your data is gone.
-- **Trigger the Emergency Seal?** Yvonne will instantly wipe her memory and play dead until manually resurrected.
+- **Trigger the Emergency Seal?** Yvonne plays dead until manually resurrected.
 
-Yvonne does not forgive, and she does not have a "Forgot Password" link. Use in production at your own risk.
+Yvonne does not forgive, and she does not have a "Forgot Password" link.
 
----
-
-## 🚀 Getting Started
-
-### Environment
-
-- Go 1.21+
-- PostgreSQL 14+ (Cluster mode)
-
-### Build
+### 🚀 Quick Start
 
 ```bash
-make build
-# or
-go build -o bin/yvonne ./cmd/yvonne
-```
-
-### Dev Mode (30-second zero-config trial)
-
-```bash
+# Dev mode (zero config, in-memory)
 ./bin/yvonne dev
-```
 
-Dev mode: in-memory storage, auto-generated Master Key, unsealed on start. Web UI at `http://127.0.0.1:8250`.
-
-### Full Cluster Setup
-
-```bash
-# 1. Generate RSA-4096 key pair for auto-unseal
+# Full cluster setup
 ./bin/yvonne unseal-keygen --out /secure/unseal.pem
-
-# 2. Initialize: generate CMK, encrypt with public key, write to DB
-./bin/yvonne init --config config.json --pub-key /tmp/unseal_pub.pem
-
-# 3. (Optional) Shamir cold backup to USB drives
-./bin/yvonne backup-split --config config.json --out-dir /mnt/usb --total 5 --threshold 3
-
-# 4. Start
+./bin/yvonne init --config config.json --pub-key /tmp/pub.pem
 ./bin/yvonne server --config config.json
 ```
 
----
+Web UI: `http://127.0.0.1:8250` | API: `http://127.0.0.1:8200`
 
-## CLI Commands
+### 📚 Documentation
 
-| Command | Description |
-|---|---|
-| `yvonne dev` | Dev mode (in-memory, auto-unseal, web UI) |
-| `yvonne server --config <path>` | Production mode (PostgreSQL + Shamir/Local PKI) |
-| `yvonne unseal-keygen --out <path>` | Generate RSA-4096 key pair for local_pki unseal |
-| `yvonne init --config <path> --pub-key <path>` | Generate CMK + encrypt + write to DB |
-| `yvonne backup-split --config <path> --out-dir <dir>` | Shamir split Wrapped CMK to USB drive files |
-| `yvonne backup-restore --out <path> <share1> <share2> ...` | Restore Wrapped CMK from share files |
+- [Deployment Guide](docs/deployment.md)
+- [Test Coverage Report](docs/coverage.md)
+- [Security Checklist](.github/CODE_REVIEW_GUIDELINES.md)
 
----
+### 🔧 Build & Test
 
-## API Reference
+```bash
+make build          # compile
+make ci             # local CI (vet + fmt + security + tests)
+make coverage       # coverage report
+bash scripts/security-check.sh  # 12 security checks
+```
 
-All APIs return JSON: `{"ok": bool, "data": ..., "error": ...}`.
-
-### System
-
-| Method | Path | Description | Sealed OK? |
-|---|---|---|---|
-| GET | `/api/v1/sys/health` | Health check | ✅ |
-| POST | `/api/v1/sys/unseal` | Submit Shamir shard | ✅ |
-| POST | `/api/v1/sys/panic` | Emergency seal (irreversible) | ✅ |
-
-### Keys
-
-| Method | Path | Description | Sealed OK? |
-|---|---|---|---|
-| POST | `/api/v1/keys` | Create key (AES/RSA/ECDSA) | ❌ 503 |
-| POST | `/api/v1/keys/{id}/rotate` | Rotate key | ❌ 503 |
-| DELETE | `/api/v1/keys/{id}/shred` | Crypto-shred (irreversible) | ❌ 503 |
-| PATCH | `/api/v1/keys/{id}/soft-delete` | Soft delete (recycle bin) | ❌ 503 |
-| POST | `/api/v1/keys/{id}/restore` | Restore from recycle bin | ❌ 503 |
-
-### Crypto
-
-| Method | Path | Description | Sealed OK? |
-|---|---|---|---|
-| POST | `/api/v1/encrypt` | Envelope encrypt | ❌ 503 |
-| POST | `/api/v1/decrypt` | Envelope decrypt | ❌ 503 |
-
-### Observability
+### 📋 API Endpoints
 
 | Method | Path | Description |
 |---|---|---|
+| GET | `/api/v1/sys/health` | Health check |
+| POST | `/api/v1/sys/unseal` | Submit Shamir shard |
+| POST | `/api/v1/sys/panic` | Emergency seal (irreversible) |
+| POST | `/api/v1/keys` | Create key (AES/RSA/ECDSA) |
+| POST | `/api/v1/keys/{id}/rotate` | Rotate key |
+| DELETE | `/api/v1/keys/{id}/shred` | Crypto-shred |
+| PATCH | `/api/v1/keys/{id}/soft-delete` | Soft delete (recycle bin) |
+| POST | `/api/v1/keys/{id}/restore` | Restore from recycle bin |
+| POST | `/api/v1/encrypt` | Envelope encrypt |
+| POST | `/api/v1/decrypt` | Envelope decrypt |
 | GET | `/metrics` | Prometheus metrics |
 
-### Ciphertext Format (Self-Routing)
+### 🗺️ Roadmap
 
-```
-[Version (uint32, 4 bytes, BigEndian)] [Nonce (12 bytes)] [Ciphertext + AuthTag]
-```
-
-Decrypt extracts the version from the first 4 bytes and routes to the correct DEK. No guessing.
-
-### Key States
-
-```
-Active ──(Rotate)──→ Deactivated ──(SoftDelete)──→ SoftDeleted ──(TTL/Shred)──→ Destroyed
-                          ↑                          │
-                          └────────(Restore)─────────┘
-```
-
-- **Active**: Only state that can encrypt. Also decrypts.
-- **Deactivated**: Historical version. Decrypt only.
-- **SoftDeleted**: In recycle bin. Still decrypts. Restorable for 90 days.
-- **Destroyed**: Physically shredded. Gone forever.
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                      API Layer                           │
-│  RBAC Auth → Audit Middleware → Sealed Check → Handler  │
-├─────────────────────────────────────────────────────────┤
-│                    Lifecycle Manager                     │
-│  DEK State Machine + Cache + LISTEN/NOTIFY + Reaper     │
-├─────────────────────────────────────────────────────────┤
-│                     Seal State Machine                   │
-│  Shamir GF(2^8) │ Local PKI │ Emergency Seal            │
-├─────────────────────────────────────────────────────────┤
-│              Crypto Engine (memguard-protected)          │
-│  AES-256-GCM │ RSA-4096 PSS │ ECDSA P-256 │ Shamir      │
-├─────────────────────────────────────────────────────────┤
-│           Storage (KVStore abstraction)                  │
-│  MemoryStore │ PostgresKVStore (tx + row lock + LISTEN) │
-├─────────────────────────────────────────────────────────┤
-│        Audit (Hash Chain + File Rotation + Syslog)      │
-└─────────────────────────────────────────────────────────┘
-```
-
----
-
-## Security (12 Automated Checks)
-
-```bash
-bash scripts/security-check.sh
-```
-
-| # | Check |
-|---|---|
-| 1 | `clear()` + `runtime.KeepAlive()` pairing (anti-DCE) |
-| 2 | No `[]byte` returning getters (sensitive data via `WithKey` closure) |
-| 3 | No sensitive variable interpolation in errors/logs |
-| 4 | CSPRNG enforcement (no `math/rand`, no bypassing `GenerateSecureRandom`) |
-| 5 | Plaintext key params must be `*memguard.SecureBuffer` |
-| 6 | Sensitive comparisons use `subtle.ConstantTimeCompare` |
-| 7 | `ProvideShare` wipes `collectedShares` after threshold |
-| 8 | Shamir operations strictly in GF(2^8) |
-| 9 | `Combine` returns `*memguard.SecureBuffer` |
-| 10 | `MemoryStore.Delete` clears before delete (Crypto-Shredding) |
-| 11 | API handler `io.ReadAll` results cleared (Payload Escaping) |
-| 12 | Byte slice access guarded by length check (anti-panic) |
-
----
-
-## CI/CD
-
-| Workflow | Triggers | Jobs |
-|---|---|---|
-| `ci.yml` | push/PR to main | lint, test, security, coverage, PostgreSQL integration |
-| `security.yml` | daily + manual | GoSec, govulncheck, TruffleHog secret scan |
-| `release.yml` | tag `v*.*.*` | Cross-compile (linux/darwin × amd64/arm64) + GitHub Release |
-
----
-
-## Project Structure
-
-```
-yvonne/
-├── cmd/yvonne/              # CLI entry point
-├── internal/
-│   ├── memguard/            # SecureBuffer + CSPRNG
-│   ├── crypto/              # AES-256-GCM + RSA/ECDSA + versioned ciphertext
-│   ├── seal/                # Shamir + VaultState + Local PKI + Emergency Seal + Backup
-│   ├── lifecycle/           # DEK lifecycle + cache + reaper
-│   ├── storage/             # KVStore (Memory + Postgres + LISTEN/NOTIFY)
-│   ├── audit/               # Hash chain + file rotation + syslog
-│   ├── metrics/             # Prometheus
-│   ├── api/                 # HTTP routes + middleware + handlers
-│   ├── auth/                # RBAC (AppRole + Policy)
-│   ├── admin/               # Web UI (embedded SPA)
-│   ├── bootstrap/           # Dependency injection (Dev/Cluster)
-│   └── config/              # Config loading + validation
-├── .github/workflows/       # CI/CD
-├── scripts/security-check.sh
-└── Makefile
-```
-
----
-
-## Roadmap
-
-- [ ] **TPM 2.0 support** — Hardware-bound CMK unseal via `go-tpm`, replacing or complementing Local PKI
+- [ ] TPM 2.0 support — hardware-bound CMK unseal
 - [ ] PKCS#11 HSM integration
 - [ ] mTLS client certificate authentication
-- [ ] Audit log tamper detection API (chain verification endpoint)
+- [ ] Audit chain verification API endpoint
+
+---
+
+<a id="中文"></a>
+
+## 中文
+
+因为每月向云厂商支付 500 美元仅为了让对方扣留你的密钥，这本质上是制度性勒索。
+
+Yvonne 是一个生产级、偏执驱动的密钥管理系统（KMS），用 Go 编写。她冷酷、不可饶恕，专门为那些谁都不信任的团队设计——尤其不信任他们的基础设施供应商、垃圾回收器、以及他们自己。
+
+如果你已经厌倦了把数据库凭证以 Base64 字符串存在所谓的"安全"配置映射里，或者合规审计员正在你脖子上吹气而你拒绝支付"云黑手党"保护费，那你来对地方了。
+
+### 💀 为什么选择 Yvonne？
+
+大多数企业级 KMS 解决方案要么是臃肿的黑盒，成本比整个工程团队的薪水加起来还高；要么是"托管服务"，要求你盲目相信某个超大规模云厂商没有偷偷留一份主密钥的后门副本。
+
+Yvonne 从零开始以**绝对零信任**构建。她不信任网络，不信任数据库，当然也不信任 Go 的垃圾回收器。
+
+### 🔪 核心特性
+
+- **密钥阿尔茨海默症（绝对内存防御）**：`clear()` + `runtime.KeepAlive()` 击败 DCE 优化。内存转储只能看到幽灵。
+- **魂器级主密钥（Shamir 秘密分割）**：主密钥在 GF(2^8) 有限域中被击碎为 5 份。3 份才能复活。
+- **穷人的自动解封（Local PKI）**：零成本 RSA-4096 解封。阅后即焚：PEM 文件用完物理删除。
+- **数字火化（真正的 Crypto-Shredding）**：`SELECT FOR UPDATE` → 覆写为 NULL → DELETE 删除行。不是 `is_deleted` 标志位。
+- **不在场证明引擎（不可篡改审计链）**：HMAC-SHA256 哈希链 + 按天文件轮转 + 异步 Syslog 双写。篡改即断链。
+- **冷存储 Shamir 备份**：将封装主密钥分片到 N 个 U 盘。丢几个？没问题。全丢？看免责声明。
+- **紧急封印**：一个 API 调用擦除一切。深度冰冻直到手动重启 + Shamir 解封。
+- **版本化自路由密文**：`[uint32 版本号][nonce][密文+tag]` — 解密自动路由到正确的 DEK 版本。
+- **RBAC + 策略引擎**：AppRole 令牌 + 通配符密钥匹配 + 操作白名单。默认拒绝。
+- **集群缓存同步**：Postgres LISTEN/NOTIFY 实现多节点 DEK 缓存失效。
+
+### ⚠️ 免责声明
+
+密码学是一把上了膛的枪。Yvonne 提供安全机制，但如果你把枪对准自己的脚扣动扳机，她不会替你挡子弹。
+
+- **弄丢了 Shamir 碎片？** 你的数据没了。
+- **没备份就删了 PostgreSQL 数据库？** 你的数据没了。
+- **触发了紧急封印？** Yvonne 会装死直到被手动复活。
+
+Yvonne 不原谅人，也没有"忘记密码"链接。
+
+### 🚀 快速开始
+
+```bash
+# 开发模式（零配置，内存存储）
+./bin/yvonne dev
+
+# 完整集群部署
+./bin/yvonne unseal-keygen --out /secure/unseal.pem
+./bin/yvonne init --config config.json --pub-key /tmp/pub.pem
+./bin/yvonne server --config config.json
+```
+
+Web 管理界面：`http://127.0.0.1:8250` | API：`http://127.0.0.1:8200`
+
+### 📚 文档
+
+- [部署指南](docs/deployment.md)
+- [测试覆盖率报告](docs/coverage.md)
+- [安全检查清单](.github/CODE_REVIEW_GUIDELINES.md)
+
+### 🔧 编译与测试
+
+```bash
+make build          # 编译
+make ci             # 本地 CI（vet + fmt + 安全 + 测试）
+make coverage       # 覆盖率报告
+bash scripts/security-check.sh  # 12 项安全检查
+```
+
+### 📋 API 端点
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/v1/sys/health` | 健康检查 |
+| POST | `/api/v1/sys/unseal` | 提交 Shamir 碎片 |
+| POST | `/api/v1/sys/panic` | 紧急封印（不可逆） |
+| POST | `/api/v1/keys` | 创建密钥（AES/RSA/ECDSA） |
+| POST | `/api/v1/keys/{id}/rotate` | 轮转密钥 |
+| DELETE | `/api/v1/keys/{id}/shred` | 物理粉碎 |
+| PATCH | `/api/v1/keys/{id}/soft-delete` | 软删除（回收站） |
+| POST | `/api/v1/keys/{id}/restore` | 从回收站恢复 |
+| POST | `/api/v1/encrypt` | 信封加密 |
+| POST | `/api/v1/decrypt` | 信封解密 |
+| GET | `/metrics` | Prometheus 指标 |
+
+### 🗺️ 路线图
+
+- [ ] TPM 2.0 支持 — 硬件绑定 CMK 解封
+- [ ] PKCS#11 HSM 集成
+- [ ] mTLS 客户端证书认证
+- [ ] 审计链验证 API 端点
 
 ---
 
