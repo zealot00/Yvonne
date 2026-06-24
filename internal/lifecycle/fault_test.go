@@ -56,6 +56,19 @@ func (f *faultStore) WithTx(ctx context.Context, fn func(txStore storage.KVStore
 	return fn(f)
 }
 
+// ScanPrefix 实现 PrefixScanner（faultStore 也支持前缀扫描）。
+func (f *faultStore) ScanPrefix(ctx context.Context, prefix string) (map[string][]byte, error) {
+	result := make(map[string][]byte)
+	for k, v := range f.data {
+		if len(k) >= len(prefix) && k[:len(prefix)] == prefix {
+			cp := make([]byte, len(v))
+			copy(cp, v)
+			result[k] = cp
+		}
+	}
+	return result, nil
+}
+
 // TestCreateKey_SaveMetadataFail 验证 saveMetadata 失败时擦除明文 DEK。
 func TestCreateKey_SaveMetadataFail(t *testing.T) {
 	store := newFaultStore()
