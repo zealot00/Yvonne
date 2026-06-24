@@ -1,0 +1,34 @@
+{
+  "mode": "cluster",
+  "server": {
+    "bind_addr": "0.0.0.0",
+    "bind_port": 8200,
+    "tls": {
+      "enabled": true,
+      "min_version": "TLS1.3",
+      "cert_file": "/etc/yvonne/tls.crt",
+      "key_file": "/etc/yvonne/tls.key"
+    },
+    "admin": {
+      "enabled": true,
+      "bind_addr": "127.0.0.1",
+      "bind_port": 8250
+    }
+  },
+  "storage": {
+    "type": "postgres",
+    "dsn": "postgres://yvonne:CHANGE_ME@db.internal:5432/yvonne?sslmode=require"
+  },
+  "unseal": {
+    "type": "shamir",
+    "total_shares": 5,
+    "threshold": 3,
+    "auto_reseal_after": "30m"
+  },
+  "logging": {
+    "level": "info",
+    "format": "json",
+    "output": "stdout",
+    "redact_secrets": true
+  }
+}

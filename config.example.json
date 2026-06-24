@@ -1,0 +1,56 @@
+{
+  "server": {
+    "bind_addr": "127.0.0.1",
+    "bind_port": 8200,
+    "tls": { "enabled": false, "min_version": "TLS1.3" },
+    "admin": {
+      "enabled": true,
+      "bind_addr": "127.0.0.1",
+      "bind_port": 8250
+    }
+  },
+  "storage": {
+    "backend": "boltdb",
+    "path": "data/yvonne.db"
+  },
+  "seal": {
+    "total_shares": 5,
+    "threshold": 3,
+    "auto_reseal_after": "30m"
+  },
+  "crypto": {
+    "dek_size": 32,
+    "rsa_key_bits": 4096,
+    "ecdsa_curve": "P-256"
+  },
+  "auth": {
+    "approle": {
+      "role_id_length": 16,
+      "secret_id_length": 32,
+      "secret_id_ttl": "24h",
+      "bind_secret_id": true
+    },
+    "jwt": {
+      "signing_method": "RS256",
+      "token_ttl": "15m",
+      "issuer": "yvonne-kms"
+    }
+  },
+  "audit": {
+    "log_path": "logs/audit.log",
+    "audit_key_derivation_salt": "DEADBEEFCAFEBABE1234567890ABCDEF",
+    "fsync": true,
+    "max_entry_bytes": 65536
+  },
+  "memory": {
+    "enable_mlock": true,
+    "use_mmap": false,
+    "gc_policy": "avoid_gc_for_secure_buffer"
+  },
+  "logging": {
+    "level": "info",
+    "format": "json",
+    "output": "stdout",
+    "redact_secrets": true
+  }
+}

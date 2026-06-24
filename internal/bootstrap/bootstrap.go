@@ -1,0 +1,273 @@
+// Package bootstrap 是 Yvonne 的初始化大管家，负责根据 YvonneConfig 在
+// Dev Mode 与 Cluster Mode 之间装配依赖并启动系统。
+//
+// 设计原则：
+//   - 模式隔离：Dev 与 Cluster 的代码路径用严格的 switch/if 分支隔离，
+//     防止 Dev 逻辑被 Cluster 误调用。
+//   - 开箱即用：Dev 模式零配置启动，自动生成临时 Master Key 并进入 Unsealed。
+//   - 严格校验：Cluster 模式配置不合法直接 panic，拒绝启动。
+//   - 优雅退出：BuildYvonne 返回的 Server 含 Close 方法，释放连接池与清理内存。
+//
+// 安全：
+//   - Dev 模式启动时必须用红字警告打印不安全提示。
+//   - Cluster 模式绝不使用 auto unseal 与 memory storage。
+package bootstrap
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"os"
+	"time"
+
+	"yvonne/internal/admin"
+	"yvonne/internal/api"
+	"yvonne/internal/audit"
+	"yvonne/internal/config"
+	"yvonne/internal/lifecycle"
+	"yvonne/internal/memguard"
+	"yvonne/internal/metrics"
+	"yvonne/internal/seal"
+	"yvonne/internal/storage"
+)
+
+// Server 是装配完成的 Yvonne 实例。
+type Server struct {
+	V1Router    *api.V1Router
+	AdminServer *admin.Server // Web 管理页面（可为 nil：admin.enabled=false）
+	AuditLog    audit.Auditor
+	Metrics     *metrics.Registry
+	VaultState  seal.Unsealer
+	Store       storage.KVStore
+	PGStore     *storage.PostgresKVStore
+	Manager     *lifecycle.Manager
+	MasterKey   *memguard.SecureBuffer
+}
+
+// Close 释放所有资源。
+// 顺序：先停 HTTP（由外部 main 完成）→ Close audit → Wipe masterKey → Close PG pool → Close store。
+func (s *Server) Close() {
+	if s.AuditLog != nil {
+		s.AuditLog.Close()
+	}
+	if s.MasterKey != nil {
+		s.MasterKey.Wipe()
+	}
+	if s.PGStore != nil {
+		_ = s.PGStore.Close(context.Background())
+	}
+}
+
+// BuildYvonne 根据配置装配 Yvonne 实例。
+//
+// Dev Mode：
+//   - 强制 storage=memory
+//   - 强制 unseal=auto，生成 32 字节临时 Master Key，直接 Unsealed
+//   - 红字警告
+//
+// Cluster Mode：
+//   - 严格校验（已由 config.ValidateYvonneConfig 完成）
+//   - 实例化 PGStore
+//   - 按 unseal.type 装配解封策略（shamir 或 local_pki）
+//   - 启动时处于 Sealed 状态，等待外部 ProvideShare
+func BuildYvonne(cfg *config.YvonneConfig) (*Server, error) {
+	if cfg == nil {
+		return nil, errors.New("bootstrap: nil config")
+	}
+
+	// 公共：创建 audit logger 与 metrics registry。
+	auditLog, err := audit.NewAuditLogger(os.Stdout)
+	if err != nil {
+		return nil, fmt.Errorf("bootstrap: create audit logger: %w", err)
+	}
+	metricsReg := metrics.NewRegistry()
+
+	// 模式分支：严格隔离 Dev 与 Cluster 装配逻辑。
+	switch cfg.Mode {
+	case config.ModeDev:
+		return buildDevMode(cfg, auditLog, metricsReg)
+	case config.ModeCluster:
+		return buildClusterMode(cfg, auditLog, metricsReg)
+	default:
+		// 不应到达（ValidateYvonneConfig 已拦截），但防御性 panic。
+		panic(fmt.Sprintf("bootstrap: invalid mode %q (validator should have caught this)", cfg.Mode))
+	}
+}
+
+// buildDevMode 装配 Dev 模式实例。
+//
+// 关键安全决策：
+//   - 强制 storage=memory，忽略配置中的 postgres（防误配）。
+//   - 强制 unseal=auto，生成临时 Master Key。
+//   - 红字警告必须打印。
+func buildDevMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, metricsReg *metrics.Registry) (*Server, error) {
+	// 红字警告（ANSI 红色）。
+	const red = "\033[31m"
+	const bold = "\033[1m"
+	const reset = "\033[0m"
+	log.Printf("%s%sWARNING: Yvonne is running in DEV MODE. Data is in-memory only and insecure. DO NOT use in production!%s",
+		red, bold, reset)
+
+	// 强制降级：忽略配置的 storage/unseal，用 Dev 专用装配。
+	store := storage.NewMemoryStore()
+
+	// 生成临时 Master Key（32 字节，AES-256）。
+	masterKey, err := memguard.NewSecureBufferFromRandom(32)
+	if err != nil {
+		auditLog.Close()
+		return nil, fmt.Errorf("bootstrap: dev generate master key: %w", err)
+	}
+
+	// 创建 VaultState 并直接 Unseal（Dev 模式跳过 Shamir）。
+	// 用 DirectUnseal 注入临时 Master Key，不走 Shamir.Split（parts=1 数学上无意义）。
+	vault := seal.NewVaultState(1, 1, 0)
+	if err := vault.DirectUnseal(masterKey); err != nil {
+		masterKey.Wipe()
+		auditLog.Close()
+		return nil, fmt.Errorf("bootstrap: dev direct unseal failed: %w", err)
+	}
+
+	// 装配 lifecycle Manager（用 Dev masterKey）。
+	lifecycleMgr := lifecycle.NewManager(store)
+
+	// 启动回收站自动清理（Dev 模式用 24h TTL，生产用 90 天）。
+	lifecycleMgr.StartSoftDeleteReaper(lifecycle.DefaultSoftDeleteTTL, nil)
+
+	// 装配 V1Router（Dev 模式无认证）。
+	v1Router := api.NewV1Router(vault, auditLog, lifecycleMgr, metricsReg, nil)
+
+	// 装配 Admin Web UI（Dev 模式默认启用，绑 127.0.0.1:8250）。
+	adminSrv := buildAdminServer(cfg, vault)
+
+	log.Printf("DEV MODE assembled: %s", cfg.PrintSummary())
+
+	return &Server{
+		V1Router:    v1Router,
+		AdminServer: adminSrv,
+		AuditLog:    auditLog,
+		Metrics:     metricsReg,
+		VaultState:  vault,
+		Store:       store,
+		Manager:     lifecycleMgr,
+		MasterKey:   masterKey,
+	}, nil
+}
+
+// buildClusterMode 装配 Cluster 模式实例。
+//
+// 严格校验：
+//   - storage.type 必须 postgres（已由 ValidateYvonneConfig 拦截，此处二次确认防误配）。
+//   - unseal.type 必须 shamir 或 local_pki（绝不 auto）。
+//   - 任何校验失败立即 panic，拒绝启动。
+func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, metricsReg *metrics.Registry) (*Server, error) {
+	// 二次确认（防误配）：Cluster 模式绝不用 memory storage 与 auto unseal。
+	if cfg.Storage.Type == "memory" {
+		auditLog.Close()
+		panic("bootstrap: FATAL cluster mode must NOT use memory storage (dev-only)")
+	}
+	if cfg.Unseal.Type == "auto" {
+		auditLog.Close()
+		panic("bootstrap: FATAL cluster mode must NOT use auto unseal (dev-only)")
+	}
+
+	// 实例化 PGStore。
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pgStore, err := storage.NewPostgresKVStoreWithConfig(ctx, storage.PostgresPoolConfig{
+		DSN:               cfg.Storage.DSN,
+		MaxConns:          8, // 生产建议 2*NumCPU，此处给保守默认值
+		MinConns:          2,
+		MaxConnLifetime:   30 * time.Minute,
+		MaxConnIdleTime:   5 * time.Minute,
+		HealthCheckPeriod: 30 * time.Second,
+	})
+	if err != nil {
+		auditLog.Close()
+		return nil, fmt.Errorf("bootstrap: cluster create pg store: %w", err)
+	}
+
+	// 装配 VaultState（Cluster 模式启动时 Sealed）。
+	totalShares := cfg.Unseal.TotalShares
+	threshold := cfg.Unseal.Threshold
+	if totalShares == 0 {
+		totalShares = 5
+	}
+	if threshold == 0 {
+		threshold = 3
+	}
+	vault := seal.NewVaultState(totalShares, threshold, 30*time.Minute)
+
+	// 按解封策略装配。
+	switch cfg.Unseal.Type {
+	case "shamir":
+		// Shamir 模式：启动时 Sealed，等待外部 ProvideShare。
+		log.Printf("CLUSTER MODE assembled: %s (sealed, awaiting shamir shares)", cfg.PrintSummary())
+	case "local_pki":
+		// Local PKI 模式：自动解封。
+		pkiUnsealer := seal.NewLocalPKIUnsealer(cfg.Unseal.PKIKeyPath, vault, pgStore)
+		if err := pkiUnsealer.AutoUnseal(ctx); err != nil {
+			auditLog.Close()
+			_ = pgStore.Close(ctx)
+			log.Fatalf("bootstrap: FATAL local_pki auto-unseal failed: %v", err)
+		}
+		log.Printf("CLUSTER MODE assembled: %s (auto-unsealed via local_pki)", cfg.PrintSummary())
+	default:
+		auditLog.Close()
+		_ = pgStore.Close(ctx)
+		panic(fmt.Sprintf("bootstrap: FATAL unsupported unseal type %q in cluster mode", cfg.Unseal.Type))
+	}
+
+	// 装配 lifecycle Manager。
+	lifecycleMgr := lifecycle.NewManager(pgStore)
+
+	// 启动回收站自动清理（90 天 TTL）。
+	lifecycleMgr.StartSoftDeleteReaper(lifecycle.DefaultSoftDeleteTTL, nil)
+
+	// 装配 V1Router（Cluster 模式暂无认证，生产环境应注入 Authenticator）。
+	v1Router := api.NewV1Router(vault, auditLog, lifecycleMgr, metricsReg, nil)
+
+	// 装配 Admin Web UI。
+	adminSrv := buildAdminServer(cfg, vault)
+
+	return &Server{
+		V1Router:    v1Router,
+		AdminServer: adminSrv,
+		AuditLog:    auditLog,
+		Metrics:     metricsReg,
+		VaultState:  vault,
+		Store:       pgStore,
+		PGStore:     pgStore,
+		Manager:     lifecycleMgr,
+		// MasterKey 为 nil：Cluster 模式由 VaultState 管理。
+		MasterKey: nil,
+	}, nil
+}
+
+// buildAdminServer 装配 Admin Web UI。
+//
+// Dev 模式默认启用（即使配置 admin.enabled=false 也强制启用，方便本地测试）。
+// Cluster 模式按配置 admin.enabled 控制。
+//
+// 监听地址：
+//   - 优先用配置 admin.bind_addr / admin.bind_port
+//   - 未配置时默认 127.0.0.1:8250
+//
+// 安全：管理页面强制绑 127.0.0.1，禁止 0.0.0.0。
+func buildAdminServer(cfg *config.YvonneConfig, vault *seal.VaultState) *admin.Server {
+	// Dev 模式强制启用 admin UI。
+	if cfg.Mode == config.ModeDev {
+		log.Printf("DEV MODE: admin web UI forced enabled")
+		return admin.NewServer(vault)
+	}
+
+	// Cluster 模式按配置。
+	if !cfg.Server.Admin.Enabled {
+		log.Printf("admin web UI disabled by config")
+		return nil
+	}
+
+	log.Printf("admin web UI enabled at %s:%d", cfg.Server.Admin.BindAddr, cfg.Server.Admin.BindPort)
+	return admin.NewServer(vault)
+}

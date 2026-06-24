@@ -1,0 +1,24 @@
+{
+  "mode": "dev",
+  "server": {
+    "bind_addr": "127.0.0.1",
+    "bind_port": 8200,
+    "admin": {
+      "enabled": true,
+      "bind_addr": "127.0.0.1",
+      "bind_port": 8250
+    }
+  },
+  "storage": {
+    "type": "memory"
+  },
+  "unseal": {
+    "type": "auto"
+  },
+  "logging": {
+    "level": "info",
+    "format": "json",
+    "output": "stdout",
+    "redact_secrets": true
+  }
+}

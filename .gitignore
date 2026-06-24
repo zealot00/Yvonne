@@ -1,0 +1,40 @@
+# 二进制
+/bin/
+/dist/
+/yvonne
+/yvonne-cli
+
+# Go 构建缓存
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# === 严禁入库的密钥材料 ===
+*.key
+*.pem
+*.p12
+*.pfx
+shares/
+secrets/
+master-key*
+audit-key*
+jwt-signing-key*
+jwt-verifying-key*
+backup-*.dat
+
+# 本地数据
+*.db
+*.db.lock
+data/
+logs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# 环境变量
+.env
+.env.local

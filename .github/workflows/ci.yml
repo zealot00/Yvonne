@@ -1,0 +1,178 @@
+# Yvonne KMS - CI Pipeline
+#
+# 触发条件：push/PR 到 main 分支
+#
+# Jobs:
+#   1. lint        — go vet + gofmt 检查
+#   2. test        — 单元测试（含 race detector）
+#   3. security    — 11 项安全自检脚本
+#   4. coverage    — 覆盖率报告 + Codecov 上传
+#   5. integration — PostgreSQL 集成测试（service container）
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  GO_VERSION: "1.21"
+
+jobs:
+  # ─── 代码质量检查 ───
+  lint:
+    name: Lint (vet + fmt)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Go fmt check
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "::error::The following files are not formatted:"
+            gofmt -l .
+            exit 1
+          fi
+
+  # ─── 单元测试（含 race detector）───
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build
+        run: go build ./...
+
+      - name: Run unit tests
+        run: go test ./... -race -count=1 -timeout 120s
+
+      - name: Run API integration tests
+        run: go test ./internal/api/ -tags=integration -race -count=1 -timeout 60s
+
+  # ─── 安全自检（11 项红线）───
+  security:
+    name: Security Check (11 Red Lines)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run security check script
+        run: bash scripts/security-check.sh
+
+  # ─── 覆盖率报告 ───
+  coverage:
+    name: Coverage Report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Generate core coverage
+        run: |
+          go test -race -count=1 -coverprofile=cover_core.out \
+            ./internal/memguard/ ./internal/crypto/ ./internal/lifecycle/ \
+            ./internal/seal/ ./internal/audit/ ./internal/metrics/
+
+      - name: Generate API coverage
+        run: |
+          go test -race -count=1 -tags=integration -coverprofile=cover_api.out \
+            ./internal/api/
+
+      - name: Merge coverage
+        run: |
+          echo "mode: set" > cover_merged.out
+          grep -v "^mode:" cover_core.out >> cover_merged.out
+          grep -v "^mode:" cover_api.out >> cover_merged.out
+
+      - name: Display coverage
+        run: go tool cover -func=cover_merged.out | tail -1
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./cover_merged.out
+          fail_ci_if_error: false
+
+      - name: Generate HTML report
+        run: go tool cover -html=cover_merged.out -o coverage.html
+
+      - name: Upload HTML artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.html
+
+  # ─── PostgreSQL 集成测试 ───
+  integration:
+    name: PostgreSQL Integration Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: yvonne
+          POSTGRES_PASSWORD: yvonne_pass
+          POSTGRES_DB: yvonne_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      YVONNE_PG_DSN: "postgres://yvonne:yvonne_pass@localhost:5432/yvonne_test?sslmode=disable"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run PostgreSQL storage integration tests
+        run: |
+          go test ./internal/storage/ -tags=integration -race -v -timeout 120s
+
+      - name: Run API integration tests
+        run: |
+          go test ./internal/api/ -tags=integration -race -v -timeout 60s

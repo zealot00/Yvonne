@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Yvonne KMS - Admin</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Yvonne KMS</div>
+    <nav class="nav">
+      <a href="#/" data-route="overview">概览</a>
+      <a href="#/unseal" data-route="unseal">Unseal</a>
+      <a href="#/keys" data-route="keys">密钥</a>
+    </nav>
+    <div class="state-pill" id="state-pill">loading...</div>
+  </header>
+
+  <main id="view" class="view">
+    <!-- 由 app.js 渲染 -->
+  </main>
+
+  <footer class="footer">
+    <small>Yvonne KMS · 内部管理界面 · 严禁暴露到公网</small>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

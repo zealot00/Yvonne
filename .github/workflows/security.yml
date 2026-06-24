@@ -1,0 +1,98 @@
+# Yvonne KMS - Security & Quality Scan
+#
+# 独立于 CI 的安全扫描流水线，每日定时运行 + 手动触发。
+#
+# Jobs:
+#   1. gosec        — Go 静态安全分析
+#   2. security-check — Yvonne 11 项红线自检
+#   3. dependency-scan — 依赖漏洞扫描 (govulncheck)
+#   4. secret-scan  — 硬编码密钥扫描
+name: Security Scan
+
+on:
+  schedule:
+    # 每日 UTC 02:00 运行
+    - cron: "0 2 * * *"
+  workflow_dispatch: {}
+  pull_request:
+    branches: [main]
+    paths:
+      - "**.go"
+      - "scripts/security-check.sh"
+
+env:
+  GO_VERSION: "1.21"
+
+jobs:
+  # ─── Go 静态安全分析 ───
+  gosec:
+    name: GoSec Static Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install GoSec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+      - name: Run GoSec
+        # 排除测试文件与 generated 文件。
+        # -exclude-dir=securebuffer 已删除。
+        # severity=medium: 中危以上才告警。
+        run: |
+          gosec -severity medium -confidence medium \
+            -exclude-dir=_test \
+            -exclude-generated \
+            ./internal/... ./cmd/...
+
+  # ─── Yvonne 11 项红线自检 ───
+  security-check:
+    name: Yvonne 11 Red Lines
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run security check
+        run: bash scripts/security-check.sh
+
+  # ─── 依赖漏洞扫描 ───
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        run: govulncheck ./...
+
+  # ─── 硬编码密钥扫描 ───
+  secret-scan:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 全历史，扫描所有提交
+
+      - name: TruffleHog OSS
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: .
+          extra_args: --only-verified --exclude-paths=.github/exclude-patterns.txt
