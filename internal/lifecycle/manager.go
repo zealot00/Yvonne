@@ -38,14 +38,16 @@ const DefaultSoftDeleteTTL = 90 * 24 * time.Hour
 
 // KeyMetadata 是密钥的元数据。仅含密文，无明文。
 type KeyMetadata struct {
-	KeyID             string    `json:"key_id"`
-	Version           int       `json:"version"`
-	State             KeyState  `json:"state"`
-	KeyType           string    `json:"key_type"`
-	EncryptedMaterial []byte    `json:"encrypted_material"`
-	PublicKey         []byte    `json:"public_key,omitempty"`
-	CreatedAt         time.Time `json:"created_at"`
-	DeletedAt         time.Time `json:"deleted_at,omitempty"` // 软删除时间（用于 TTL 自动清除）
+	KeyID              string    `json:"key_id"`
+	Version            int       `json:"version"`
+	State              KeyState  `json:"state"`
+	KeyType            string    `json:"key_type"`
+	EncryptedMaterial  []byte    `json:"encrypted_material"`
+	PublicKey          []byte    `json:"public_key,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	DeletedAt          time.Time `json:"deleted_at,omitempty"`
+	RotationPeriodDays int       `json:"rotation_period_days,omitempty"` // 0=不自动轮转
+	NextRotationAt     time.Time `json:"next_rotation_at,omitempty"`     // 下次自动轮转时间
 }
 
 func metadataKey(keyID string, version int) string {
@@ -152,7 +154,8 @@ func (m *Manager) GenerateDataKey(ctx context.Context, keyID string, masterKey *
 }
 
 // CreateKey 生成新 DEK 并存储元数据。
-func (m *Manager) CreateKey(ctx context.Context, keyID string, masterKey *memguard.SecureBuffer) (*KeyMetadata, *memguard.SecureBuffer, error) {
+// rotationPeriodDays=0 表示不自动轮转。
+func (m *Manager) CreateKey(ctx context.Context, keyID string, masterKey *memguard.SecureBuffer, rotationPeriodDays int) (*KeyMetadata, *memguard.SecureBuffer, error) {
 	if keyID == "" {
 		return nil, nil, errors.New("lifecycle: empty key id")
 	}
@@ -165,12 +168,17 @@ func (m *Manager) CreateKey(ctx context.Context, keyID string, masterKey *memgua
 		return nil, nil, fmt.Errorf("lifecycle: generate data key: %w", err)
 	}
 
+	now := time.Now().UTC()
 	meta := KeyMetadata{
-		KeyID:             keyID,
-		Version:           1,
-		State:             StateActive,
-		EncryptedMaterial: encryptedDEK,
-		CreatedAt:         time.Now().UTC(),
+		KeyID:              keyID,
+		Version:            1,
+		State:              StateActive,
+		EncryptedMaterial:  encryptedDEK,
+		CreatedAt:          now,
+		RotationPeriodDays: rotationPeriodDays,
+	}
+	if rotationPeriodDays > 0 {
+		meta.NextRotationAt = now.Add(time.Duration(rotationPeriodDays) * 24 * time.Hour)
 	}
 
 	if err := m.saveMetadata(ctx, meta); err != nil {
@@ -390,12 +398,17 @@ func (m *Manager) RotateKey(ctx context.Context, keyID string, masterKey *memgua
 			return fmt.Errorf("lifecycle: generate new data key: %w", err)
 		}
 
+		now := time.Now().UTC()
 		newMeta = &KeyMetadata{
-			KeyID:             keyID,
-			Version:           latestV + 1,
-			State:             StateActive,
-			EncryptedMaterial: encryptedDEK,
-			CreatedAt:         time.Now().UTC(),
+			KeyID:              keyID,
+			Version:            latestV + 1,
+			State:              StateActive,
+			EncryptedMaterial:  encryptedDEK,
+			CreatedAt:          now,
+			RotationPeriodDays: oldMeta.RotationPeriodDays,
+		}
+		if oldMeta.RotationPeriodDays > 0 {
+			newMeta.NextRotationAt = now.Add(time.Duration(oldMeta.RotationPeriodDays) * 24 * time.Hour)
 		}
 		newData, err := json.Marshal(newMeta)
 		if err != nil {

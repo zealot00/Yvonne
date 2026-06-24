@@ -72,7 +72,7 @@ func (r *V1Router) handleCreateKey(w http.ResponseWriter, req *http.Request) {
 	}
 
 	err = r.seal.MasterKeyRef(func(mk *memguard.SecureBuffer) error {
-		m, pdek, e := r.manager.CreateKey(context.Background(), body.KeyID, mk)
+		m, pdek, e := r.manager.CreateKey(context.Background(), body.KeyID, mk, 0)
 		if e != nil {
 			return e
 		}

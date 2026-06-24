@@ -34,7 +34,7 @@ func TestCreateKey_Success(t *testing.T) {
 	mk := newTestMasterKey(t)
 	ctx := context.Background()
 
-	meta, plainDEK, err := mgr.CreateKey(ctx, "key-001", mk)
+	meta, plainDEK, err := mgr.CreateKey(ctx, "key-001", mk, 0)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestRotateKey_Success(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. CreateKey V1。
-	_, plainDEK1, err := mgr.CreateKey(ctx, "key-002", mk)
+	_, plainDEK1, err := mgr.CreateKey(ctx, "key-002", mk, 0)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestShredKey_Success(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. CreateKey。
-	_, plainDEK, err := mgr.CreateKey(ctx, "key-003", mk)
+	_, plainDEK, err := mgr.CreateKey(ctx, "key-003", mk, 0)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestShredKey_ClearsEncryptedMaterial(t *testing.T) {
 	mk := newTestMasterKey(t)
 	ctx := context.Background()
 
-	_, plainDEK, err := mgr.CreateKey(ctx, "key-004", mk)
+	_, plainDEK, err := mgr.CreateKey(ctx, "key-004", mk, 0)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestFullLifecycle(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. Create V1 Active。
-	meta1, plainDEK1, err := mgr.CreateKey(ctx, "key-lifecycle", mk)
+	meta1, plainDEK1, err := mgr.CreateKey(ctx, "key-lifecycle", mk, 0)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestRotateKey_ConcurrentNoDeadlock(t *testing.T) {
 	ctx := context.Background()
 
 	// 初始 V1。
-	_, plainDEK, err := mgr.CreateKey(ctx, "key-concurrent", mk)
+	_, plainDEK, err := mgr.CreateKey(ctx, "key-concurrent", mk, 0)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
@@ -298,7 +298,7 @@ func allZero(b []byte) bool {
 func TestCreateKey_EmptyKeyID(t *testing.T) {
 	mgr, _ := newTestManager(t)
 	mk := newTestMasterKey(t)
-	_, _, err := mgr.CreateKey(context.Background(), "", mk)
+	_, _, err := mgr.CreateKey(context.Background(), "", mk, 0)
 	if err == nil {
 		t.Fatal("CreateKey with empty keyID should fail")
 	}
@@ -307,7 +307,7 @@ func TestCreateKey_EmptyKeyID(t *testing.T) {
 // TestCreateKey_NilMasterKey 验证 nil masterKey 报错。
 func TestCreateKey_NilMasterKey(t *testing.T) {
 	mgr, _ := newTestManager(t)
-	_, _, err := mgr.CreateKey(context.Background(), "key-nil-mk", nil)
+	_, _, err := mgr.CreateKey(context.Background(), "key-nil-mk", nil, 0)
 	if err == nil {
 		t.Fatal("CreateKey with nil masterKey should fail")
 	}
@@ -367,7 +367,7 @@ func TestRotateKey_AlreadyDeactivated(t *testing.T) {
 	ctx := context.Background()
 
 	// 创建并轮转。
-	_, _, err := mgr.CreateKey(ctx, "deact-key", mk)
+	_, _, err := mgr.CreateKey(ctx, "deact-key", mk, 0)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestShredKey_AlreadyShredded(t *testing.T) {
 	mk := newTestMasterKey(t)
 	ctx := context.Background()
 
-	_, _, err := mgr.CreateKey(ctx, "double-shred", mk)
+	_, _, err := mgr.CreateKey(ctx, "double-shred", mk, 0)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}

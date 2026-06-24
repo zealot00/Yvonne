@@ -14,7 +14,7 @@ func TestReapExpiredSoftDeletes_PhysicalDestroy(t *testing.T) {
 	ctx := context.Background()
 
 	// 创建密钥。
-	_, _, _ = mgr.CreateKey(ctx, "reap-test", mk)
+	_, _, _ = mgr.CreateKey(ctx, "reap-test", mk, 0)
 
 	// 软删除。
 	if err := mgr.SoftDeleteKey(ctx, "reap-test", 1); err != nil {
@@ -56,7 +56,7 @@ func TestReapExpiredSoftDeletes_NotExpiredKept(t *testing.T) {
 	mk := newTestMasterKey(t)
 	ctx := context.Background()
 
-	_, _, _ = mgr.CreateKey(ctx, "keep-test", mk)
+	_, _, _ = mgr.CreateKey(ctx, "keep-test", mk, 0)
 	_ = mgr.SoftDeleteKey(ctx, "keep-test", 1)
 
 	// DeletedAt 刚才设置（未过期）。
@@ -80,7 +80,7 @@ func TestReapExpiredSoftDeletes_ActiveNotTouched(t *testing.T) {
 	mk := newTestMasterKey(t)
 	ctx := context.Background()
 
-	_, _, _ = mgr.CreateKey(ctx, "active-reap-test", mk)
+	_, _, _ = mgr.CreateKey(ctx, "active-reap-test", mk, 0)
 	// 不软删除，保持 Active。
 
 	mgr.ReapNow(90*24*time.Hour, nil)
@@ -103,18 +103,18 @@ func TestReapExpiredSoftDeletes_MixedKeys(t *testing.T) {
 	ctx := context.Background()
 
 	// key-expired: 软删除 + 100 天前。
-	_, _, _ = mgr.CreateKey(ctx, "key-expired", mk)
+	_, _, _ = mgr.CreateKey(ctx, "key-expired", mk, 0)
 	_ = mgr.SoftDeleteKey(ctx, "key-expired", 1)
 	meta, _ := mgr.GetKey(ctx, "key-expired", 1)
 	meta.DeletedAt = time.Now().UTC().Add(-100 * 24 * time.Hour)
 	saveMetaDirect(t, mgr, *meta)
 
 	// key-recent: 软删除 + 刚才。
-	_, _, _ = mgr.CreateKey(ctx, "key-recent", mk)
+	_, _, _ = mgr.CreateKey(ctx, "key-recent", mk, 0)
 	_ = mgr.SoftDeleteKey(ctx, "key-recent", 1)
 
 	// key-active: Active。
-	_, _, _ = mgr.CreateKey(ctx, "key-active", mk)
+	_, _, _ = mgr.CreateKey(ctx, "key-active", mk, 0)
 
 	// 执行 reaper。
 	reaped := []string{}

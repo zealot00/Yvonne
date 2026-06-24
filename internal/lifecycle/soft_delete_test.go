@@ -13,7 +13,7 @@ func TestSoftDeleteKey_Success(t *testing.T) {
 	mk := newTestMasterKey(t)
 	ctx := context.Background()
 
-	_, _, err := mgr.CreateKey(ctx, "soft-del-test", mk)
+	_, _, err := mgr.CreateKey(ctx, "soft-del-test", mk, 0)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestSoftDeleteKey_Idempotent(t *testing.T) {
 	mk := newTestMasterKey(t)
 	ctx := context.Background()
 
-	_, _, _ = mgr.CreateKey(ctx, "idempotent-test", mk)
+	_, _, _ = mgr.CreateKey(ctx, "idempotent-test", mk, 0)
 	_ = mgr.SoftDeleteKey(ctx, "idempotent-test", 1)
 	// 再次软删除应幂等返回 nil。
 	if err := mgr.SoftDeleteKey(ctx, "idempotent-test", 1); err != nil {
@@ -58,7 +58,7 @@ func TestSoftDeleteKey_DestroyedRejected(t *testing.T) {
 	mk := newTestMasterKey(t)
 	ctx := context.Background()
 
-	_, _, _ = mgr.CreateKey(ctx, "destroyed-test", mk)
+	_, _, _ = mgr.CreateKey(ctx, "destroyed-test", mk, 0)
 	_ = mgr.ShredKey(ctx, "destroyed-test", 1)
 
 	// ShredKey 物理删除了行，SoftDeleteKey 应返回 not found error。
@@ -74,7 +74,7 @@ func TestRestoreKey_Success(t *testing.T) {
 	mk := newTestMasterKey(t)
 	ctx := context.Background()
 
-	_, _, _ = mgr.CreateKey(ctx, "restore-test", mk)
+	_, _, _ = mgr.CreateKey(ctx, "restore-test", mk, 0)
 	_ = mgr.SoftDeleteKey(ctx, "restore-test", 1)
 
 	// 恢复。
@@ -97,7 +97,7 @@ func TestRestoreKey_NotSoftDeleted(t *testing.T) {
 	mk := newTestMasterKey(t)
 	ctx := context.Background()
 
-	_, _, _ = mgr.CreateKey(ctx, "active-restore", mk)
+	_, _, _ = mgr.CreateKey(ctx, "active-restore", mk, 0)
 	// Active 状态恢复应幂等返回 nil。
 	if err := mgr.RestoreKey(ctx, "active-restore", 1); err != nil {
 		t.Fatalf("RestoreKey on Active should be idempotent: %v", err)
@@ -110,7 +110,7 @@ func TestRestoreKey_DestroyedRejected(t *testing.T) {
 	mk := newTestMasterKey(t)
 	ctx := context.Background()
 
-	_, _, _ = mgr.CreateKey(ctx, "restore-destroyed", mk)
+	_, _, _ = mgr.CreateKey(ctx, "restore-destroyed", mk, 0)
 	_ = mgr.ShredKey(ctx, "restore-destroyed", 1)
 
 	// ShredKey 物理删除了行，RestoreKey 应返回 not found error。
@@ -126,7 +126,7 @@ func TestSoftDeleted_CanDecrypt(t *testing.T) {
 	mk := newTestMasterKey(t)
 	ctx := context.Background()
 
-	_, _, _ = mgr.CreateKey(ctx, "decrypt-after-softdel", mk)
+	_, _, _ = mgr.CreateKey(ctx, "decrypt-after-softdel", mk, 0)
 	_ = mgr.SoftDeleteKey(ctx, "decrypt-after-softdel", 1)
 
 	// GetKeyForDecrypt 应成功（SoftDeleted 允许解密）。
@@ -145,7 +145,7 @@ func TestSoftDeleted_CannotEncrypt(t *testing.T) {
 	mk := newTestMasterKey(t)
 	ctx := context.Background()
 
-	_, _, _ = mgr.CreateKey(ctx, "encrypt-after-softdel", mk)
+	_, _, _ = mgr.CreateKey(ctx, "encrypt-after-softdel", mk, 0)
 	_ = mgr.SoftDeleteKey(ctx, "encrypt-after-softdel", 1)
 
 	// 轮转后 V1 是 Deactivated，GetActiveKey 应返回 V2。
@@ -165,7 +165,7 @@ func TestSoftDeleteThenShred(t *testing.T) {
 	mk := newTestMasterKey(t)
 	ctx := context.Background()
 
-	_, _, _ = mgr.CreateKey(ctx, "soft-then-shred", mk)
+	_, _, _ = mgr.CreateKey(ctx, "soft-then-shred", mk, 0)
 	_ = mgr.SoftDeleteKey(ctx, "soft-then-shred", 1)
 
 	// 物理粉碎。
@@ -188,7 +188,7 @@ func TestFullSoftDeleteRestoreShredLifecycle(t *testing.T) {
 	keyID := "lifecycle-test"
 
 	// 1. 创建 V1。
-	_, _, _ = mgr.CreateKey(ctx, keyID, mk)
+	_, _, _ = mgr.CreateKey(ctx, keyID, mk, 0)
 
 	// 2. 软删除 V1。
 	if err := mgr.SoftDeleteKey(ctx, keyID, 1); err != nil {

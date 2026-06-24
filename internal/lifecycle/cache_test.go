@@ -73,7 +73,7 @@ func TestManager_GetKey_CacheHit(t *testing.T) {
 	// 创建密钥。
 	mk, _ := memguard.NewSecureBufferFromRandom(32)
 	defer mk.Wipe()
-	_, _, err := mgr.CreateKey(ctx, "cache-test", mk)
+	_, _, err := mgr.CreateKey(ctx, "cache-test", mk, 0)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestManager_RotateKey_InvalidatesCache(t *testing.T) {
 	ctx := context.Background()
 
 	// 创建 + 预热缓存。
-	_, _, _ = mgr.CreateKey(ctx, "rotate-cache-test", mk)
+	_, _, _ = mgr.CreateKey(ctx, "rotate-cache-test", mk, 0)
 	_, _ = mgr.GetKey(ctx, "rotate-cache-test", 1)
 	if mgr.cache.size() != 1 {
 		t.Fatalf("cache size = %d, want 1 before rotate", mgr.cache.size())
@@ -127,7 +127,7 @@ func TestManager_ShredKey_InvalidatesCache(t *testing.T) {
 	defer mk.Wipe()
 	ctx := context.Background()
 
-	_, _, _ = mgr.CreateKey(ctx, "shred-cache-test", mk)
+	_, _, _ = mgr.CreateKey(ctx, "shred-cache-test", mk, 0)
 	_, _ = mgr.GetKey(ctx, "shred-cache-test", 1)
 	if mgr.cache.size() != 1 {
 		t.Fatalf("cache size = %d, want 1 before shred", mgr.cache.size())
@@ -151,7 +151,7 @@ func TestManager_RotateKey_TriggersNotifier(t *testing.T) {
 	defer mk.Wipe()
 	ctx := context.Background()
 
-	_, _, _ = mgr.CreateKey(ctx, "notify-test", mk)
+	_, _, _ = mgr.CreateKey(ctx, "notify-test", mk, 0)
 	_, _, err := mgr.RotateKey(ctx, "notify-test", mk)
 	if err != nil {
 		t.Fatalf("RotateKey: %v", err)
@@ -175,7 +175,7 @@ func TestManager_ShredKey_TriggersNotifier(t *testing.T) {
 	defer mk.Wipe()
 	ctx := context.Background()
 
-	_, _, _ = mgr.CreateKey(ctx, "notify-shred", mk)
+	_, _, _ = mgr.CreateKey(ctx, "notify-shred", mk, 0)
 	err := mgr.ShredKey(ctx, "notify-shred", 1)
 	if err != nil {
 		t.Fatalf("ShredKey: %v", err)
@@ -194,7 +194,7 @@ func TestManager_InvalidateCache_PublicAPI(t *testing.T) {
 
 	mk, _ := memguard.NewSecureBufferFromRandom(32)
 	defer mk.Wipe()
-	_, _, _ = mgr.CreateKey(ctx, "public-invalidate", mk)
+	_, _, _ = mgr.CreateKey(ctx, "public-invalidate", mk, 0)
 	_, _ = mgr.GetKey(ctx, "public-invalidate", 1)
 
 	mgr.InvalidateCache("public-invalidate")
@@ -211,8 +211,8 @@ func TestManager_ClearCache_PublicAPI(t *testing.T) {
 
 	mk, _ := memguard.NewSecureBufferFromRandom(32)
 	defer mk.Wipe()
-	_, _, _ = mgr.CreateKey(ctx, "key-a", mk)
-	_, _, _ = mgr.CreateKey(ctx, "key-b", mk)
+	_, _, _ = mgr.CreateKey(ctx, "key-a", mk, 0)
+	_, _, _ = mgr.CreateKey(ctx, "key-b", mk, 0)
 	_, _ = mgr.GetKey(ctx, "key-a", 1)
 	_, _ = mgr.GetKey(ctx, "key-b", 1)
 
