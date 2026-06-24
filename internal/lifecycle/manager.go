@@ -94,6 +94,63 @@ func (m *Manager) ClearCache() {
 	m.cache.clear()
 }
 
+// GenerateDataKey 生成临时 DEK 并用 Active 版本的密钥加密。
+//
+// 职责分离（关键）：
+//   - 临时 DEK 不存入数据库，KMS 仅负责用现役密钥包装它。
+//   - 返回明文 DEK（SecureBuffer，调用方负责 Wipe）+ 密文 DEK（版本化自路由格式）。
+//   - 客户端用明文 DEK 本地加密数据，用完丢弃；密文 DEK 存储在业务侧。
+//   - 解密时客户端将密文 DEK 发回 KMS Decrypt API，KMS 返回明文 DEK。
+//
+// 流程：
+//  1. 获取 KeyID 的 Active 版本元数据
+//  2. 用 MasterKey 解密存储的 DEK 密文 → 明文 DEK
+//  3. 生成全新 32 字节随机临时 DEK
+//  4. 用存储的 DEK 加密临时 DEK → 版本化密文
+//  5. 返回临时 DEK（明文 SecureBuffer）+ 版本化密文
+func (m *Manager) GenerateDataKey(ctx context.Context, keyID string, masterKey *memguard.SecureBuffer) (*memguard.SecureBuffer, []byte, error) {
+	if keyID == "" {
+		return nil, nil, errors.New("lifecycle: empty key id")
+	}
+	if masterKey == nil {
+		return nil, nil, errors.New("lifecycle: master key is nil")
+	}
+
+	// 1. 获取 Active 版本（状态机强制：只有 Active 能用于加密）。
+	meta, err := m.GetActiveKey(ctx, keyID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("lifecycle: gdk get active key: %w", err)
+	}
+
+	// 2. 生成全新 32 字节随机临时 DEK。
+	plainDEK, err := memguard.NewSecureBufferFromRandom(32)
+	if err != nil {
+		return nil, nil, fmt.Errorf("lifecycle: gdk generate random DEK: %w", err)
+	}
+
+	// 3. 用 MasterKey 解密存储的 DEK，然后用存储的 DEK 加密临时 DEK。
+	storedDEK, err := crypto.DecryptGCM(masterKey, meta.EncryptedMaterial)
+	if err != nil {
+		plainDEK.Wipe()
+		return nil, nil, fmt.Errorf("lifecycle: gdk decrypt stored DEK: %w", err)
+	}
+	defer storedDEK.Wipe()
+
+	// 4. 用存储的 DEK 加密临时 DEK → 版本化密文（自路由格式）。
+	var ciphertext []byte
+	err = plainDEK.WithKey(func(dek []byte) error {
+		var e error
+		ciphertext, e = crypto.EncryptVersioned(storedDEK, uint32(meta.Version), dek)
+		return e
+	})
+	if err != nil {
+		plainDEK.Wipe()
+		return nil, nil, fmt.Errorf("lifecycle: gdk encrypt temporary DEK: %w", err)
+	}
+
+	return plainDEK, ciphertext, nil
+}
+
 // CreateKey 生成新 DEK 并存储元数据。
 func (m *Manager) CreateKey(ctx context.Context, keyID string, masterKey *memguard.SecureBuffer) (*KeyMetadata, *memguard.SecureBuffer, error) {
 	if keyID == "" {

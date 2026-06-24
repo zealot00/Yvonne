@@ -156,6 +156,11 @@ func (r *V1Router) handleKeyOps(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		r.handleRestoreKey(w, req, keyID)
+	case "generate-data-key":
+		if !requireMethod(w, req, http.MethodPost) {
+			return
+		}
+		r.handleGenerateDataKey(w, req, keyID)
 	default:
 		writeJSONError(w, http.StatusNotFound, "unknown key operation: "+action)
 	}
@@ -344,4 +349,80 @@ func (r *V1Router) handleRestoreKey(w http.ResponseWriter, req *http.Request, ke
 		"state":    "Deactivated",
 		"note":     "restored as Deactivated; rotate to make Active for encryption",
 	})
+}
+
+// gdkResponse 是 GenerateDataKey 的响应结构。
+// PlaintextDEK 是 []byte，JSON 编码时自动 base64。
+// CiphertextDEK 是版本化密文 []byte，JSON 编码时自动 base64。
+type gdkResponse struct {
+	OK   bool `json:"ok"`
+	Data struct {
+		KeyID         string `json:"key_id"`
+		PlaintextDEK  []byte `json:"plaintext_dek"`
+		CiphertextDEK []byte `json:"ciphertext_dek"`
+	} `json:"data"`
+}
+
+// handleGenerateDataKey 生成临时 DEK 并返回明文+密文。
+//
+// POST /api/v1/keys/{key_id}/generate-data-key
+//
+// 致命内存流转约束：
+//   - 明文 DEK 从 SecureBuffer 提取后装入 []byte 用于 JSON 编码。
+//   - JSON 写入 ResponseWriter 后，立即 clear() 擦除明文 []byte。
+//   - SecureBuffer 本身由 defer Wipe 擦除。
+//
+// 审计防泄漏：
+//   - 审计日志记录 Action=GenerateDataKey，但绝不记录明文/密文 DEK。
+func (r *V1Router) handleGenerateDataKey(w http.ResponseWriter, req *http.Request, keyID string) {
+	// 1. 调用 lifecycle 生成临时 DEK + 密文。
+	var plainDEK *memguard.SecureBuffer
+	var ciphertext []byte
+
+	err := r.seal.MasterKeyRef(func(mk *memguard.SecureBuffer) error {
+		var e error
+		plainDEK, ciphertext, e = r.manager.GenerateDataKey(req.Context(), keyID, mk)
+		return e
+	})
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, "generate data key failed")
+		return
+	}
+	defer plainDEK.Wipe()
+
+	// 2. 从 SecureBuffer 提取明文 DEK 副本用于 JSON 响应。
+	var rawDEK []byte
+	_ = plainDEK.WithKey(func(dek []byte) error {
+		rawDEK = make([]byte, len(dek))
+		copy(rawDEK, dek)
+		return nil
+	})
+	// 致命约束：响应发送后立即 clear 明文 DEK 副本。
+	defer func() {
+		clear(rawDEK)
+		runtime.KeepAlive(rawDEK)
+	}()
+
+	// 3. 手动构造 JSON（不走 writeJSONOK，因为需要精确控制 clear 时机）。
+	resp := gdkResponse{OK: true}
+	resp.Data.KeyID = keyID
+	resp.Data.PlaintextDEK = rawDEK
+	resp.Data.CiphertextDEK = ciphertext
+
+	out, err := json.Marshal(resp)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "marshal response failed")
+		return
+	}
+
+	// 4. 写入 HTTP 响应。
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(out)
+
+	// 5. rawDEK 由 defer clear 擦除（函数返回时执行）。
+	// plainDEK 由 defer Wipe 擦除。
 }

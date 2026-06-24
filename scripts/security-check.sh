@@ -513,12 +513,16 @@ section "[CHECK 7] ProvideShare 达阈值后必须擦除 collectedShares"
 #      （defer 或直接调用均算）
 violations_ck7=()
 
-# 找 seal 包下的 ProvideShare 实现（排除测试文件）
+# 找 seal 包下的 ProvideShare 实现（排除测试文件 + HSM/backup 等非 Shamir 实现）
 seal_files=""
 while IFS= read -r line; do
   [[ -z "$line" ]] && continue
   file="${line%%:*}"
   is_test_file "$file" && continue
+  # 跳过 HSM unsealer（HSM 模式不使用 Shamir，ProvideShare 直接返回 error）
+  case "$file" in
+    */hsm_unsealer.go) continue ;;
+  esac
   # 必须是函数定义行（func 开头），不是方法调用
   content="${line#*:}"
   content="${content#*:}"
