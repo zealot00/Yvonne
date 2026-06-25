@@ -77,8 +77,15 @@ func (r *V1Router) register() {
 	r.mux.HandleFunc("/api/v1/decrypt", r.auditMiddleware("Decrypt", r.authAndSeal("Decrypt", r.handleV1Decrypt)))
 
 	// 可观测性。
+	// metrics 含内部状态（请求量/延迟/失败率），生产应认证保护。
+	// Cluster 模式有 authenticator → 包裹 RequireAuth("Metrics")。
+	// Dev 模式无 authenticator → 直接暴露（仅 127.0.0.1）。
 	if r.metrics != nil {
-		r.mux.Handle("/metrics", metricsHandler(r.metrics))
+		if r.authenticator != nil {
+			r.mux.Handle("/metrics", r.auditMiddleware("Metrics", r.RequireAuth(r.authenticator, "Metrics", metricsHandler(r.metrics).ServeHTTP)))
+		} else {
+			r.mux.Handle("/metrics", metricsHandler(r.metrics))
+		}
 	}
 }
 

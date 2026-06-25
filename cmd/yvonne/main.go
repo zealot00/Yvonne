@@ -50,6 +50,8 @@ func main() {
 		runBackupSplitCmd(os.Args[2:])
 	case "backup-restore":
 		runBackupRestoreCmd(os.Args[2:])
+	case "audit-verify":
+		runAuditVerifyCmd(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -73,6 +75,7 @@ Usage:
                                      Split wrapped CMK into Shamir shares on USB drives.
   yvonne backup-restore --out <path> <share1> <share2> <share3>...
                                      Restore wrapped CMK from Shamir share files.
+  yvonne audit-verify --dir <dir>    Verify audit log hash chain integrity.
 
 Examples:
   yvonne server --config config.json
@@ -487,4 +490,64 @@ func runBackupRestoreCmd(args []string) {
 
 	log.Printf("restored wrapped CMK (%d bytes) to %s", len(wrappedCMK), *outPath)
 	log.Printf("to restore DB: yvonne init --config <path> --pub-key <path> (after manually putting this file back into DB)")
+}
+
+// runAuditVerifyCmd 处理 `yvonne audit-verify --dir <dir>`。
+// 验证审计日志哈希链完整性，报告篡改/损坏的条目。
+func runAuditVerifyCmd(args []string) {
+	fs := flag.NewFlagSet("audit-verify", flag.ExitOnError)
+	dir := fs.String("dir", "", "audit log directory (required)")
+	_ = fs.Parse(args)
+
+	if *dir == "" {
+		fmt.Fprintln(os.Stderr, "error: --dir is required for 'audit-verify' command")
+		os.Exit(1)
+	}
+
+	// 创建临时 logger 仅用于 Query（不需要写入能力）。
+	logger, err := audit.NewAuditLogger(nil)
+	if err != nil {
+		log.Fatalf("create audit logger: %v", err)
+	}
+	defer logger.Close()
+
+	results, err := logger.Query(*dir, audit.QueryFilter{Limit: -1})
+	if err != nil {
+		log.Fatalf("audit query failed: %v", err)
+	}
+
+	if len(results) == 0 {
+		log.Printf("no audit entries found in %s", *dir)
+		return
+	}
+
+	total := len(results)
+	valid := 0
+	tampered := 0
+	var brokenEntries []string
+
+	for _, r := range results {
+		if r.Valid {
+			valid++
+		} else {
+			tampered++
+			brokenEntries = append(brokenEntries, fmt.Sprintf("  chain_seq=%d timestamp=%s actor=%s action=%s",
+				r.Envelope.ChainSeq, r.Entry.Timestamp, r.Entry.Actor, r.Entry.Action))
+		}
+	}
+
+	log.Printf("audit chain verification complete:")
+	log.Printf("  total entries: %d", total)
+	log.Printf("  valid:         %d", valid)
+	log.Printf("  tampered:      %d", tampered)
+
+	if tampered > 0 {
+		log.Printf("BROKEN ENTRIES:")
+		for _, e := range brokenEntries {
+			log.Print(e)
+		}
+		os.Exit(1) // 篡改发现，退出码 1
+	}
+
+	log.Printf("✓ audit chain integrity verified")
 }

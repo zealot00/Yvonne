@@ -69,8 +69,17 @@ jobs:
         with:
           path: dist
 
+      - name: Generate SBOM (SPDX JSON)
+        uses: anchore/sbom-action@v0
+        with:
+          format: spdx-json
+          output-file: dist/sbom.spdx.json
+          artifact-name: yvonne-sbom
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: dist/**/yvonne-*
+          files: |
+            dist/**/yvonne-*
+            dist/sbom.spdx.json

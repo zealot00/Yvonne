@@ -13,6 +13,7 @@
 package admin
 
 import (
+	"crypto/subtle"
 	"embed"
 	"io/fs"
 	"net/http"
@@ -25,8 +26,9 @@ var staticFS embed.FS
 
 // Server 是管理页面的 HTTP 服务器。
 type Server struct {
-	seal *seal.VaultState
-	mux  *http.ServeMux
+	seal       *seal.VaultState
+	adminToken string // 可选：设置后 /admin/api/* 需 Bearer Token 认证
+	mux        *http.ServeMux
 }
 
 // NewServer 创建管理页面 Server。Sealed 状态下也允许访问（否则无法 Unseal）。
@@ -37,6 +39,13 @@ func NewServer(s *seal.VaultState) *Server {
 	}
 	srv.register()
 	return srv
+}
+
+// SetAdminToken 设置管理操作认证 Token。
+// 设置后 /admin/api/seal 和 /admin/api/unseal 需要 `Authorization: Bearer <token>`。
+// seal-status 和静态资源不需认证（用于查看状态）。
+func (s *Server) SetAdminToken(token string) {
+	s.adminToken = token
 }
 
 func (s *Server) register() {
@@ -52,9 +61,34 @@ func (s *Server) register() {
 	s.mux.HandleFunc("/", s.handleIndex)
 
 	// 管理页面 API。
+	// seal-status 不需认证（用于探活/概览）。
 	s.mux.HandleFunc("/admin/api/seal-status", s.handleSealStatus)
-	s.mux.HandleFunc("/admin/api/seal", s.handleSeal)
-	s.mux.HandleFunc("/admin/api/unseal", s.handleUnseal)
+	// seal/unseal 需要认证（如果设置了 adminToken）。
+	s.mux.HandleFunc("/admin/api/seal", s.requireAdminToken(s.handleSeal))
+	s.mux.HandleFunc("/admin/api/unseal", s.requireAdminToken(s.handleUnseal))
+}
+
+// requireAdminToken 包装 handler，要求 Bearer Token 认证。
+// adminToken 为空时跳过认证（向后兼容 Dev 模式）。
+func (s *Server) requireAdminToken(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		if s.adminToken == "" {
+			next(w, req)
+			return
+		}
+		auth := req.Header.Get("Authorization")
+		const prefix = "Bearer "
+		if len(auth) <= len(prefix) || auth[:len(prefix)] != prefix {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		token := auth[len(prefix):]
+		if subtle.ConstantTimeCompare([]byte(token), []byte(s.adminToken)) != 1 {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		next(w, req)
+	}
 }
 
 // ServeHTTP 实现 http.Handler。
