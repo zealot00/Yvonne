@@ -4,8 +4,20 @@
 
 | Version | Supported          |
 |---------|--------------------|
-| 0.x     | ✅ Security fixes  |
-| < 0.1   | ❌ Pre-release     |
+| 0.3.x   | ✅ Security fixes  |
+| 0.2.x   | ✅ Security fixes  |
+| 0.1.x   | ❌ Pre-release     |
+
+## Security Fixes by Version
+
+### 0.3.0
+- **SecureBuffer race condition**: `sync.RWMutex` added (WithKey=RLock, Wipe=Lock)
+- **O(N) version scan**: `meta:latest:{keyID}` index (O(1) lookup + phantom read prevention)
+- **JWT multi-role**: array role claims fully extracted (not just first element)
+- **statusRecorder**: `http.Flusher`/`Hijacker`/`Pusher` passthrough restored
+- **GDK memory escape**: `json.Marshal` output cleared after response
+- **Graceful shutdown**: rootCancel before HTTP Shutdown (prevent in-flight panic)
+- **EmergencySeal cache**: DEK cache cleared synchronously on seal
 
 ## Threat Model
 

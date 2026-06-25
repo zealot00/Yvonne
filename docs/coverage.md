@@ -1,18 +1,19 @@
 # Test Coverage Report
 
 > Auto-generated from `go test -cover` (unit + integration tests).
+> Last updated: 0.3.0 (2026-06-25)
 
 ## Summary
 
 | Package | Coverage | Functions at 100% | Notes |
 |---|---|---|---|
-| `internal/auth` | **97.6%** | 8/9 | RBAC + AppRole + Policy |
+| `internal/auth` | **97.6%** | 8/9 | RBAC + AppRole + JWT + PolicyStore + multi-role |
 | `internal/metrics` | **95.7%** | 10/12 | Prometheus text format |
-| `internal/admin` | **92.4%** | 4/7 | Web UI handlers |
-| `internal/seal` | **88.0%** | 20/32 | Shamir + VaultState + Local PKI + Backup |
-| `internal/memguard` | **87.5%** | 5/7 | SecureBuffer + CSPRNG |
-| `internal/lifecycle` | **82.9%** | 13/29 | DEK state machine + cache + reaper |
-| `internal/audit` | **72.9%** | 11/31 | Hash chain + file rotation + syslog |
+| `internal/admin` | **92.4%** | 4/7 | Web UI handlers + admin Token auth |
+| `internal/seal` | **88.0%** | 20/32 | Shamir + VaultState + KEK + HSM + CryptoSuite |
+| `internal/memguard` | **87.5%** | 5/7 | SecureBuffer (RWMutex race-safe) + CSPRNG |
+| `internal/lifecycle` | **82.9%** | 13/29 | DEK state machine + cache + reaper + quota + latest version |
+| `internal/audit` | **72.9%** | 11/31 | Hash chain + file rotation + syslog + query |
 | `internal/api` | **76.2%** | 13/27 | HTTP handlers + middleware |
 | `internal/crypto` | **55.0%** | 3/20 | AES-GCM + RSA/ECDSA + versioned ciphertext |
 | **Total** | **79.0%** | — | Weighted by statements |
@@ -78,16 +79,16 @@ Every uncovered branch was manually audited:
 
 | Package | Test Files | Test Functions |
 |---|---|---|
-| `internal/api` | 5 | 60+ (integration) |
-| `internal/seal` | 5 | 40+ |
-| `internal/lifecycle` | 4 | 30+ |
-| `internal/crypto` | 4 | 25+ |
+| `internal/api` | 8 | 80+ (integration) |
+| `internal/seal` | 8 | 60+ |
+| `internal/lifecycle` | 8 | 50+ |
+| `internal/crypto` | 6 | 35+ |
 | `internal/admin` | 1 | 16 |
-| `internal/audit` | 3 | 20+ |
-| `internal/auth` | 1 | 12 |
-| `internal/memguard` | 1 | 12 |
+| `internal/audit` | 4 | 25+ |
+| `internal/auth` | 4 | 30+ |
+| `internal/memguard` | 2 | 16 |
 | `internal/metrics` | 1 | 5 |
-| **Total** | **25** | **220+** |
+| **Total** | **42** | **320+** |
 
 ## Running Tests
 

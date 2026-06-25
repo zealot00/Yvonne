@@ -13,6 +13,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Kubernetes KMS v2 plugin (planned, gRPC over Unix socket)
 - OpenAPI spec + SDK (Go/Java/Python)
 
+## [0.3.0] - 2026-06-25
+
+### Added
+- **HSM backend (pluggable)** — `CryptoBackend` + `KEK` abstraction
+  - `softwareKEK` (AES-256-GCM, byte-compatible with existing format)
+  - `hsmKEK` (CMK never leaves chip)
+  - Build tag isolation: `go build` (no HSM) / `go build -tags hsm` (Mock)
+  - `Unsealer.KEKRef` unified entry for Shamir/LocalPKI/HSM
+- **GM (国密) crypto suite** — SM4-GCM + SM3 + HMAC-SM3
+  - `CryptoSuite` interface (Cipher + Hash)
+  - `StandardSuite` (AES-256-GCM + SHA-256, default)
+  - `GMSMSuite` (SM4-GCM + SM3, `-tags gmsm`)
+  - GB/T 32907/32905 compliant
+- **Global key quota** — `SetMaxGlobalKeys` + `ErrQuotaExceeded`
+- **Latest version index** — `meta:latest:{keyID}` O(1) lookup (replaces O(N) scan)
+- **EmergencySeal cache clearing** — DEK cache synced with EmergencySeal
+- **SecureBuffer RWMutex** — race-safe WithKey/Wipe concurrency
+- **JWT multi-role** — array role claims fully extracted (not just v[0])
+- **statusRecorder interfaces** — Flusher/Hijacker/Pusher passthrough
+
+### Fixed
+- **Bug 1**: SecureBuffer data race — `WithKey` and `Wipe` concurrent access could read zeroed memory
+- **Bug 2**: O(N) version scan storm — `findLatestVersion` looped v1→vN making N DB queries
+- **Bug 3**: JWT array role extraction — only took `v[0]`, multi-role merge broken
+- **Bug 4**: statusRecorder lost `http.Flusher`/`Hijacker`/`Pusher` interfaces
+- **Improvement 5**: GDK `json.Marshal` output not cleared (plaintext DEK on heap)
+- **Improvement 6**: Graceful shutdown — rootCancel before HTTP Shutdown (prevent in-flight panic)
+- **Improvement 7**: EmergencySeal did not clear lifecycle DEK cache
+
+### Tests Added
+- SecureBuffer race condition (4 tests)
+- Latest version index O(1) + fallback scan (4 tests)
+- JWT multi-role extraction (8 tests)
+- statusRecorder interface compliance (7 tests)
+- EmergencySeal cache clearing (2 tests)
+- HSM KEK isolation (12 tests)
+- GM (SM4/SM3) suite (7 tests)
+- Performance benchmarks (16 cases)
+- E2E time-travel key lifecycle (3 tests)
+- JWT privilege escalation attacks (9 tests)
+- Global key quota circuit breaker (8 tests)
+- Crypto + seal destructive tests (28 tests)
+
 ## [0.2.0] - 2026-06-25
 
 ### Added
