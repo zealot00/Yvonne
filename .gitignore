@@ -28,6 +28,7 @@ backup-*.dat
 *.db.lock
 data/
 logs/
+reports/
 
 # IDE
 .idea/
@@ -38,3 +39,4 @@ logs/
 # 环境变量
 .env
 .env.local
+.cache/

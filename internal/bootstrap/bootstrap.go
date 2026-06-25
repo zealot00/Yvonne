@@ -24,6 +24,7 @@ import (
 	"yvonne/internal/admin"
 	"yvonne/internal/api"
 	"yvonne/internal/audit"
+	"yvonne/internal/auth"
 	"yvonne/internal/config"
 	"yvonne/internal/lifecycle"
 	"yvonne/internal/memguard"
@@ -225,8 +226,27 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 	// 启动回收站自动清理（90 天 TTL）。
 	lifecycleMgr.StartSoftDeleteReaper(lifecycle.DefaultSoftDeleteTTL, nil)
 
-	// 装配 V1Router（Cluster 模式暂无认证，生产环境应注入 Authenticator）。
-	v1Router := api.NewV1Router(vault, auditLog, lifecycleMgr, metricsReg, nil)
+	// 强制装配认证器（Cluster 模式绝不允许 nil authenticator）。
+	var authenticator auth.Authenticator
+	if len(cfg.Auth.AppRoles) > 0 {
+		authenticator = auth.NewAppRoleAuthenticator()
+		for _, r := range cfg.Auth.AppRoles {
+			authenticator.(*auth.AppRoleAuthenticator).RegisterPolicy(r.RoleID, r.Token, &auth.Policy{
+				RoleID:         r.RoleID,
+				AllowedKeys:    r.AllowedKeys,
+				AllowedActions: r.AllowedActions,
+			})
+		}
+		log.Printf("CLUSTER MODE: authenticator loaded with %d AppRole(s)", len(cfg.Auth.AppRoles))
+	} else {
+		// 致命约束：Cluster 模式无认证器 = 裸奔，拒绝启动。
+		auditLog.Close()
+		_ = pgStore.Close(ctx)
+		panic("FATAL: Cluster mode requires a valid authenticator (configure auth.app_roles in config)")
+	}
+
+	// 装配 V1Router（注入认证器，绝不传 nil）。
+	v1Router := api.NewV1Router(vault, auditLog, lifecycleMgr, metricsReg, authenticator)
 
 	// 装配 Admin Web UI。
 	adminSrv := buildAdminServer(cfg, vault)

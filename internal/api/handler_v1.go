@@ -81,6 +81,12 @@ func (r *V1Router) handleV1Encrypt(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// 资源级授权校验：body.KeyID 必须在 Policy.AllowedKeys 范围内。
+	if !authorizeBodyKeyID(req, body.KeyID) {
+		writeJSONError(w, http.StatusForbidden, "resource access denied")
+		return
+	}
+
 	ctx := context.Background()
 
 	// 强制请求 Active 版本（状态机硬编码：只有 Active 能加密）。
@@ -176,6 +182,13 @@ func (r *V1Router) handleV1Decrypt(w http.ResponseWriter, req *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "key_id is required")
 		return
 	}
+
+	// 资源级授权校验：body.KeyID 必须在 Policy.AllowedKeys 范围内。
+	if !authorizeBodyKeyID(req, body.KeyID) {
+		writeJSONError(w, http.StatusForbidden, "resource access denied")
+		return
+	}
+
 	if len(body.Ciphertext) < crypto.MinCiphertextSize {
 		writeJSONError(w, http.StatusBadRequest, "ciphertext too short")
 		return

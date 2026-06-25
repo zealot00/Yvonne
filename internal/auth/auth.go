@@ -134,6 +134,8 @@ type ContextKey int
 const (
 	// RoleIDKey 存储 RoleID。
 	RoleIDKey ContextKey = iota
+	// PolicyKey 存储完整 Policy 对象（资源级授权用）。
+	PolicyKey
 )
 
 // RoleIDFromContext 从 context 提取 RoleID。
@@ -147,6 +149,20 @@ func RoleIDFromContext(ctx context.Context) string {
 // WithRoleID 将 RoleID 注入 context。
 func WithRoleID(ctx context.Context, roleID string) context.Context {
 	return context.WithValue(ctx, RoleIDKey, roleID)
+}
+
+// PolicyFromContext 从 context 提取完整 Policy 对象。
+// 用于 handler 内部做 body.KeyID 资源级授权校验。
+func PolicyFromContext(ctx context.Context) *Policy {
+	if v, ok := ctx.Value(PolicyKey).(*Policy); ok {
+		return v
+	}
+	return nil
+}
+
+// WithPolicy 将完整 Policy 注入 context。
+func WithPolicy(ctx context.Context, policy *Policy) context.Context {
+	return context.WithValue(ctx, PolicyKey, policy)
 }
 
 // ExtractBearerToken 从 Authorization header 提取 Bearer token。

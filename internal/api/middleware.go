@@ -41,14 +41,15 @@ func (r *statusRecorder) WriteHeader(code int) {
 // 流程：
 //  1. 从 Authorization header 提取 Bearer Token。
 //  2. 调用 Authenticator 获取 Policy。
-//  3. 将 RoleID 注入 context。
-//  4. 校验 KeyID 和 Action 是否在 Policy 范围内。
-//  5. 越权返回 403 并记录审计日志。
+//  3. 将 RoleID + 完整 Policy 注入 context（供 handler 内做 body.KeyID 资源级校验）。
+//  4. 校验 Action 是否在 Policy 范围内。
+//  5. 校验 URL path 中的 KeyID（如 /keys/{id}/rotate），body 中的 KeyID 由 handler 校验。
+//  6. 越权返回 403。
 //
 // 安全红线：
 //   - 绝不打印 Token 明文。
 //   - 默认拒绝：无 Token 或找不到 Policy 返回 401。
-//   - Actor 字段记录 RoleID（非 IP）。
+//   - body 中的 KeyID 资源级校验由 handler 调用 PolicyFromContext + IsKeyAllowed 完成。
 func (r *V1Router) RequireAuth(authenticator auth.Authenticator, action string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		// 1. 提取 Bearer Token。
@@ -66,8 +67,9 @@ func (r *V1Router) RequireAuth(authenticator auth.Authenticator, action string, 
 			return
 		}
 
-		// 3. 注入 RoleID 到 context。
+		// 3. 注入 RoleID + 完整 Policy 到 context。
 		ctx := auth.WithRoleID(req.Context(), policy.RoleID)
+		ctx = auth.WithPolicy(ctx, policy)
 		req = req.WithContext(ctx)
 
 		// 4. RBAC 校验：Action 是否允许。
@@ -76,10 +78,8 @@ func (r *V1Router) RequireAuth(authenticator auth.Authenticator, action string, 
 			return
 		}
 
-		// 5. RBAC 校验：KeyID 是否允许（从 URL 路径或 body 解析）。
-		//    对于 /api/v1/keys/{key_id}/*，从路径提取 key_id。
-		//    对于 /api/v1/encrypt 和 /api/v1/decrypt，key_id 在 body 中，
-		//    handler 内部会调用 policy 检查（此处仅检查 action）。
+		// 5. RBAC 校验：URL path 中的 KeyID（如 /keys/{id}/rotate）。
+		//    body 中的 KeyID（如 /encrypt /decrypt）由 handler 内部校验。
 		keyID := extractKeyIDFromPath(req.URL.Path)
 		if keyID != "" && !policy.IsKeyAllowed(keyID) {
 			writeJSONError(w, http.StatusForbidden, "key not allowed")
@@ -88,6 +88,16 @@ func (r *V1Router) RequireAuth(authenticator auth.Authenticator, action string, 
 
 		next(w, req)
 	}
+}
+
+// authorizeBodyKeyID 从 context 提取 Policy，校验 body 中的 KeyID 是否被授权。
+// 返回 true=允许，false=拒绝。
+func authorizeBodyKeyID(req *http.Request, keyID string) bool {
+	policy := auth.PolicyFromContext(req.Context())
+	if policy == nil {
+		return false // 默认拒绝
+	}
+	return policy.IsKeyAllowed(keyID)
 }
 
 // extractKeyIDFromPath 从 URL 路径提取 key_id（仅对 /api/v1/keys/{key_id}/... 有效）。

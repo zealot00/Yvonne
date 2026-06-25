@@ -36,7 +36,24 @@ type YvonneConfig struct {
 	Server  ServerConfig    `json:"server"  yaml:"server"`  // 复用既有 ServerConfig
 	Storage StorageModeConf `json:"storage" yaml:"storage"` // 模式相关存储配置
 	Unseal  UnsealModeConf  `json:"unseal"  yaml:"unseal"`  // 模式相关解封配置
+	Auth    AuthModeConf    `json:"auth"    yaml:"auth"`    // 认证配置（Cluster 必填）
 	Logging LoggingConfig   `json:"logging" yaml:"logging"` // 复用既有 LoggingConfig
+}
+
+// AuthModeConf 是认证配置（Cluster 模式必填，Dev 模式忽略）。
+//
+// AppRoles 是 AppRole 列表，每个角色包含 Token + Policy。
+// Cluster 模式启动时必须至少配置一个角色，否则 panic。
+type AuthModeConf struct {
+	AppRoles []AppRoleEntry `json:"app_roles" yaml:"app_roles"`
+}
+
+// AppRoleEntry 是单个 AppRole 的配置（Cluster 模式认证）。
+type AppRoleEntry struct {
+	RoleID         string   `json:"role_id"          yaml:"role_id"`
+	Token          string   `json:"token"            yaml:"token"`
+	AllowedKeys    []string `json:"allowed_keys"     yaml:"allowed_keys"`
+	AllowedActions []string `json:"allowed_actions"  yaml:"allowed_actions"`
 }
 
 // StorageModeConf 是模式相关的存储配置。
@@ -205,6 +222,25 @@ func validateClusterConfig(cfg *YvonneConfig) error {
 
 	if !cfg.Logging.RedactSecrets {
 		errs = append(errs, "cluster mode requires logging.redact_secrets=true")
+	}
+
+	// Cluster 模式必须配置至少一个 AppRole。
+	if len(cfg.Auth.AppRoles) == 0 {
+		errs = append(errs, "cluster mode requires at least one auth.app_roles entry")
+	}
+	for i, r := range cfg.Auth.AppRoles {
+		if r.RoleID == "" {
+			errs = append(errs, fmt.Sprintf("auth.app_roles[%d].role_id is required", i))
+		}
+		if r.Token == "" {
+			errs = append(errs, fmt.Sprintf("auth.app_roles[%d].token is required", i))
+		}
+		if len(r.AllowedKeys) == 0 {
+			errs = append(errs, fmt.Sprintf("auth.app_roles[%d].allowed_keys is required", i))
+		}
+		if len(r.AllowedActions) == 0 {
+			errs = append(errs, fmt.Sprintf("auth.app_roles[%d].allowed_actions is required", i))
+		}
 	}
 
 	if len(errs) > 0 {
