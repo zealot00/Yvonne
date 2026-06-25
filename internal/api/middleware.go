@@ -92,10 +92,11 @@ func (r *V1Router) RequireAuth(authenticator auth.Authenticator, action string, 
 
 // authorizeBodyKeyID 从 context 提取 Policy，校验 body 中的 KeyID 是否被授权。
 // 返回 true=允许，false=拒绝。
+// 无 Policy（Dev 模式无认证器）时默认允许，保持向后兼容。
 func authorizeBodyKeyID(req *http.Request, keyID string) bool {
 	policy := auth.PolicyFromContext(req.Context())
 	if policy == nil {
-		return false // 默认拒绝
+		return true // Dev 模式无认证器，允许所有
 	}
 	return policy.IsKeyAllowed(keyID)
 }

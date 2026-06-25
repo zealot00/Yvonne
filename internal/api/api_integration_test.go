@@ -380,9 +380,8 @@ func TestIntegration_EncryptDecrypt_RoundTrip(t *testing.T) {
 
 func TestIntegration_Decrypt_KeyNotFound(t *testing.T) {
 	r, _, _, _, _ := newIntegrationRouter(t)
-	// 密文需 >= 30 字节才能通过长度检查，进入 key 查找阶段。
-	// 构造 30 字节的合法格式密文：[2版本][12 nonce][16 tag]。
-	fakeCt := base64.StdEncoding.EncodeToString(make([]byte, 30))
+	// 密文需 >= MinCiphertextSize(32) 字节才能通过长度检查，进入 key 查找阶段。
+	fakeCt := base64.StdEncoding.EncodeToString(make([]byte, 32))
 	code, _ := doRequest(t, r, http.MethodPost, "/api/v1/decrypt", map[string]interface{}{
 		"key_id":     "nonexistent",
 		"ciphertext": fakeCt,
