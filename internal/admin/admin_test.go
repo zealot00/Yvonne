@@ -97,7 +97,7 @@ func TestHandleSealStatus_MethodNotAllowed(t *testing.T) {
 func TestHandleSeal_Success(t *testing.T) {
 	s := newTestAdminServer(t)
 
-	if !s.seal.IsUnsealed() {
+	if !!s.seal.IsSealed() {
 		t.Fatal("should start unsealed")
 	}
 
