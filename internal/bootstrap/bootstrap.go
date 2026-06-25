@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/syslog"
 	"os"
 	"time"
 
@@ -35,15 +36,16 @@ import (
 
 // Server 是装配完成的 Yvonne 实例。
 type Server struct {
-	V1Router    *api.V1Router
-	AdminServer *admin.Server // Web 管理页面（可为 nil：admin.enabled=false）
-	AuditLog    audit.Auditor
-	Metrics     *metrics.Registry
-	VaultState  seal.Unsealer
-	Store       storage.KVStore
-	PGStore     *storage.PostgresKVStore
-	Manager     *lifecycle.Manager
-	MasterKey   *memguard.SecureBuffer
+	V1Router       *api.V1Router
+	AdminServer    *admin.Server
+	AuditLog       audit.Auditor
+	Metrics        *metrics.Registry
+	VaultState     seal.Unsealer
+	Store          storage.KVStore
+	PGStore        *storage.PostgresKVStore
+	Manager        *lifecycle.Manager
+	MasterKey      *memguard.SecureBuffer
+	RotationDaemon *lifecycle.RotationDaemon
 }
 
 // Close 释放所有资源。
@@ -62,38 +64,78 @@ func (s *Server) Close() {
 
 // BuildYvonne 根据配置装配 Yvonne 实例。
 //
+// 装配顺序：配置加载 → 基础组件（存储、审计）→ 业务组件（Lifecycle、Auth、Seal）→ HTTP 路由 → 后台 Daemon → 启动 Server。
+//
 // Dev Mode：
 //   - 强制 storage=memory
 //   - 强制 unseal=auto，生成 32 字节临时 Master Key，直接 Unsealed
+//   - 审计输出到 stdout（不落盘）
 //   - 红字警告
 //
 // Cluster Mode：
 //   - 严格校验（已由 config.ValidateYvonneConfig 完成）
-//   - 实例化 PGStore
-//   - 按 unseal.type 装配解封策略（shamir 或 local_pki）
-//   - 启动时处于 Sealed 状态，等待外部 ProvideShare
+//   - 双写审计（File + Syslog）必须成功，否则 panic
+//   - 强制认证器装配
+//   - 装配 RotationDaemon
 func BuildYvonne(cfg *config.YvonneConfig) (*Server, error) {
 	if cfg == nil {
 		return nil, errors.New("bootstrap: nil config")
 	}
 
-	// 公共：创建 audit logger 与 metrics registry。
-	auditLog, err := audit.NewAuditLogger(os.Stdout)
-	if err != nil {
-		return nil, fmt.Errorf("bootstrap: create audit logger: %w", err)
-	}
 	metricsReg := metrics.NewRegistry()
 
 	// 模式分支：严格隔离 Dev 与 Cluster 装配逻辑。
 	switch cfg.Mode {
 	case config.ModeDev:
+		// Dev 模式：审计输出到 stdout。
+		auditLog, err := audit.NewAuditLogger(os.Stdout)
+		if err != nil {
+			return nil, fmt.Errorf("bootstrap: dev create audit logger: %w", err)
+		}
 		return buildDevMode(cfg, auditLog, metricsReg)
 	case config.ModeCluster:
+		// Cluster 模式：装配双写审计器（File + Syslog）。
+		auditLog := buildClusterAuditLogger(cfg)
 		return buildClusterMode(cfg, auditLog, metricsReg)
 	default:
-		// 不应到达（ValidateYvonneConfig 已拦截），但防御性 panic。
 		panic(fmt.Sprintf("bootstrap: invalid mode %q (validator should have caught this)", cfg.Mode))
 	}
+}
+
+// buildClusterAuditLogger 装配 Cluster 模式的双写审计器（File + Syslog）。
+//
+// 致命约束：审计落盘失败 = 不合规 KMS，直接 panic 拒绝启动。
+func buildClusterAuditLogger(cfg *config.YvonneConfig) *audit.AuditLogger {
+	dir := cfg.Audit.Dir
+	filename := cfg.Audit.Filename
+	if filename == "" {
+		filename = "audit.log"
+	}
+	retention := cfg.Audit.RetentionDays
+	if retention == 0 {
+		retention = 180
+	}
+
+	// 可选 Syslog。
+	var sw *audit.SyslogWriter
+	if cfg.Audit.SyslogEnabled {
+		tag := cfg.Audit.SyslogTag
+		if tag == "" {
+			tag = "yvonne-kms"
+		}
+		var err error
+		sw, err = audit.NewSyslogWriter(syslog.LOG_AUTHPRIV|syslog.LOG_INFO, tag)
+		if err != nil {
+			panic("FATAL: Failed to initialize compliant audit logger (syslog connection failed): " + err.Error())
+		}
+	}
+
+	logger, err := audit.NewDualWriteLogger(dir, filename, retention, sw)
+	if err != nil {
+		panic("FATAL: Failed to initialize compliant audit logger (file rotation failed): " + err.Error())
+	}
+	log.Printf("CLUSTER MODE: dual-write audit logger initialized (dir=%s, retention=%dd, syslog=%v)", dir, retention, cfg.Audit.SyslogEnabled)
+	return logger
 }
 
 // buildDevMode 装配 Dev 模式实例。
@@ -251,17 +293,32 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 	// 装配 Admin Web UI。
 	adminSrv := buildAdminServer(cfg, vault)
 
+	// 装配 RotationDaemon（Cluster 模式专用）。
+	// 使用 AdvisoryLocker 实现集群选主，确保只有一个节点执行轮转。
+	locker := storage.NewAdvisoryLocker(pgStore.Pool(), 0x796F6E6E65) // "yonne" 的 int64
+	daemon := lifecycle.NewRotationDaemon(lifecycleMgr, vault, locker, func(entry lifecycle.AuditEntry) error {
+		// 桥接 lifecycle.AuditEntry → audit.LogEntry。
+		return auditLog.Record(audit.LogEntry{
+			TraceID:   "",
+			Timestamp: entry.Timestamp,
+			Actor:     entry.Actor,
+			Action:    entry.Action,
+			Resource:  entry.Resource,
+			Result:    entry.Result,
+		})
+	})
+
 	return &Server{
-		V1Router:    v1Router,
-		AdminServer: adminSrv,
-		AuditLog:    auditLog,
-		Metrics:     metricsReg,
-		VaultState:  vault,
-		Store:       pgStore,
-		PGStore:     pgStore,
-		Manager:     lifecycleMgr,
-		// MasterKey 为 nil：Cluster 模式由 VaultState 管理。
-		MasterKey: nil,
+		V1Router:       v1Router,
+		AdminServer:    adminSrv,
+		AuditLog:       auditLog,
+		Metrics:        metricsReg,
+		VaultState:     vault,
+		Store:          pgStore,
+		PGStore:        pgStore,
+		Manager:        lifecycleMgr,
+		MasterKey:      nil,
+		RotationDaemon: daemon,
 	}, nil
 }
 

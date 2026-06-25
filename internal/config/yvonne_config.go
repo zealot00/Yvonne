@@ -37,7 +37,17 @@ type YvonneConfig struct {
 	Storage StorageModeConf `json:"storage" yaml:"storage"` // 模式相关存储配置
 	Unseal  UnsealModeConf  `json:"unseal"  yaml:"unseal"`  // 模式相关解封配置
 	Auth    AuthModeConf    `json:"auth"    yaml:"auth"`    // 认证配置（Cluster 必填）
+	Audit   AuditModeConf   `json:"audit"   yaml:"audit"`   // 审计配置（Cluster 必填）
 	Logging LoggingConfig   `json:"logging" yaml:"logging"` // 复用既有 LoggingConfig
+}
+
+// AuditModeConf 是审计配置（Cluster 模式必填）。
+type AuditModeConf struct {
+	Dir           string `json:"dir"             yaml:"dir"`            // 日志目录（如 /var/log/yvonne）
+	Filename      string `json:"filename"        yaml:"filename"`       // 当前日志文件名（默认 audit.log）
+	RetentionDays int    `json:"retention_days"  yaml:"retention_days"` // 留存天数（默认 180）
+	SyslogEnabled bool   `json:"syslog_enabled"  yaml:"syslog_enabled"` // 是否启用 Syslog 双写
+	SyslogTag     string `json:"syslog_tag"      yaml:"syslog_tag"`     // Syslog tag（默认 yvonne-kms）
 }
 
 // AuthModeConf 是认证配置（Cluster 模式必填，Dev 模式忽略）。
@@ -222,6 +232,11 @@ func validateClusterConfig(cfg *YvonneConfig) error {
 
 	if !cfg.Logging.RedactSecrets {
 		errs = append(errs, "cluster mode requires logging.redact_secrets=true")
+	}
+
+	// Cluster 模式必须配置审计落盘目录。
+	if cfg.Audit.Dir == "" {
+		errs = append(errs, "cluster mode requires audit.dir (e.g. /var/log/yvonne)")
 	}
 
 	// Cluster 模式必须配置至少一个 AppRole。

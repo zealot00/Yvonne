@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"yvonne/internal/memguard"
+	"yvonne/internal/seal"
 	"yvonne/internal/storage"
 )
 
@@ -45,17 +46,17 @@ type LockAcquirer interface {
 // RotationDaemon 是自动密钥轮转守护进程。
 type RotationDaemon struct {
 	manager      *Manager
-	masterKey    *memguard.SecureBuffer
+	seal         seal.Unsealer // 通过 MasterKeyRef 获取 CMK，避免明文密钥离开 VaultState
 	locker       LockAcquirer
 	auditFn      func(entry AuditEntry) error
 	scanInterval time.Duration
 }
 
 // NewRotationDaemon 创建轮转守护进程。
-func NewRotationDaemon(manager *Manager, masterKey *memguard.SecureBuffer, locker LockAcquirer, auditFn func(entry AuditEntry) error) *RotationDaemon {
+func NewRotationDaemon(manager *Manager, seal seal.Unsealer, locker LockAcquirer, auditFn func(entry AuditEntry) error) *RotationDaemon {
 	return &RotationDaemon{
 		manager:      manager,
-		masterKey:    masterKey,
+		seal:         seal,
 		locker:       locker,
 		auditFn:      auditFn,
 		scanInterval: 1 * time.Hour,
@@ -158,7 +159,12 @@ func (d *RotationDaemon) scanExpiredKeys(ctx context.Context) ([]KeyMetadata, er
 
 // rotateAndAudit 执行轮转 + 写审计日志。
 func (d *RotationDaemon) rotateAndAudit(ctx context.Context, meta KeyMetadata) {
-	newMeta, _, err := d.manager.RotateKey(ctx, meta.KeyID, d.masterKey)
+	var rotateErr error
+	var newMeta *KeyMetadata
+	_ = d.seal.MasterKeyRef(func(mk *memguard.SecureBuffer) error {
+		newMeta, _, rotateErr = d.manager.RotateKey(ctx, meta.KeyID, mk)
+		return rotateErr
+	})
 
 	// 审计日志（无论成败都记录）。
 	entry := AuditEntry{
@@ -168,9 +174,9 @@ func (d *RotationDaemon) rotateAndAudit(ctx context.Context, meta KeyMetadata) {
 		Resource:  meta.KeyID,
 		Result:    "success",
 	}
-	if err != nil {
-		entry.Result = fmt.Sprintf("failure: %v", err)
-		log.Printf("rotation daemon: rotate %s failed: %v", meta.KeyID, err)
+	if rotateErr != nil {
+		entry.Result = fmt.Sprintf("failure: %v", rotateErr)
+		log.Printf("rotation daemon: rotate %s failed: %v", meta.KeyID, rotateErr)
 	} else {
 		log.Printf("rotation daemon: rotated %s v%d → v%d", meta.KeyID, meta.Version, newMeta.Version)
 	}

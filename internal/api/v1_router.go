@@ -69,8 +69,8 @@ func (r *V1Router) register() {
 	r.mux.HandleFunc("/api/v1/keys/import", r.auditMiddleware("ImportKey", r.authAndSeal("ImportKey", r.handleImportKey)))
 	r.mux.HandleFunc("/api/v1/keys/", r.auditMiddleware("KeyOp", r.authAndSeal("KeyOp", r.handleKeyOps)))
 
-	// 审计日志查询。
-	r.mux.HandleFunc("/api/v1/audit/query", r.auditMiddleware("AuditQuery", r.handleAuditQuery))
+	// 审计日志查询（需认证 + AuditQuery action 权限）。
+	r.mux.HandleFunc("/api/v1/audit/query", r.auditMiddleware("AuditQuery", r.authAndSeal("AuditQuery", r.handleAuditQuery)))
 
 	// 密码学运算（需认证 + Unsealed）。
 	r.mux.HandleFunc("/api/v1/encrypt", r.auditMiddleware("Encrypt", r.authAndSeal("Encrypt", r.handleV1Encrypt)))

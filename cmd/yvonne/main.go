@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"yvonne/internal/audit"
 	"yvonne/internal/bootstrap"
 	"yvonne/internal/config"
 	"yvonne/internal/memguard"
@@ -166,6 +167,23 @@ func startYvonne(cfg *config.YvonneConfig) {
 	}
 	defer srv.Close()
 
+	// Cluster 模式 TLS 未启用时打印醒目警告（审计留痕）。
+	if cfg.Mode == config.ModeCluster && !cfg.Server.TLS.Enabled {
+		const red = "\033[31m"
+		const bold = "\033[1m"
+		const reset = "\033[0m"
+		log.Printf("%s%sWARNING: Cluster mode running without TLS. Transport layer is NOT encrypted!%s",
+			red, bold, reset)
+		log.Printf("WARNING: Ensure API is behind mTLS service mesh or reverse proxy with TLS termination.")
+		_ = srv.AuditLog.Record(audit.LogEntry{
+			Timestamp: time.Now().UTC(),
+			Actor:     "SYSTEM_BOOTSTRAP",
+			Action:    "TLSWarning",
+			Resource:  "transport",
+			Result:    "warning: tls disabled in cluster mode",
+		})
+	}
+
 	// 创建主 HTTP Server（业务 API）。
 	httpSrv := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.Server.BindAddr, cfg.Server.BindPort),
@@ -177,7 +195,6 @@ func startYvonne(cfg *config.YvonneConfig) {
 	// 创建 Admin HTTP Server（Web UI）。
 	var adminHTTPSrv *http.Server
 	if srv.AdminServer != nil {
-		// Dev 模式默认 127.0.0.1:8250；Cluster 模式用配置。
 		adminAddr := "127.0.0.1:8250"
 		if cfg.Server.Admin.BindAddr != "" && cfg.Server.Admin.BindPort != 0 {
 			adminAddr = fmt.Sprintf("%s:%d", cfg.Server.Admin.BindAddr, cfg.Server.Admin.BindPort)
@@ -190,12 +207,29 @@ func startYvonne(cfg *config.YvonneConfig) {
 		}
 	}
 
+	// 创建全局 context（支持优雅停机，传递给 RotationDaemon）。
+	rootCtx, rootCancel := context.WithCancel(context.Background())
+	defer rootCancel()
+
+	// 启动 RotationDaemon（Cluster 模式）。
+	if srv.RotationDaemon != nil {
+		srv.RotationDaemon.Start(rootCtx)
+		log.Printf("rotation daemon started (hourly scan)")
+	}
+
 	// 启动监听。
 	errCh := make(chan error, 2)
 	go func() {
 		log.Printf("yvonne API listening on %s", httpSrv.Addr)
-		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errCh <- err
+		if cfg.Server.TLS.Enabled {
+			log.Printf("TLS enabled: cert=%s", cfg.Server.TLS.CertFile)
+			if err := httpSrv.ListenAndServeTLS(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
+				errCh <- err
+			}
+		} else {
+			if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				errCh <- err
+			}
 		}
 	}()
 	if adminHTTPSrv != nil {
@@ -218,7 +252,8 @@ func startYvonne(cfg *config.YvonneConfig) {
 		log.Printf("server error: %v", err)
 	}
 
-	// 优雅停机：10s 超时关闭 HTTP。
+	// 优雅停机：取消全局 context（通知 Daemon 退出）→ 关闭 HTTP（10s 超时）。
+	rootCancel()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

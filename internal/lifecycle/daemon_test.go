@@ -55,7 +55,7 @@ func TestRotationDaemon_AutoRotate(t *testing.T) {
 	var auditMu sync.Mutex
 
 	locker := &mockAdvisoryLocker{}
-	daemon := NewRotationDaemon(mgr, mk, locker, func(entry AuditEntry) error {
+	daemon := NewRotationDaemon(mgr, &mockUnsealer{masterKey: mk}, locker, func(entry AuditEntry) error {
 		auditMu.Lock()
 		auditEntries = append(auditEntries, entry)
 		auditMu.Unlock()
@@ -116,7 +116,7 @@ func TestRotationDaemon_NoExpiredKeys(t *testing.T) {
 
 	var auditCount int
 	locker := &mockAdvisoryLocker{}
-	daemon := NewRotationDaemon(mgr, mk, locker, func(entry AuditEntry) error {
+	daemon := NewRotationDaemon(mgr, &mockUnsealer{masterKey: mk}, locker, func(entry AuditEntry) error {
 		auditCount++
 		return nil
 	})
@@ -141,7 +141,7 @@ func TestRotationDaemon_NoRotationPeriod(t *testing.T) {
 
 	var auditCount int
 	locker := &mockAdvisoryLocker{}
-	daemon := NewRotationDaemon(mgr, mk, locker, func(entry AuditEntry) error {
+	daemon := NewRotationDaemon(mgr, &mockUnsealer{masterKey: mk}, locker, func(entry AuditEntry) error {
 		auditCount++
 		return nil
 	})
@@ -161,7 +161,7 @@ func TestRotationDaemon_ContextCancel(t *testing.T) {
 	defer mk.Wipe()
 
 	locker := &mockAdvisoryLocker{}
-	daemon := NewRotationDaemon(mgr, mk, locker, nil)
+	daemon := NewRotationDaemon(mgr, &mockUnsealer{masterKey: mk}, locker, nil)
 	daemon.SetScanInterval(100 * time.Millisecond)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -204,7 +204,7 @@ func TestRotationDaemon_MultipleExpired(t *testing.T) {
 
 	var auditCount int
 	locker := &mockAdvisoryLocker{}
-	daemon := NewRotationDaemon(mgr, mk, locker, func(entry AuditEntry) error {
+	daemon := NewRotationDaemon(mgr, &mockUnsealer{masterKey: mk}, locker, func(entry AuditEntry) error {
 		auditCount++
 		return nil
 	})
@@ -247,7 +247,7 @@ func TestRotationDaemon_LockNotAcquired(t *testing.T) {
 	locker := &mockAdvisoryLocker{acquired: true}
 
 	var auditCount int
-	daemon := NewRotationDaemon(mgr, mk, locker, func(entry AuditEntry) error {
+	daemon := NewRotationDaemon(mgr, &mockUnsealer{masterKey: mk}, locker, func(entry AuditEntry) error {
 		auditCount++
 		return nil
 	})
@@ -281,7 +281,7 @@ func TestRotationDaemon_NewNextRotationAt(t *testing.T) {
 	saveMetaDirect(t, mgr, *meta)
 
 	locker := &mockAdvisoryLocker{}
-	daemon := NewRotationDaemon(mgr, mk, locker, nil)
+	daemon := NewRotationDaemon(mgr, &mockUnsealer{masterKey: mk}, locker, nil)
 	daemon.scanOnce(ctx)
 
 	// V2 应有新的 NextRotationAt（7 天后）。
@@ -317,7 +317,7 @@ func TestRotationDaemon_DeactivatedSkipped(t *testing.T) {
 
 	var auditCount int
 	locker := &mockAdvisoryLocker{}
-	daemon := NewRotationDaemon(mgr, mk, locker, func(entry AuditEntry) error {
+	daemon := NewRotationDaemon(mgr, &mockUnsealer{masterKey: mk}, locker, func(entry AuditEntry) error {
 		auditCount++
 		return nil
 	})
@@ -347,7 +347,7 @@ func TestRotationDaemon_SoftDeletedSkipped(t *testing.T) {
 
 	var auditCount int
 	locker := &mockAdvisoryLocker{}
-	daemon := NewRotationDaemon(mgr, mk, locker, func(entry AuditEntry) error {
+	daemon := NewRotationDaemon(mgr, &mockUnsealer{masterKey: mk}, locker, func(entry AuditEntry) error {
 		auditCount++
 		return nil
 	})
@@ -366,7 +366,7 @@ func TestRotationDaemon_EmptyDB(t *testing.T) {
 	defer mk.Wipe()
 
 	locker := &mockAdvisoryLocker{}
-	daemon := NewRotationDaemon(mgr, mk, locker, nil)
+	daemon := NewRotationDaemon(mgr, &mockUnsealer{masterKey: mk}, locker, nil)
 
 	// 空 DB 扫描不应 panic。
 	daemon.scanOnce(context.Background())
@@ -386,7 +386,7 @@ func TestRotationDaemon_AuditFailureDoesNotBlock(t *testing.T) {
 	saveMetaDirect(t, mgr, *meta)
 
 	locker := &mockAdvisoryLocker{}
-	daemon := NewRotationDaemon(mgr, mk, locker, func(entry AuditEntry) error {
+	daemon := NewRotationDaemon(mgr, &mockUnsealer{masterKey: mk}, locker, func(entry AuditEntry) error {
 		return fmt.Errorf("simulated audit failure")
 	})
 
@@ -415,7 +415,7 @@ func TestRotationDaemon_SecondScanNoOp(t *testing.T) {
 
 	var auditCount int
 	locker := &mockAdvisoryLocker{}
-	daemon := NewRotationDaemon(mgr, mk, locker, func(entry AuditEntry) error {
+	daemon := NewRotationDaemon(mgr, &mockUnsealer{masterKey: mk}, locker, func(entry AuditEntry) error {
 		auditCount++
 		return nil
 	})
@@ -464,7 +464,7 @@ func TestRotationDaemon_MixedStates(t *testing.T) {
 	var rotatedKeys []string
 	var mu sync.Mutex
 	locker := &mockAdvisoryLocker{}
-	daemon := NewRotationDaemon(mgr, mk, locker, func(entry AuditEntry) error {
+	daemon := NewRotationDaemon(mgr, &mockUnsealer{masterKey: mk}, locker, func(entry AuditEntry) error {
 		mu.Lock()
 		rotatedKeys = append(rotatedKeys, entry.Resource)
 		mu.Unlock()
@@ -498,7 +498,7 @@ func TestRotationDaemon_AuditEntryFields(t *testing.T) {
 
 	var entry AuditEntry
 	locker := &mockAdvisoryLocker{}
-	daemon := NewRotationDaemon(mgr, mk, locker, func(e AuditEntry) error {
+	daemon := NewRotationDaemon(mgr, &mockUnsealer{masterKey: mk}, locker, func(e AuditEntry) error {
 		entry = e
 		return nil
 	})
@@ -543,7 +543,7 @@ func TestRotationDaemon_RotateFailureAudited(t *testing.T) {
 
 	var entry AuditEntry
 	locker := &mockAdvisoryLocker{}
-	daemon := NewRotationDaemon(mgr, mk, locker, func(e AuditEntry) error {
+	daemon := NewRotationDaemon(mgr, &mockUnsealer{masterKey: mk}, locker, func(e AuditEntry) error {
 		entry = e
 		return nil
 	})
@@ -566,7 +566,7 @@ func TestRotationDaemon_GoroutineExit(t *testing.T) {
 	defer mk.Wipe()
 
 	locker := &mockAdvisoryLocker{}
-	daemon := NewRotationDaemon(mgr, mk, locker, nil)
+	daemon := NewRotationDaemon(mgr, &mockUnsealer{masterKey: mk}, locker, nil)
 	daemon.SetScanInterval(50 * time.Millisecond)
 
 	ctx, cancel := context.WithCancel(context.Background())
