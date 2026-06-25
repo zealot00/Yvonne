@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -40,6 +41,7 @@ type PolicyStore interface {
 
 // MemoryPolicyStore 是基于内存 map 的 PolicyStore 实现。
 type MemoryPolicyStore struct {
+	mu       sync.RWMutex
 	policies map[string]*Policy
 }
 
@@ -48,15 +50,19 @@ func NewMemoryPolicyStore() *MemoryPolicyStore {
 	return &MemoryPolicyStore{policies: make(map[string]*Policy)}
 }
 
-// AddPolicy 注册一个角色的 Policy。
+// AddPolicy 注册一个角色的 Policy（线程安全）。
 func (m *MemoryPolicyStore) AddPolicy(policy *Policy) {
 	if policy != nil && policy.RoleID != "" {
+		m.mu.Lock()
+		defer m.mu.Unlock()
 		m.policies[policy.RoleID] = policy
 	}
 }
 
-// LookupPolicy 查找角色的 Policy。
+// LookupPolicy 查找角色的 Policy（线程安全）。
 func (m *MemoryPolicyStore) LookupPolicy(roleID string) (*Policy, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	p, ok := m.policies[roleID]
 	if !ok {
 		return nil, nil
