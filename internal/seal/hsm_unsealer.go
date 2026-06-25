@@ -58,10 +58,21 @@ func (h *HSMUnsealer) ProvideShare(share []byte) (bool, error) {
 }
 
 // MasterKeyRef HSM 模式下不传入明文 CMK。
-// 调用方应使用 CryptoBackend 接口而非明文密钥。
-// 此方法返回 error，提示调用方使用 HSM 专用路径。
+// Deprecated: 使用 KEKRef 代替。
 func (h *HSMUnsealer) MasterKeyRef(action func(key *memguard.SecureBuffer) error) error {
-	return errors.New("seal: HSM mode does not expose plaintext master key; use CryptoBackend instead")
+	return errors.New("seal: HSM mode does not expose plaintext master key; use KEKRef instead")
+}
+
+// KEKRef 在闭包内访问 HSM KEK 实例（hsmKEK 包装 CryptoBackend）。
+// 会话未建立时返回 error。
+func (h *HSMUnsealer) KEKRef(action func(kek KEK) error) error {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	if !h.session {
+		return errors.New("seal: HSM session not established, kek unavailable")
+	}
+	return action(NewHSMKEK(h.backend))
 }
 
 // BackendRef 在闭包内访问 CryptoBackend 实例。

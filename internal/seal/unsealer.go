@@ -30,7 +30,13 @@ type Unsealer interface {
 
 	// MasterKeyRef 在闭包内访问 Master Key。
 	// Sealed 状态返回 error。
+	// Deprecated: 使用 KEKRef 代替。HSM 模式下此方法返回 error。
 	MasterKeyRef(action func(key *memguard.SecureBuffer) error) error
+
+	// KEKRef 在闭包内访问 KEK 实例（统一 software CMK 与 HSM backend）。
+	// 这是主业务路径（DEK wrap/unwrap）的统一入口，三模式均可用。
+	// Sealed 状态返回 error。
+	KEKRef(action func(kek KEK) error) error
 
 	// Seal 重新封印，清零 Master Key。
 	Seal(ctx context.Context)

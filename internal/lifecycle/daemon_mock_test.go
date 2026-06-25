@@ -18,6 +18,9 @@ func (m *mockUnsealer) ProvideShare(share []byte) (bool, error) { return false, 
 func (m *mockUnsealer) MasterKeyRef(action func(key *memguard.SecureBuffer) error) error {
 	return action(m.masterKey)
 }
+func (m *mockUnsealer) KEKRef(action func(kek seal.KEK) error) error {
+	return action(seal.NewSoftwareKEK(m.masterKey))
+}
 func (m *mockUnsealer) Seal(ctx context.Context)          {}
 func (m *mockUnsealer) EmergencySeal(ctx context.Context) {}
 func (m *mockUnsealer) State() seal.State                 { return seal.StateUnsealed }

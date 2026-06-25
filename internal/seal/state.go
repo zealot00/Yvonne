@@ -351,3 +351,15 @@ func (v *VaultState) MasterKeyRef(action func(key *memguard.SecureBuffer) error)
 	}
 	return action(v.masterKey)
 }
+
+// KEKRef 在闭包内访问 KEK 实例（softwareKEK 包装 masterKey）。
+// Sealed 状态返回 error。
+func (v *VaultState) KEKRef(action func(kek KEK) error) error {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	if v.state.Load() != int32(StateUnsealed) || v.masterKey == nil {
+		return errors.New("seal: vault is sealed, kek unavailable")
+	}
+	return action(NewSoftwareKEK(v.masterKey))
+}
