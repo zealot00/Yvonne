@@ -995,6 +995,7 @@ for v in "${violations_ck12[@]}"; do
     */gcm.go) continue ;;
     */versioned_encrypt.go) continue ;;
     */gcm_bytes.go) continue ;;
+    */suite_gmsm.go) continue ;; # SM4-GCM，长度校验在 line 76
   esac
 
   filtered_ck12+=("$v")

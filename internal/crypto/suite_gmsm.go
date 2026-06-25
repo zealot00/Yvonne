@@ -3,40 +3,94 @@
 // Package crypto - 国密套件（SM4-GCM + SM3 + SM2）。
 //
 // 符合标准：
-//   - SM4: GB/T 32907
-//   - SM3: GB/T 32905
-//   - SM2: GB/T 32918
+//   - SM4: GB/T 32907（分组密码算法）
+//   - SM3: GB/T 32905（密码杂凑算法）
+//   - SM2: GB/T 32918（椭圆曲线公钥密码算法）
+//   - HMAC-SM3: GM/T 0054（密码应用消息认证码）
 //
 // 依赖：github.com/tjfoc/gmsm
+// 编译：go build -tags gmsm
 package crypto
 
 import (
+	"crypto/cipher"
 	"crypto/hmac"
+	"crypto/rand"
+	"errors"
+	"io"
 
 	"github.com/tjfoc/gmsm/sm3"
+	"github.com/tjfoc/gmsm/sm4"
 
 	"yvonne/internal/memguard"
 )
 
 // GMSMCipher 是 SM4-GCM 对称加密实现。
-// 注意：SM4 密钥长度 16 字节（128 位）。
+// SM4 密钥长度 16 字节（128 位），GCM nonce 12 字节。
+// 密文格式：[12B Nonce][Ciphertext+AuthTag]，与 AES-GCM 结构一致。
 type GMSMCipher struct{}
 
 // NewGMSMCipher 创建国密 Cipher。
 func NewGMSMCipher() Cipher { return GMSMCipher{} }
 
 func (GMSMCipher) Encrypt(key *memguard.SecureBuffer, plaintext []byte) ([]byte, error) {
-	// SM4-GCM：用 16 字节密钥 + GCM 模式。
-	// 复用 EncryptGCM 的 AES-GCM 框架，但替换 cipher 为 SM4。
-	// 注意：tjfoc/gmsm 的 sm4 包不直接支持 GCM，需要用 cipher.NewGCM。
-	return encryptGCMWithCipher(key, plaintext, "sm4")
+	var ct []byte
+	err := key.WithKey(func(k []byte) error {
+		if len(k) < 16 {
+			return errors.New("crypto: SM4 key must be 16 bytes")
+		}
+		block, e := sm4.NewCipher(k[:16])
+		if e != nil {
+			return e
+		}
+		gcm, e := cipher.NewGCM(block)
+		if e != nil {
+			return e
+		}
+		nonce := make([]byte, gcm.NonceSize())
+		if _, e := io.ReadFull(rand.Reader, nonce); e != nil {
+			return e
+		}
+		ct = gcm.Seal(nonce, nonce, plaintext, nil)
+		return nil
+	})
+	return ct, err
 }
 
 func (GMSMCipher) Decrypt(key *memguard.SecureBuffer, ciphertext []byte) (*memguard.SecureBuffer, error) {
-	return decryptGCMWithCipher(key, ciphertext, "sm4")
+	var pt []byte
+	err := key.WithKey(func(k []byte) error {
+		if len(k) < 16 {
+			return errors.New("crypto: SM4 key must be 16 bytes")
+		}
+		block, e := sm4.NewCipher(k[:16])
+		if e != nil {
+			return e
+		}
+		gcm, e := cipher.NewGCM(block)
+		if e != nil {
+			return e
+		}
+		nonceSize := gcm.NonceSize()
+		if len(ciphertext) <= nonceSize {
+			return errors.New("crypto: SM4 ciphertext too short")
+		}
+		nonce := ciphertext[:nonceSize]
+		ct := ciphertext[nonceSize:]
+		pt, e = gcm.Open(nil, nonce, ct, nil)
+		return e
+	})
+	if err != nil {
+		return nil, err
+	}
+	sb := memguard.NewSecureBuffer(pt)
+	for i := range pt {
+		pt[i] = 0
+	}
+	return sb, nil
 }
 
-func (GMSMCipher) KeySize() int { return 16 } // SM4 = 128 位 = 16 字节
+func (GMSMCipher) KeySize() int { return 16 }
 func (GMSMCipher) Name() string { return "sm4-gcm" }
 
 // GMSMHash 是 SM3 哈希实现。
@@ -69,44 +123,3 @@ func NewGMSMSuite() (CryptoSuite, error) { return GMSMSuite{}, nil }
 func (GMSMSuite) Cipher() Cipher { return GMSMCipher{} }
 func (GMSMSuite) Hash() Hash     { return GMSMHash{} }
 func (GMSMSuite) Name() string   { return string(SuiteGMSM) }
-
-// encryptGCMWithCipher 用指定算法（aes/sm4）执行 GCM 加密。
-// 密文格式与 StandardCipher 一致：[12B Nonce][Ciphertext+AuthTag]。
-func encryptGCMWithCipher(key *memguard.SecureBuffer, plaintext []byte, algo string) ([]byte, error) {
-	var ct []byte
-	err := key.WithKey(func(k []byte) error {
-		var e error
-		ct, e = encryptWithAlgo(k, plaintext, algo)
-		return e
-	})
-	return ct, err
-}
-
-func decryptGCMWithCipher(key *memguard.SecureBuffer, ciphertext []byte, algo string) (*memguard.SecureBuffer, error) {
-	var pt []byte
-	err := key.WithKey(func(k []byte) error {
-		var e error
-		pt, e = decryptWithAlgo(k, ciphertext, algo)
-		return e
-	})
-	if err != nil {
-		return nil, err
-	}
-	sb := memguard.NewSecureBuffer(pt)
-	for i := range pt {
-		pt[i] = 0
-	}
-	return sb, nil
-}
-
-// encryptWithAlgo 用 sm4 或 aes 执行 GCM 加密。
-func encryptWithAlgo(key, plaintext []byte, algo string) ([]byte, error) {
-	// 复用 gcm.go 的 EncryptGCM 逻辑，但 block cipher 用 SM4。
-	// 简化：直接调 EncryptGCM（AES-GCM），未来替换为 SM4-GCM。
-	// 注意：当前实现为占位，真实 SM4-GCM 需要 cipher.NewGCM(sm4.NewCipher(key))。
-	return EncryptGCMBytes(key, plaintext)
-}
-
-func decryptWithAlgo(key, ciphertext []byte, algo string) ([]byte, error) {
-	return DecryptGCMBytes(key, ciphertext)
-}
