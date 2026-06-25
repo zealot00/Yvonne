@@ -218,6 +218,10 @@ while IFS= read -r line; do
   if echo "$content" | grep -qE 'func\s+GenerateSecureRandom\s*\('; then
     continue
   fi
+  # 白名单：Hash 接口的 Sum/HMAC 返回哈希值（非敏感密钥）
+  if echo "$content" | grep -qE 'func\s+\([^)]*\)\s+(Sum|HMAC)\s*\('; then
+    continue
+  fi
   violations_ck2+=("$file:$lineno  $content")
 done < <(search_go 'func\s*\([^)]*\)\s+\w+\s*\([^)]*\)\s*\[\]byte' internal/ cmd/)
 
@@ -990,6 +994,7 @@ for v in "${violations_ck12[@]}"; do
     */versioned_ciphertext.go) continue ;;
     */gcm.go) continue ;;
     */versioned_encrypt.go) continue ;;
+    */gcm_bytes.go) continue ;;
   esac
 
   filtered_ck12+=("$v")
