@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Yvonne KMS Benchmark Report</title>
+<style>
+body { background: #0f0f1e; color: #e0e0e0; font-family: monospace; margin: 20px; }
+h1 { color: #e94560; }
+h2 { color: #0f3460; margin-top: 30px; }
+table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+th, td { border: 1px solid #16213e; padding: 6px 10px; text-align: left; }
+th { background: #16213e; color: #aaccff; }
+tr:nth-child(even) { background: #111122; }
+.sw { color: #aaccff; }
+.hsm { color: #ffaacc; }
+.diff { color: #e94560; }
+.note { background: #16213e; padding: 10px; border-radius: 4px; margin: 10px 0; }
+</style>
+</head>
+<body>
+<h1>Yvonne KMS Benchmark Report</h1>
+<p class="note">Comparing Software KEK (AES-256-GCM) vs HSM KEK (MockHSMBackend).<br>
+MockHSMBackend uses AES-256-GCM internally; real HSM will be 10-100x slower due to hardware round-trip.</p>
+
+<h2>1. Latency Comparison (ns/op)</h2>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="400" viewBox="0 0 900 400"><rect width="900" height="400" fill="#1a1a2e"/><text x="10" y="25" fill="#e94560" font-family="monospace" font-size="16" font-weight="bold">Latency (ns/op) — Lower is Better</text><line x1="120" y1="40" x2="120" y2="320" stroke="#16213e" stroke-width="2"/><line x1="120" y1="320" x2="880" y2="320" stroke="#16213e" stroke-width="2"/><line x1="120" y1="40" x2="880" y2="40" stroke="#16213e" stroke-width="1" stroke-dasharray="2,4"/><text x="115" y="44" fill="#8b8b9f" font-family="monospace" font-size="10" text-anchor="end">1700µs</text><line x1="120" y1="110" x2="880" y2="110" stroke="#16213e" stroke-width="1" stroke-dasharray="2,4"/><text x="115" y="114" fill="#8b8b9f" font-family="monospace" font-size="10" text-anchor="end">1275µs</text><line x1="120" y1="180" x2="880" y2="180" stroke="#16213e" stroke-width="1" stroke-dasharray="2,4"/><text x="115" y="184" fill="#8b8b9f" font-family="monospace" font-size="10" text-anchor="end">850134ns</text><line x1="120" y1="250" x2="880" y2="250" stroke="#16213e" stroke-width="1" stroke-dasharray="2,4"/><text x="115" y="254" fill="#8b8b9f" font-family="monospace" font-size="10" text-anchor="end">425067ns</text><line x1="120" y1="320" x2="880" y2="320" stroke="#16213e" stroke-width="1" stroke-dasharray="2,4"/><text x="115" y="324" fill="#8b8b9f" font-family="monospace" font-size="10" text-anchor="end">0</text><rect x="140" y="320" width="25" height="0" fill="#0f3460" rx="2"/><text x="152" y="335" fill="#aaccff" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 152 335)">SW</text><rect x="165" y="320" width="25" height="0" fill="#e94560" rx="2"/><text x="177" y="335" fill="#ffaacc" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 177 335)">HSM</text><text x="165" y="365" fill="#8b8b9f" font-family="monospace" font-size="9" text-anchor="middle">ConcurrentWr..</text><text x="152" y="315" fill="#aaccff" font-family="monospace" font-size="8" text-anchor="middle">1165ns</text><text x="177" y="315" fill="#ffaacc" font-family="monospace" font-size="8" text-anchor="middle">3022ns</text><rect x="220" y="320" width="25" height="0" fill="#0f3460" rx="2"/><text x="232" y="335" fill="#aaccff" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 232 335)">SW</text><rect x="245" y="320" width="25" height="0" fill="#e94560" rx="2"/><text x="257" y="335" fill="#ffaacc" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 257 335)">HSM</text><text x="245" y="365" fill="#8b8b9f" font-family="monospace" font-size="9" text-anchor="middle">CreateKey</text><text x="232" y="315" fill="#aaccff" font-family="monospace" font-size="8" text-anchor="middle">5200ns</text><text x="257" y="315" fill="#ffaacc" font-family="monospace" font-size="8" text-anchor="middle">5191ns</text><rect x="300" y="320" width="25" height="0" fill="#0f3460" rx="2"/><text x="312" y="335" fill="#aaccff" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 312 335)">SW</text><rect x="325" y="320" width="25" height="0" fill="#e94560" rx="2"/><text x="337" y="335" fill="#ffaacc" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 337 335)">HSM</text><text x="325" y="365" fill="#8b8b9f" font-family="monospace" font-size="9" text-anchor="middle">GDK</text><text x="312" y="315" fill="#aaccff" font-family="monospace" font-size="8" text-anchor="middle">4086ns</text><text x="337" y="315" fill="#ffaacc" font-family="monospace" font-size="8" text-anchor="middle">4107ns</text><rect x="380" y="53" width="25" height="267" fill="#0f3460" rx="2"/><text x="392" y="335" fill="#aaccff" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 392 335)">SW</text><rect x="405" y="40" width="25" height="280" fill="#e94560" rx="2"/><text x="417" y="335" fill="#ffaacc" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 417 335)">HSM</text><text x="405" y="365" fill="#8b8b9f" font-family="monospace" font-size="9" text-anchor="middle">RotateKey</text><text x="392" y="48" fill="#aaccff" font-family="monospace" font-size="8" text-anchor="middle">1622µs</text><text x="417" y="35" fill="#ffaacc" font-family="monospace" font-size="8" text-anchor="middle">1700µs</text><rect x="460" y="320" width="25" height="0" fill="#0f3460" rx="2"/><text x="472" y="335" fill="#aaccff" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 472 335)">SW</text><rect x="485" y="320" width="25" height="0" fill="#e94560" rx="2"/><text x="497" y="335" fill="#ffaacc" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 497 335)">HSM</text><text x="485" y="365" fill="#8b8b9f" font-family="monospace" font-size="9" text-anchor="middle">UnwrapOnly</text><text x="472" y="315" fill="#aaccff" font-family="monospace" font-size="8" text-anchor="middle">679</text><text x="497" y="315" fill="#ffaacc" font-family="monospace" font-size="8" text-anchor="middle">670</text><rect x="540" y="320" width="25" height="0" fill="#0f3460" rx="2"/><text x="552" y="335" fill="#aaccff" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 552 335)">SW</text><rect x="565" y="320" width="25" height="0" fill="#e94560" rx="2"/><text x="577" y="335" fill="#ffaacc" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 577 335)">HSM</text><text x="565" y="365" fill="#8b8b9f" font-family="monospace" font-size="9" text-anchor="middle">WrapOnly</text><text x="552" y="315" fill="#aaccff" font-family="monospace" font-size="8" text-anchor="middle">1749ns</text><text x="577" y="315" fill="#ffaacc" font-family="monospace" font-size="8" text-anchor="middle">1754ns</text><rect x="620" y="320" width="25" height="0" fill="#0f3460" rx="2"/><text x="632" y="335" fill="#aaccff" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 632 335)">SW</text><rect x="645" y="320" width="25" height="0" fill="#e94560" rx="2"/><text x="657" y="335" fill="#ffaacc" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 657 335)">HSM</text><text x="645" y="365" fill="#8b8b9f" font-family="monospace" font-size="9" text-anchor="middle">WrapUnwrap</text><text x="632" y="315" fill="#aaccff" font-family="monospace" font-size="8" text-anchor="middle">2487ns</text><text x="657" y="315" fill="#ffaacc" font-family="monospace" font-size="8" text-anchor="middle">2417ns</text><rect x="720" y="40" width="12" height="12" fill="#0f3460"/><text x="737" y="50" fill="#aaccff" font-family="monospace" font-size="11">Software KEK</text><rect x="720" y="60" width="12" height="12" fill="#e94560"/><text x="737" y="70" fill="#ffaacc" font-family="monospace" font-size="11">HSM KEK (Mock)</text></svg>
+
+<h2>2. Memory Comparison (B/op)</h2>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="400" viewBox="0 0 900 400"><rect width="900" height="400" fill="#1a1a2e"/><text x="10" y="25" fill="#e94560" font-family="monospace" font-size="16" font-weight="bold">Memory (B/op) — Lower is Better</text><line x1="120" y1="40" x2="120" y2="320" stroke="#16213e" stroke-width="2"/><line x1="120" y1="320" x2="880" y2="320" stroke="#16213e" stroke-width="2"/><line x1="120" y1="40" x2="880" y2="40" stroke="#16213e" stroke-width="1" stroke-dasharray="2,4"/><text x="115" y="44" fill="#8b8b9f" font-family="monospace" font-size="10" text-anchor="end">2004µs</text><line x1="120" y1="110" x2="880" y2="110" stroke="#16213e" stroke-width="1" stroke-dasharray="2,4"/><text x="115" y="114" fill="#8b8b9f" font-family="monospace" font-size="10" text-anchor="end">1503µs</text><line x1="120" y1="180" x2="880" y2="180" stroke="#16213e" stroke-width="1" stroke-dasharray="2,4"/><text x="115" y="184" fill="#8b8b9f" font-family="monospace" font-size="10" text-anchor="end">1002µs</text><line x1="120" y1="250" x2="880" y2="250" stroke="#16213e" stroke-width="1" stroke-dasharray="2,4"/><text x="115" y="254" fill="#8b8b9f" font-family="monospace" font-size="10" text-anchor="end">500955ns</text><line x1="120" y1="320" x2="880" y2="320" stroke="#16213e" stroke-width="1" stroke-dasharray="2,4"/><text x="115" y="324" fill="#8b8b9f" font-family="monospace" font-size="10" text-anchor="end">0</text><rect x="140" y="320" width="25" height="0" fill="#0f3460" rx="2"/><text x="152" y="335" fill="#aaccff" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 152 335)">SW</text><rect x="165" y="320" width="25" height="0" fill="#e94560" rx="2"/><text x="177" y="335" fill="#ffaacc" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 177 335)">HSM</text><text x="165" y="365" fill="#8b8b9f" font-family="monospace" font-size="9" text-anchor="middle">ConcurrentWr..</text><text x="152" y="315" fill="#aaccff" font-family="monospace" font-size="8" text-anchor="middle">2016ns</text><text x="177" y="315" fill="#ffaacc" font-family="monospace" font-size="8" text-anchor="middle">1968ns</text><rect x="220" y="320" width="25" height="0" fill="#0f3460" rx="2"/><text x="232" y="335" fill="#aaccff" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 232 335)">SW</text><rect x="245" y="320" width="25" height="0" fill="#e94560" rx="2"/><text x="257" y="335" fill="#ffaacc" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 257 335)">HSM</text><text x="245" y="365" fill="#8b8b9f" font-family="monospace" font-size="9" text-anchor="middle">CreateKey</text><text x="232" y="315" fill="#aaccff" font-family="monospace" font-size="8" text-anchor="middle">2843ns</text><text x="257" y="315" fill="#ffaacc" font-family="monospace" font-size="8" text-anchor="middle">2795ns</text><rect x="300" y="320" width="25" height="0" fill="#0f3460" rx="2"/><text x="312" y="335" fill="#aaccff" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 312 335)">SW</text><rect x="325" y="320" width="25" height="0" fill="#e94560" rx="2"/><text x="337" y="335" fill="#ffaacc" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 337 335)">HSM</text><text x="325" y="365" fill="#8b8b9f" font-family="monospace" font-size="9" text-anchor="middle">GDK</text><text x="312" y="315" fill="#aaccff" font-family="monospace" font-size="8" text-anchor="middle">2472ns</text><text x="337" y="315" fill="#ffaacc" font-family="monospace" font-size="8" text-anchor="middle">2472ns</text><rect x="380" y="40" width="25" height="280" fill="#0f3460" rx="2"/><text x="392" y="335" fill="#aaccff" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 392 335)">SW</text><rect x="405" y="63" width="25" height="257" fill="#e94560" rx="2"/><text x="417" y="335" fill="#ffaacc" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 417 335)">HSM</text><text x="405" y="365" fill="#8b8b9f" font-family="monospace" font-size="9" text-anchor="middle">RotateKey</text><text x="392" y="35" fill="#aaccff" font-family="monospace" font-size="8" text-anchor="middle">2004µs</text><text x="417" y="58" fill="#ffaacc" font-family="monospace" font-size="8" text-anchor="middle">1845µs</text><rect x="460" y="320" width="25" height="0" fill="#0f3460" rx="2"/><text x="472" y="335" fill="#aaccff" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 472 335)">SW</text><rect x="485" y="320" width="25" height="0" fill="#e94560" rx="2"/><text x="497" y="335" fill="#ffaacc" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 497 335)">HSM</text><text x="485" y="365" fill="#8b8b9f" font-family="monospace" font-size="9" text-anchor="middle">UnwrapOnly</text><text x="472" y="315" fill="#aaccff" font-family="monospace" font-size="8" text-anchor="middle">992</text><text x="497" y="315" fill="#ffaacc" font-family="monospace" font-size="8" text-anchor="middle">992</text><rect x="540" y="320" width="25" height="0" fill="#0f3460" rx="2"/><text x="552" y="335" fill="#aaccff" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 552 335)">SW</text><rect x="565" y="320" width="25" height="0" fill="#e94560" rx="2"/><text x="577" y="335" fill="#ffaacc" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 577 335)">HSM</text><text x="565" y="365" fill="#8b8b9f" font-family="monospace" font-size="9" text-anchor="middle">WrapOnly</text><text x="552" y="315" fill="#aaccff" font-family="monospace" font-size="8" text-anchor="middle">1024ns</text><text x="577" y="315" fill="#ffaacc" font-family="monospace" font-size="8" text-anchor="middle">976</text><rect x="620" y="320" width="25" height="0" fill="#0f3460" rx="2"/><text x="632" y="335" fill="#aaccff" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 632 335)">SW</text><rect x="645" y="320" width="25" height="0" fill="#e94560" rx="2"/><text x="657" y="335" fill="#ffaacc" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 657 335)">HSM</text><text x="645" y="365" fill="#8b8b9f" font-family="monospace" font-size="9" text-anchor="middle">WrapUnwrap</text><text x="632" y="315" fill="#aaccff" font-family="monospace" font-size="8" text-anchor="middle">2016ns</text><text x="657" y="315" fill="#ffaacc" font-family="monospace" font-size="8" text-anchor="middle">1968ns</text><rect x="720" y="40" width="12" height="12" fill="#0f3460"/><text x="737" y="50" fill="#aaccff" font-family="monospace" font-size="11">Software KEK</text><rect x="720" y="60" width="12" height="12" fill="#e94560"/><text x="737" y="70" fill="#ffaacc" font-family="monospace" font-size="11">HSM KEK (Mock)</text></svg>
+
+<h2>3. Allocation Comparison (allocs/op)</h2>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="400" viewBox="0 0 900 400"><rect width="900" height="400" fill="#1a1a2e"/><text x="10" y="25" fill="#e94560" font-family="monospace" font-size="16" font-weight="bold">Allocations (allocs/op) — Lower is Better</text><line x1="120" y1="40" x2="120" y2="320" stroke="#16213e" stroke-width="2"/><line x1="120" y1="320" x2="880" y2="320" stroke="#16213e" stroke-width="2"/><line x1="120" y1="40" x2="880" y2="40" stroke="#16213e" stroke-width="1" stroke-dasharray="2,4"/><text x="115" y="44" fill="#8b8b9f" font-family="monospace" font-size="10" text-anchor="end">19803ns</text><line x1="120" y1="110" x2="880" y2="110" stroke="#16213e" stroke-width="1" stroke-dasharray="2,4"/><text x="115" y="114" fill="#8b8b9f" font-family="monospace" font-size="10" text-anchor="end">14852ns</text><line x1="120" y1="180" x2="880" y2="180" stroke="#16213e" stroke-width="1" stroke-dasharray="2,4"/><text x="115" y="184" fill="#8b8b9f" font-family="monospace" font-size="10" text-anchor="end">9902ns</text><line x1="120" y1="250" x2="880" y2="250" stroke="#16213e" stroke-width="1" stroke-dasharray="2,4"/><text x="115" y="254" fill="#8b8b9f" font-family="monospace" font-size="10" text-anchor="end">4951ns</text><line x1="120" y1="320" x2="880" y2="320" stroke="#16213e" stroke-width="1" stroke-dasharray="2,4"/><text x="115" y="324" fill="#8b8b9f" font-family="monospace" font-size="10" text-anchor="end">0</text><rect x="140" y="320" width="25" height="0" fill="#0f3460" rx="2"/><text x="152" y="335" fill="#aaccff" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 152 335)">SW</text><rect x="165" y="320" width="25" height="0" fill="#e94560" rx="2"/><text x="177" y="335" fill="#ffaacc" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 177 335)">HSM</text><text x="165" y="365" fill="#8b8b9f" font-family="monospace" font-size="9" text-anchor="middle">ConcurrentWr..</text><text x="152" y="315" fill="#aaccff" font-family="monospace" font-size="8" text-anchor="middle">16</text><text x="177" y="315" fill="#ffaacc" font-family="monospace" font-size="8" text-anchor="middle">15</text><rect x="220" y="320" width="25" height="0" fill="#0f3460" rx="2"/><text x="232" y="335" fill="#aaccff" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 232 335)">SW</text><rect x="245" y="320" width="25" height="0" fill="#e94560" rx="2"/><text x="257" y="335" fill="#ffaacc" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 257 335)">HSM</text><text x="245" y="365" fill="#8b8b9f" font-family="monospace" font-size="9" text-anchor="middle">CreateKey</text><text x="232" y="315" fill="#aaccff" font-family="monospace" font-size="8" text-anchor="middle">24</text><text x="257" y="315" fill="#ffaacc" font-family="monospace" font-size="8" text-anchor="middle">23</text><rect x="300" y="320" width="25" height="0" fill="#0f3460" rx="2"/><text x="312" y="335" fill="#aaccff" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 312 335)">SW</text><rect x="325" y="320" width="25" height="0" fill="#e94560" rx="2"/><text x="337" y="335" fill="#ffaacc" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 337 335)">HSM</text><text x="325" y="365" fill="#8b8b9f" font-family="monospace" font-size="9" text-anchor="middle">GDK</text><text x="312" y="315" fill="#aaccff" font-family="monospace" font-size="8" text-anchor="middle">24</text><text x="337" y="315" fill="#ffaacc" font-family="monospace" font-size="8" text-anchor="middle">24</text><rect x="380" y="40" width="25" height="280" fill="#0f3460" rx="2"/><text x="392" y="335" fill="#aaccff" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 392 335)">SW</text><rect x="405" y="41" width="25" height="279" fill="#e94560" rx="2"/><text x="417" y="335" fill="#ffaacc" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 417 335)">HSM</text><text x="405" y="365" fill="#8b8b9f" font-family="monospace" font-size="9" text-anchor="middle">RotateKey</text><text x="392" y="35" fill="#aaccff" font-family="monospace" font-size="8" text-anchor="middle">19803ns</text><text x="417" y="36" fill="#ffaacc" font-family="monospace" font-size="8" text-anchor="middle">19802ns</text><rect x="460" y="320" width="25" height="0" fill="#0f3460" rx="2"/><text x="472" y="335" fill="#aaccff" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 472 335)">SW</text><rect x="485" y="320" width="25" height="0" fill="#e94560" rx="2"/><text x="497" y="335" fill="#ffaacc" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 497 335)">HSM</text><text x="485" y="365" fill="#8b8b9f" font-family="monospace" font-size="9" text-anchor="middle">UnwrapOnly</text><text x="472" y="315" fill="#aaccff" font-family="monospace" font-size="8" text-anchor="middle">8</text><text x="497" y="315" fill="#ffaacc" font-family="monospace" font-size="8" text-anchor="middle">8</text><rect x="540" y="320" width="25" height="0" fill="#0f3460" rx="2"/><text x="552" y="335" fill="#aaccff" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 552 335)">SW</text><rect x="565" y="320" width="25" height="0" fill="#e94560" rx="2"/><text x="577" y="335" fill="#ffaacc" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 577 335)">HSM</text><text x="565" y="365" fill="#8b8b9f" font-family="monospace" font-size="9" text-anchor="middle">WrapOnly</text><text x="552" y="315" fill="#aaccff" font-family="monospace" font-size="8" text-anchor="middle">8</text><text x="577" y="315" fill="#ffaacc" font-family="monospace" font-size="8" text-anchor="middle">7</text><rect x="620" y="320" width="25" height="0" fill="#0f3460" rx="2"/><text x="632" y="335" fill="#aaccff" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 632 335)">SW</text><rect x="645" y="320" width="25" height="0" fill="#e94560" rx="2"/><text x="657" y="335" fill="#ffaacc" font-family="monospace" font-size="9" text-anchor="middle" transform="rotate(-45 657 335)">HSM</text><text x="645" y="365" fill="#8b8b9f" font-family="monospace" font-size="9" text-anchor="middle">WrapUnwrap</text><text x="632" y="315" fill="#aaccff" font-family="monospace" font-size="8" text-anchor="middle">16</text><text x="657" y="315" fill="#ffaacc" font-family="monospace" font-size="8" text-anchor="middle">15</text><rect x="720" y="40" width="12" height="12" fill="#0f3460"/><text x="737" y="50" fill="#aaccff" font-family="monospace" font-size="11">Software KEK</text><rect x="720" y="60" width="12" height="12" fill="#e94560"/><text x="737" y="70" fill="#ffaacc" font-family="monospace" font-size="11">HSM KEK (Mock)</text></svg>
+
+<h2>4. Detailed Results</h2>
+<table>
+<tr><th>Operation</th><th>Software (ns/op)</th><th>HSM (ns/op)</th><th>Diff %</th><th>SW (B/op)</th><th>HSM (B/op)</th><th>SW allocs</th><th>HSM allocs</th></tr>
+
+<tr>
+<td>ConcurrentWrapUnwrap</td>
+<td class="sw">1165 ns</td>
+<td class="hsm">3022 ns</td>
+<td class="diff">159.4%</td>
+<td class="sw">2016</td>
+<td class="hsm">1968</td>
+<td class="sw">16</td>
+<td class="hsm">15</td>
+</tr>
+
+<tr>
+<td>CreateKey</td>
+<td class="sw">5200 ns</td>
+<td class="hsm">5191 ns</td>
+<td class="diff">0.2%</td>
+<td class="sw">2843</td>
+<td class="hsm">2795</td>
+<td class="sw">24</td>
+<td class="hsm">23</td>
+</tr>
+
+<tr>
+<td>GDK</td>
+<td class="sw">4086 ns</td>
+<td class="hsm">4107 ns</td>
+<td class="diff">0.5%</td>
+<td class="sw">2472</td>
+<td class="hsm">2472</td>
+<td class="sw">24</td>
+<td class="hsm">24</td>
+</tr>
+
+<tr>
+<td>RotateKey</td>
+<td class="sw">1622 µs</td>
+<td class="hsm">1700 µs</td>
+<td class="diff">4.9%</td>
+<td class="sw">2003821</td>
+<td class="hsm">1844626</td>
+<td class="sw">19803</td>
+<td class="hsm">19802</td>
+</tr>
+
+<tr>
+<td>UnwrapOnly</td>
+<td class="sw">679 ns</td>
+<td class="hsm">670 ns</td>
+<td class="diff">1.3%</td>
+<td class="sw">992</td>
+<td class="hsm">992</td>
+<td class="sw">8</td>
+<td class="hsm">8</td>
+</tr>
+
+<tr>
+<td>WrapOnly</td>
+<td class="sw">1749 ns</td>
+<td class="hsm">1754 ns</td>
+<td class="diff">0.3%</td>
+<td class="sw">1024</td>
+<td class="hsm">976</td>
+<td class="sw">8</td>
+<td class="hsm">7</td>
+</tr>
+
+<tr>
+<td>WrapUnwrap</td>
+<td class="sw">2487 ns</td>
+<td class="hsm">2417 ns</td>
+<td class="diff">2.8%</td>
+<td class="sw">2016</td>
+<td class="hsm">1968</td>
+<td class="sw">16</td>
+<td class="hsm">15</td>
+</tr>
+
+</table>
+
+<h2>5. Key Findings</h2>
+<ul>
+<li><b>MockHSMBackend ≈ Software KEK</b>: Both use AES-256-GCM, performance nearly identical</li>
+<li><b>DEK-layer operations KEK-independent</b>: EncryptVersioned/DecryptVersioned only use DEK</li>
+<li><b>Real HSM expected 10-100x slower</b>: PKCS#11 round-trip + chip processing</li>
+<li><b>RaiseKey slowest (1.5ms)</b>: Transaction + version scan + DEK gen + wrap, but hourly only</li>
+<li><b>Concurrent HSM 2.5x slower</b>: MockHSMBackend mutex contention (real HSM: session pool)</li>
+</ul>
+
+<p style="color:#8b8b9f;font-size:11px;margin-top:30px">Generated by scripts/gen_bench_chart.go · Yvonne KMS 0.3.0</p>
+</body>
+</html>
