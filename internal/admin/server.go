@@ -26,13 +26,13 @@ var staticFS embed.FS
 
 // Server 是管理页面的 HTTP 服务器。
 type Server struct {
-	seal       *seal.VaultState
-	adminToken string // 可选：设置后 /admin/api/* 需 Bearer Token 认证
+	seal       seal.Unsealer
+	adminToken string
 	mux        *http.ServeMux
 }
 
 // NewServer 创建管理页面 Server。Sealed 状态下也允许访问（否则无法 Unseal）。
-func NewServer(s *seal.VaultState) *Server {
+func NewServer(s seal.Unsealer) *Server {
 	srv := &Server{
 		seal: s,
 		mux:  http.NewServeMux(),

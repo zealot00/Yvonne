@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"yvonne/internal/memguard"
+	"yvonne/internal/seal"
 	"yvonne/internal/storage"
 )
 
@@ -40,7 +41,7 @@ func TestRotationDaemon_AutoRotate(t *testing.T) {
 	ctx := context.Background()
 
 	// 创建密钥，设置 1 天轮转周期。
-	_, _, err := mgr.CreateKey(ctx, "auto-rotate-test", mk, 1)
+	_, _, err := mgr.CreateKey(ctx, "auto-rotate-test", seal.NewSoftwareKEK(mk), 1)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
@@ -112,7 +113,7 @@ func TestRotationDaemon_NoExpiredKeys(t *testing.T) {
 	ctx := context.Background()
 
 	// 创建密钥，30 天轮转（未过期）。
-	mgr.CreateKey(ctx, "future-rotate", mk, 30)
+	mgr.CreateKey(ctx, "future-rotate", seal.NewSoftwareKEK(mk), 30)
 
 	var auditCount int
 	locker := &mockAdvisoryLocker{}
@@ -137,7 +138,7 @@ func TestRotationDaemon_NoRotationPeriod(t *testing.T) {
 	ctx := context.Background()
 
 	// 创建密钥，不自动轮转。
-	mgr.CreateKey(ctx, "no-rotate", mk, 0)
+	mgr.CreateKey(ctx, "no-rotate", seal.NewSoftwareKEK(mk), 0)
 
 	var auditCount int
 	locker := &mockAdvisoryLocker{}
@@ -196,7 +197,7 @@ func TestRotationDaemon_MultipleExpired(t *testing.T) {
 
 	// 创建 3 个密钥，都设置已过期的 NextRotationAt。
 	for _, keyID := range []string{"key-a", "key-b", "key-c"} {
-		mgr.CreateKey(ctx, keyID, mk, 1)
+		mgr.CreateKey(ctx, keyID, seal.NewSoftwareKEK(mk), 1)
 		meta, _ := mgr.GetKey(ctx, keyID, 1)
 		meta.NextRotationAt = time.Now().UTC().Add(-1 * time.Hour)
 		saveMetaDirect(t, mgr, *meta)
@@ -238,7 +239,7 @@ func TestRotationDaemon_LockNotAcquired(t *testing.T) {
 	ctx := context.Background()
 
 	// 创建过期密钥。
-	mgr.CreateKey(ctx, "locked-test", mk, 1)
+	mgr.CreateKey(ctx, "locked-test", seal.NewSoftwareKEK(mk), 1)
 	meta, _ := mgr.GetKey(ctx, "locked-test", 1)
 	meta.NextRotationAt = time.Now().UTC().Add(-1 * time.Hour)
 	saveMetaDirect(t, mgr, *meta)
@@ -275,7 +276,7 @@ func TestRotationDaemon_NewNextRotationAt(t *testing.T) {
 	ctx := context.Background()
 
 	// 创建 7 天轮转密钥，篡改为已过期。
-	mgr.CreateKey(ctx, "next-rotation-test", mk, 7)
+	mgr.CreateKey(ctx, "next-rotation-test", seal.NewSoftwareKEK(mk), 7)
 	meta, _ := mgr.GetKey(ctx, "next-rotation-test", 1)
 	meta.NextRotationAt = time.Now().UTC().Add(-1 * time.Hour)
 	saveMetaDirect(t, mgr, *meta)
@@ -307,8 +308,8 @@ func TestRotationDaemon_DeactivatedSkipped(t *testing.T) {
 	ctx := context.Background()
 
 	// 创建并手动轮转（V1 变 Deactivated）。
-	mgr.CreateKey(ctx, "deact-daemon-test", mk, 1)
-	mgr.RotateKey(ctx, "deact-daemon-test", mk)
+	mgr.CreateKey(ctx, "deact-daemon-test", seal.NewSoftwareKEK(mk), 1)
+	mgr.RotateKey(ctx, "deact-daemon-test", seal.NewSoftwareKEK(mk))
 
 	// 篡改 V1 的 NextRotationAt 为已过期。
 	v1, _ := mgr.GetKey(ctx, "deact-daemon-test", 1)
@@ -337,7 +338,7 @@ func TestRotationDaemon_SoftDeletedSkipped(t *testing.T) {
 	defer mk.Wipe()
 	ctx := context.Background()
 
-	mgr.CreateKey(ctx, "softdel-daemon-test", mk, 1)
+	mgr.CreateKey(ctx, "softdel-daemon-test", seal.NewSoftwareKEK(mk), 1)
 	mgr.SoftDeleteKey(ctx, "softdel-daemon-test", 1)
 
 	// 篡改 NextRotationAt 为已过期。
@@ -380,7 +381,7 @@ func TestRotationDaemon_AuditFailureDoesNotBlock(t *testing.T) {
 	defer mk.Wipe()
 	ctx := context.Background()
 
-	mgr.CreateKey(ctx, "audit-fail-test", mk, 1)
+	mgr.CreateKey(ctx, "audit-fail-test", seal.NewSoftwareKEK(mk), 1)
 	meta, _ := mgr.GetKey(ctx, "audit-fail-test", 1)
 	meta.NextRotationAt = time.Now().UTC().Add(-1 * time.Hour)
 	saveMetaDirect(t, mgr, *meta)
@@ -408,7 +409,7 @@ func TestRotationDaemon_SecondScanNoOp(t *testing.T) {
 	defer mk.Wipe()
 	ctx := context.Background()
 
-	mgr.CreateKey(ctx, "double-scan-test", mk, 7)
+	mgr.CreateKey(ctx, "double-scan-test", seal.NewSoftwareKEK(mk), 7)
 	meta, _ := mgr.GetKey(ctx, "double-scan-test", 1)
 	meta.NextRotationAt = time.Now().UTC().Add(-1 * time.Hour)
 	saveMetaDirect(t, mgr, *meta)
@@ -443,20 +444,20 @@ func TestRotationDaemon_MixedStates(t *testing.T) {
 	ctx := context.Background()
 
 	// key-expired: Active + 已过期 → 应轮转。
-	mgr.CreateKey(ctx, "key-expired", mk, 1)
+	mgr.CreateKey(ctx, "key-expired", seal.NewSoftwareKEK(mk), 1)
 	meta, _ := mgr.GetKey(ctx, "key-expired", 1)
 	meta.NextRotationAt = time.Now().UTC().Add(-1 * time.Hour)
 	saveMetaDirect(t, mgr, *meta)
 
 	// key-future: Active + 未过期 → 跳过。
-	mgr.CreateKey(ctx, "key-future", mk, 30)
+	mgr.CreateKey(ctx, "key-future", seal.NewSoftwareKEK(mk), 30)
 
 	// key-no-period: Active + 无轮转周期 → 跳过。
-	mgr.CreateKey(ctx, "key-no-period", mk, 0)
+	mgr.CreateKey(ctx, "key-no-period", seal.NewSoftwareKEK(mk), 0)
 
 	// key-deactivated: Deactivated + 已过期 → 跳过。
-	mgr.CreateKey(ctx, "key-deactivated", mk, 1)
-	mgr.RotateKey(ctx, "key-deactivated", mk) // V1 → Deactivated
+	mgr.CreateKey(ctx, "key-deactivated", seal.NewSoftwareKEK(mk), 1)
+	mgr.RotateKey(ctx, "key-deactivated", seal.NewSoftwareKEK(mk)) // V1 → Deactivated
 	v1, _ := mgr.GetKey(ctx, "key-deactivated", 1)
 	v1.NextRotationAt = time.Now().UTC().Add(-1 * time.Hour)
 	saveMetaDirect(t, mgr, *v1)
@@ -491,7 +492,7 @@ func TestRotationDaemon_AuditEntryFields(t *testing.T) {
 	defer mk.Wipe()
 	ctx := context.Background()
 
-	mgr.CreateKey(ctx, "audit-fields-test", mk, 1)
+	mgr.CreateKey(ctx, "audit-fields-test", seal.NewSoftwareKEK(mk), 1)
 	meta, _ := mgr.GetKey(ctx, "audit-fields-test", 1)
 	meta.NextRotationAt = time.Now().UTC().Add(-1 * time.Hour)
 	saveMetaDirect(t, mgr, *meta)
@@ -530,7 +531,7 @@ func TestRotationDaemon_RotateFailureAudited(t *testing.T) {
 	ctx := context.Background()
 
 	// 创建一个过期密钥。
-	mgr.CreateKey(ctx, "rotate-fail-test", mk, 1)
+	mgr.CreateKey(ctx, "rotate-fail-test", seal.NewSoftwareKEK(mk), 1)
 	meta, _ := mgr.GetKey(ctx, "rotate-fail-test", 1)
 	meta.NextRotationAt = time.Now().UTC().Add(-1 * time.Hour)
 	saveMetaDirect(t, mgr, *meta)

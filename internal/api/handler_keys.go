@@ -17,6 +17,7 @@ import (
 
 	"yvonne/internal/lifecycle"
 	"yvonne/internal/memguard"
+	"yvonne/internal/seal"
 )
 
 // createKeyRequest 是 POST /api/v1/keys 的请求体。
@@ -71,8 +72,8 @@ func (r *V1Router) handleCreateKey(w http.ResponseWriter, req *http.Request) {
 		Version int
 	}
 
-	err = r.seal.MasterKeyRef(func(mk *memguard.SecureBuffer) error {
-		m, pdek, e := r.manager.CreateKey(context.Background(), body.KeyID, mk, 0)
+	err = r.seal.KEKRef(func(kek seal.KEK) error {
+		m, pdek, e := r.manager.CreateKey(context.Background(), body.KeyID, kek, 0)
 		if e != nil {
 			return e
 		}
@@ -171,8 +172,8 @@ func (r *V1Router) handleRotateKey(w http.ResponseWriter, req *http.Request, key
 	var plaintextDEK *memguard.SecureBuffer
 	var newVersion int
 
-	err := r.seal.MasterKeyRef(func(mk *memguard.SecureBuffer) error {
-		m, pdek, e := r.manager.RotateKey(context.Background(), keyID, mk)
+	err := r.seal.KEKRef(func(kek seal.KEK) error {
+		m, pdek, e := r.manager.RotateKey(context.Background(), keyID, kek)
 		if e != nil {
 			return e
 		}
@@ -379,9 +380,9 @@ func (r *V1Router) handleGenerateDataKey(w http.ResponseWriter, req *http.Reques
 	var plainDEK *memguard.SecureBuffer
 	var ciphertext []byte
 
-	err := r.seal.MasterKeyRef(func(mk *memguard.SecureBuffer) error {
+	err := r.seal.KEKRef(func(kek seal.KEK) error {
 		var e error
-		plainDEK, ciphertext, e = r.manager.GenerateDataKey(req.Context(), keyID, mk)
+		plainDEK, ciphertext, e = r.manager.GenerateDataKey(req.Context(), keyID, kek)
 		return e
 	})
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 
 	"yvonne/internal/crypto"
 	"yvonne/internal/memguard"
+	"yvonne/internal/seal"
 	"yvonne/internal/storage"
 )
 
@@ -109,7 +110,7 @@ func TestImportKey_FullFlow(t *testing.T) {
 	wrapped := wrapWithPub(t, pub.PublicKey, externalDEK)
 
 	// 3. 导入。
-	meta, err := mgr.ImportKey(ctx, "imported-key", pub.KeyID, wrapped, tm, mk)
+	meta, err := mgr.ImportKey(ctx, "imported-key", pub.KeyID, wrapped, tm, seal.NewSoftwareKEK(mk))
 	if err != nil {
 		t.Fatalf("ImportKey: %v", err)
 	}

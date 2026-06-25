@@ -20,7 +20,6 @@ import (
 	"log"
 	"time"
 
-	"yvonne/internal/memguard"
 	"yvonne/internal/seal"
 	"yvonne/internal/storage"
 )
@@ -161,8 +160,8 @@ func (d *RotationDaemon) scanExpiredKeys(ctx context.Context) ([]KeyMetadata, er
 func (d *RotationDaemon) rotateAndAudit(ctx context.Context, meta KeyMetadata) {
 	var rotateErr error
 	var newMeta *KeyMetadata
-	_ = d.seal.MasterKeyRef(func(mk *memguard.SecureBuffer) error {
-		newMeta, _, rotateErr = d.manager.RotateKey(ctx, meta.KeyID, mk)
+	_ = d.seal.KEKRef(func(kek seal.KEK) error {
+		newMeta, _, rotateErr = d.manager.RotateKey(ctx, meta.KeyID, kek)
 		return rotateErr
 	})
 

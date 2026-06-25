@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"runtime"
 
-	"yvonne/internal/memguard"
+	"yvonne/internal/seal"
 )
 
 // handleTransitPub 生成临时传输公钥。
@@ -101,14 +101,14 @@ func (r *V1Router) handleImportKey(w http.ResponseWriter, req *http.Request) {
 
 	// 调用 lifecycle.ImportKey 完成解包 + 加密 + 存储。
 	var version int
-	err = r.seal.MasterKeyRef(func(mk *memguard.SecureBuffer) error {
+	err = r.seal.KEKRef(func(kek seal.KEK) error {
 		meta, e := r.manager.ImportKey(
 			context.Background(),
 			body.KeyID,
 			body.TransitKeyID,
 			wrapped,
 			r.transitMgr,
-			mk,
+			kek,
 		)
 		if e != nil {
 			return e

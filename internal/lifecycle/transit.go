@@ -29,6 +29,7 @@ import (
 
 	"yvonne/internal/crypto"
 	"yvonne/internal/memguard"
+	"yvonne/internal/seal"
 )
 
 // TransitKeyTTL 传输密钥存活时间（10 分钟）。
@@ -196,12 +197,12 @@ func (t *TransitKeyManager) CleanupExpired() {
 //  4. 明文 DEK Wipe
 //
 // targetKeyID 是导入后的 Yvonne 密钥标识。
-func (m *Manager) ImportKey(ctx context.Context, targetKeyID string, transitKeyID string, wrappedMaterial []byte, transitMgr *TransitKeyManager, masterKey *memguard.SecureBuffer) (*KeyMetadata, error) {
+func (m *Manager) ImportKey(ctx context.Context, targetKeyID string, transitKeyID string, wrappedMaterial []byte, transitMgr *TransitKeyManager, kek seal.KEK) (*KeyMetadata, error) {
 	if targetKeyID == "" {
 		return nil, errors.New("lifecycle: empty target key id")
 	}
-	if masterKey == nil {
-		return nil, errors.New("lifecycle: master key is nil")
+	if kek == nil {
+		return nil, errors.New("lifecycle: kek is nil")
 	}
 
 	// 1. 解密外部 DEK。
@@ -217,13 +218,8 @@ func (m *Manager) ImportKey(ctx context.Context, targetKeyID string, transitKeyI
 	}
 	defer dekSB.Wipe()
 
-	// 3. 用 CMK 加密 DEK → Yvonne 标准密文。
-	var encryptedDEK []byte
-	err = dekSB.WithKey(func(dek []byte) error {
-		var e error
-		encryptedDEK, e = crypto.EncryptGCM(masterKey, dek)
-		return e
-	})
+	// 3. 用 KEK 加密 DEK → Yvonne 标准密文。
+	encryptedDEK, err := kek.WrapDEK(dekSB)
 	if err != nil {
 		return nil, fmt.Errorf("lifecycle: import encrypt DEK: %w", err)
 	}
@@ -235,6 +231,7 @@ func (m *Manager) ImportKey(ctx context.Context, targetKeyID string, transitKeyI
 		State:             StateActive,
 		KeyType:           crypto.KeyTypeAES,
 		EncryptedMaterial: encryptedDEK,
+		KEKType:           string(kek.Type()),
 		CreatedAt:         time.Now().UTC(),
 	}
 

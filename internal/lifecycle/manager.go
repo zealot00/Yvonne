@@ -20,6 +20,7 @@ import (
 
 	"yvonne/internal/crypto"
 	"yvonne/internal/memguard"
+	"yvonne/internal/seal"
 	"yvonne/internal/storage"
 )
 
@@ -43,11 +44,12 @@ type KeyMetadata struct {
 	State              KeyState  `json:"state"`
 	KeyType            string    `json:"key_type"`
 	EncryptedMaterial  []byte    `json:"encrypted_material"`
+	KEKType            string    `json:"kek_type,omitempty"` // "software"|"hsm"，空值=software（旧数据兼容）
 	PublicKey          []byte    `json:"public_key,omitempty"`
 	CreatedAt          time.Time `json:"created_at"`
 	DeletedAt          time.Time `json:"deleted_at,omitempty"`
-	RotationPeriodDays int       `json:"rotation_period_days,omitempty"` // 0=不自动轮转
-	NextRotationAt     time.Time `json:"next_rotation_at,omitempty"`     // 下次自动轮转时间
+	RotationPeriodDays int       `json:"rotation_period_days,omitempty"`
+	NextRotationAt     time.Time `json:"next_rotation_at,omitempty"`
 }
 
 func metadataKey(keyID string, version int) string {
@@ -110,12 +112,12 @@ func (m *Manager) ClearCache() {
 //  3. 生成全新 32 字节随机临时 DEK
 //  4. 用存储的 DEK 加密临时 DEK → 版本化密文
 //  5. 返回临时 DEK（明文 SecureBuffer）+ 版本化密文
-func (m *Manager) GenerateDataKey(ctx context.Context, keyID string, masterKey *memguard.SecureBuffer) (*memguard.SecureBuffer, []byte, error) {
+func (m *Manager) GenerateDataKey(ctx context.Context, keyID string, kek seal.KEK) (*memguard.SecureBuffer, []byte, error) {
 	if keyID == "" {
 		return nil, nil, errors.New("lifecycle: empty key id")
 	}
-	if masterKey == nil {
-		return nil, nil, errors.New("lifecycle: master key is nil")
+	if kek == nil {
+		return nil, nil, errors.New("lifecycle: kek is nil")
 	}
 
 	// 1. 获取 Active 版本（状态机强制：只有 Active 能用于加密）。
@@ -130,11 +132,11 @@ func (m *Manager) GenerateDataKey(ctx context.Context, keyID string, masterKey *
 		return nil, nil, fmt.Errorf("lifecycle: gdk generate random DEK: %w", err)
 	}
 
-	// 3. 用 MasterKey 解密存储的 DEK，然后用存储的 DEK 加密临时 DEK。
-	storedDEK, err := crypto.DecryptGCM(masterKey, meta.EncryptedMaterial)
+	// 3. 用 KEK 解密存储的 DEK，然后用存储的 DEK 加密临时 DEK。
+	storedDEK, err := kek.UnwrapDEK(meta.EncryptedMaterial)
 	if err != nil {
 		plainDEK.Wipe()
-		return nil, nil, fmt.Errorf("lifecycle: gdk decrypt stored DEK: %w", err)
+		return nil, nil, fmt.Errorf("lifecycle: gdk unwrap stored DEK: %w", err)
 	}
 	defer storedDEK.Wipe()
 
@@ -155,17 +157,25 @@ func (m *Manager) GenerateDataKey(ctx context.Context, keyID string, masterKey *
 
 // CreateKey 生成新 DEK 并存储元数据。
 // rotationPeriodDays=0 表示不自动轮转。
-func (m *Manager) CreateKey(ctx context.Context, keyID string, masterKey *memguard.SecureBuffer, rotationPeriodDays int) (*KeyMetadata, *memguard.SecureBuffer, error) {
+func (m *Manager) CreateKey(ctx context.Context, keyID string, kek seal.KEK, rotationPeriodDays int) (*KeyMetadata, *memguard.SecureBuffer, error) {
 	if keyID == "" {
 		return nil, nil, errors.New("lifecycle: empty key id")
 	}
-	if masterKey == nil {
-		return nil, nil, errors.New("lifecycle: master key is nil")
+	if kek == nil {
+		return nil, nil, errors.New("lifecycle: kek is nil")
 	}
 
-	plaintextDEK, encryptedDEK, err := crypto.GenerateDataKey(masterKey)
+	// 生成 32 字节随机 DEK。
+	plaintextDEK, err := memguard.NewSecureBufferFromRandom(32)
 	if err != nil {
 		return nil, nil, fmt.Errorf("lifecycle: generate data key: %w", err)
+	}
+
+	// 用 KEK 加密 DEK。
+	encryptedDEK, err := kek.WrapDEK(plaintextDEK)
+	if err != nil {
+		plaintextDEK.Wipe()
+		return nil, nil, fmt.Errorf("lifecycle: wrap DEK: %w", err)
 	}
 
 	now := time.Now().UTC()
@@ -174,6 +184,7 @@ func (m *Manager) CreateKey(ctx context.Context, keyID string, masterKey *memgua
 		Version:            1,
 		State:              StateActive,
 		EncryptedMaterial:  encryptedDEK,
+		KEKType:            string(kek.Type()),
 		CreatedAt:          now,
 		RotationPeriodDays: rotationPeriodDays,
 	}
@@ -200,12 +211,12 @@ func (m *Manager) CreateKey(ctx context.Context, keyID string, masterKey *memgua
 // 返回：
 //   - meta: 密钥元数据（含公钥 PEM，不含私钥明文）
 //   - 无明文私钥返回（私钥仅在 KMS 内部解密后用于签名，不暴露给调用方）
-func (m *Manager) CreateAsymmetricKey(ctx context.Context, keyID, algoType string, masterKey *memguard.SecureBuffer) (*KeyMetadata, error) {
+func (m *Manager) CreateAsymmetricKey(ctx context.Context, keyID, algoType string, kek seal.KEK) (*KeyMetadata, error) {
 	if keyID == "" {
 		return nil, errors.New("lifecycle: empty key id")
 	}
-	if masterKey == nil {
-		return nil, errors.New("lifecycle: master key is nil")
+	if kek == nil {
+		return nil, errors.New("lifecycle: kek is nil")
 	}
 	if algoType != crypto.KeyTypeRSA && algoType != crypto.KeyTypeECDSA {
 		return nil, fmt.Errorf("lifecycle: unsupported key type %q, want %q or %q", algoType, crypto.KeyTypeRSA, crypto.KeyTypeECDSA)
@@ -231,13 +242,8 @@ func (m *Manager) CreateAsymmetricKey(ctx context.Context, keyID, algoType strin
 	}
 	defer derSB.Wipe()
 
-	// 3. 用 MasterKey 信封加密私钥 DER。
-	var encryptedMaterial []byte
-	err = derSB.WithKey(func(der []byte) error {
-		var e error
-		encryptedMaterial, e = crypto.EncryptGCM(masterKey, der)
-		return e
-	})
+	// 3. 用 KEK 信封加密私钥 DER。
+	encryptedMaterial, err := kek.WrapDEK(derSB)
 	if err != nil {
 		return nil, fmt.Errorf("lifecycle: encrypt private key: %w", err)
 	}
@@ -261,6 +267,7 @@ func (m *Manager) CreateAsymmetricKey(ctx context.Context, keyID, algoType strin
 		State:             StateActive,
 		KeyType:           algoType,
 		EncryptedMaterial: encryptedMaterial,
+		KEKType:           string(kek.Type()),
 		PublicKey:         pubPEM,
 		CreatedAt:         time.Now().UTC(),
 	}
@@ -347,12 +354,12 @@ func (m *Manager) findLatestVersionInTx(ctx context.Context, txStore storage.KVS
 }
 
 // RotateKey 轮转密钥。
-func (m *Manager) RotateKey(ctx context.Context, keyID string, masterKey *memguard.SecureBuffer) (*KeyMetadata, *memguard.SecureBuffer, error) {
+func (m *Manager) RotateKey(ctx context.Context, keyID string, kek seal.KEK) (*KeyMetadata, *memguard.SecureBuffer, error) {
 	if keyID == "" {
 		return nil, nil, errors.New("lifecycle: empty key id")
 	}
-	if masterKey == nil {
-		return nil, nil, errors.New("lifecycle: master key is nil")
+	if kek == nil {
+		return nil, nil, errors.New("lifecycle: kek is nil")
 	}
 
 	var newMeta *KeyMetadata
@@ -393,9 +400,14 @@ func (m *Manager) RotateKey(ctx context.Context, keyID string, masterKey *memgua
 			return fmt.Errorf("lifecycle: update old version: %w", err)
 		}
 
-		plainDEK, encryptedDEK, err := crypto.GenerateDataKey(masterKey)
+		plainDEK, err := memguard.NewSecureBufferFromRandom(32)
 		if err != nil {
 			return fmt.Errorf("lifecycle: generate new data key: %w", err)
+		}
+		encryptedDEK, err := kek.WrapDEK(plainDEK)
+		if err != nil {
+			plainDEK.Wipe()
+			return fmt.Errorf("lifecycle: wrap new DEK: %w", err)
 		}
 
 		now := time.Now().UTC()
@@ -404,6 +416,7 @@ func (m *Manager) RotateKey(ctx context.Context, keyID string, masterKey *memgua
 			Version:            latestV + 1,
 			State:              StateActive,
 			EncryptedMaterial:  encryptedDEK,
+			KEKType:            string(kek.Type()),
 			CreatedAt:          now,
 			RotationPeriodDays: oldMeta.RotationPeriodDays,
 		}

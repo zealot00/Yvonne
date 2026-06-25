@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"yvonne/internal/memguard"
+	"yvonne/internal/seal"
 	"yvonne/internal/storage"
 )
 
@@ -77,7 +78,7 @@ func TestCreateKey_SaveMetadataFail(t *testing.T) {
 	mk, _ := memguard.NewSecureBufferFromRandom(32)
 	defer mk.Wipe()
 
-	_, _, err := mgr.CreateKey(context.Background(), "fail-key", mk, 0)
+	_, _, err := mgr.CreateKey(context.Background(), "fail-key", seal.NewSoftwareKEK(mk), 0)
 	if err == nil {
 		t.Fatal("CreateKey with failing store should fail")
 	}
@@ -92,14 +93,14 @@ func TestRotateKey_SaveMetadataFail(t *testing.T) {
 	ctx := context.Background()
 
 	// 先正常创建。
-	_, _, err := mgr.CreateKey(ctx, "rotate-fail-key", mk, 0)
+	_, _, err := mgr.CreateKey(ctx, "rotate-fail-key", seal.NewSoftwareKEK(mk), 0)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
 
 	// 设 Put 错误，Rotate 应失败。
 	store.putErr = errors.New("simulated put error on rotate")
-	_, _, err = mgr.RotateKey(ctx, "rotate-fail-key", mk)
+	_, _, err = mgr.RotateKey(ctx, "rotate-fail-key", seal.NewSoftwareKEK(mk))
 	if err == nil {
 		t.Fatal("RotateKey with failing store should fail")
 	}
@@ -113,7 +114,7 @@ func TestShredKey_GetFail(t *testing.T) {
 	defer mk.Wipe()
 	ctx := context.Background()
 
-	_, _, err := mgr.CreateKey(ctx, "shred-get-fail", mk, 0)
+	_, _, err := mgr.CreateKey(ctx, "shred-get-fail", seal.NewSoftwareKEK(mk), 0)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
@@ -133,7 +134,7 @@ func TestShredKey_DeleteFail(t *testing.T) {
 	defer mk.Wipe()
 	ctx := context.Background()
 
-	_, _, err := mgr.CreateKey(ctx, "shred-del-fail", mk, 0)
+	_, _, err := mgr.CreateKey(ctx, "shred-del-fail", seal.NewSoftwareKEK(mk), 0)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}

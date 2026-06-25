@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"yvonne/internal/memguard"
+	"yvonne/internal/seal"
 	"yvonne/internal/storage"
 )
 
@@ -34,7 +35,7 @@ func TestCreateKey_Success(t *testing.T) {
 	mk := newTestMasterKey(t)
 	ctx := context.Background()
 
-	meta, plainDEK, err := mgr.CreateKey(ctx, "key-001", mk, 0)
+	meta, plainDEK, err := mgr.CreateKey(ctx, "key-001", seal.NewSoftwareKEK(mk), 0)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
@@ -69,14 +70,14 @@ func TestRotateKey_Success(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. CreateKey V1。
-	_, plainDEK1, err := mgr.CreateKey(ctx, "key-002", mk, 0)
+	_, plainDEK1, err := mgr.CreateKey(ctx, "key-002", seal.NewSoftwareKEK(mk), 0)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
 	plainDEK1.Wipe()
 
 	// 2. RotateKey。
-	meta2, plainDEK2, err := mgr.RotateKey(ctx, "key-002", mk)
+	meta2, plainDEK2, err := mgr.RotateKey(ctx, "key-002", seal.NewSoftwareKEK(mk))
 	if err != nil {
 		t.Fatalf("RotateKey: %v", err)
 	}
@@ -106,7 +107,7 @@ func TestShredKey_Success(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. CreateKey。
-	_, plainDEK, err := mgr.CreateKey(ctx, "key-003", mk, 0)
+	_, plainDEK, err := mgr.CreateKey(ctx, "key-003", seal.NewSoftwareKEK(mk), 0)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
@@ -131,7 +132,7 @@ func TestShredKey_ClearsEncryptedMaterial(t *testing.T) {
 	mk := newTestMasterKey(t)
 	ctx := context.Background()
 
-	_, plainDEK, err := mgr.CreateKey(ctx, "key-004", mk, 0)
+	_, plainDEK, err := mgr.CreateKey(ctx, "key-004", seal.NewSoftwareKEK(mk), 0)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
@@ -168,7 +169,7 @@ func TestFullLifecycle(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. Create V1 Active。
-	meta1, plainDEK1, err := mgr.CreateKey(ctx, "key-lifecycle", mk, 0)
+	meta1, plainDEK1, err := mgr.CreateKey(ctx, "key-lifecycle", seal.NewSoftwareKEK(mk), 0)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
@@ -178,7 +179,7 @@ func TestFullLifecycle(t *testing.T) {
 	}
 
 	// 2. Rotate → V1 Deactivated, V2 Active。
-	meta2, plainDEK2, err := mgr.RotateKey(ctx, "key-lifecycle", mk)
+	meta2, plainDEK2, err := mgr.RotateKey(ctx, "key-lifecycle", seal.NewSoftwareKEK(mk))
 	if err != nil {
 		t.Fatalf("RotateKey: %v", err)
 	}
@@ -226,7 +227,7 @@ func TestRotateKey_ConcurrentNoDeadlock(t *testing.T) {
 	ctx := context.Background()
 
 	// 初始 V1。
-	_, plainDEK, err := mgr.CreateKey(ctx, "key-concurrent", mk, 0)
+	_, plainDEK, err := mgr.CreateKey(ctx, "key-concurrent", seal.NewSoftwareKEK(mk), 0)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
@@ -240,7 +241,7 @@ func TestRotateKey_ConcurrentNoDeadlock(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, p, err := mgr.RotateKey(ctx, "key-concurrent", mk)
+			_, p, err := mgr.RotateKey(ctx, "key-concurrent", seal.NewSoftwareKEK(mk))
 			if p != nil {
 				p.Wipe()
 			}
@@ -298,7 +299,7 @@ func allZero(b []byte) bool {
 func TestCreateKey_EmptyKeyID(t *testing.T) {
 	mgr, _ := newTestManager(t)
 	mk := newTestMasterKey(t)
-	_, _, err := mgr.CreateKey(context.Background(), "", mk, 0)
+	_, _, err := mgr.CreateKey(context.Background(), "", seal.NewSoftwareKEK(mk), 0)
 	if err == nil {
 		t.Fatal("CreateKey with empty keyID should fail")
 	}
@@ -317,7 +318,7 @@ func TestCreateKey_NilMasterKey(t *testing.T) {
 func TestRotateKey_EmptyKeyID(t *testing.T) {
 	mgr, _ := newTestManager(t)
 	mk := newTestMasterKey(t)
-	_, _, err := mgr.RotateKey(context.Background(), "", mk)
+	_, _, err := mgr.RotateKey(context.Background(), "", seal.NewSoftwareKEK(mk))
 	if err == nil {
 		t.Fatal("RotateKey with empty keyID should fail")
 	}
@@ -336,7 +337,7 @@ func TestRotateKey_NilMasterKey(t *testing.T) {
 func TestRotateKey_KeyNotFound(t *testing.T) {
 	mgr, _ := newTestManager(t)
 	mk := newTestMasterKey(t)
-	_, _, err := mgr.RotateKey(context.Background(), "nonexistent-key", mk)
+	_, _, err := mgr.RotateKey(context.Background(), "nonexistent-key", seal.NewSoftwareKEK(mk))
 	if err == nil {
 		t.Fatal("RotateKey on nonexistent key should fail")
 	}
@@ -367,18 +368,18 @@ func TestRotateKey_AlreadyDeactivated(t *testing.T) {
 	ctx := context.Background()
 
 	// 创建并轮转。
-	_, _, err := mgr.CreateKey(ctx, "deact-key", mk, 0)
+	_, _, err := mgr.CreateKey(ctx, "deact-key", seal.NewSoftwareKEK(mk), 0)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
-	_, _, err = mgr.RotateKey(ctx, "deact-key", mk)
+	_, _, err = mgr.RotateKey(ctx, "deact-key", seal.NewSoftwareKEK(mk))
 	if err != nil {
 		t.Fatalf("RotateKey: %v", err)
 	}
 
 	// 手动把 V1 改成 Deactivated（已经是了），再尝试 rotate 应该轮转 V2。
 	// 这里测试 V2 Active 的正常轮转。
-	_, _, err = mgr.RotateKey(ctx, "deact-key", mk)
+	_, _, err = mgr.RotateKey(ctx, "deact-key", seal.NewSoftwareKEK(mk))
 	if err != nil {
 		t.Fatalf("RotateKey V2: %v", err)
 	}
@@ -390,7 +391,7 @@ func TestShredKey_AlreadyShredded(t *testing.T) {
 	mk := newTestMasterKey(t)
 	ctx := context.Background()
 
-	_, _, err := mgr.CreateKey(ctx, "double-shred", mk, 0)
+	_, _, err := mgr.CreateKey(ctx, "double-shred", seal.NewSoftwareKEK(mk), 0)
 	if err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
@@ -415,7 +416,7 @@ func TestCreateAsymmetricKey_RSA(t *testing.T) {
 	mk := newTestMasterKey(t)
 	ctx := context.Background()
 
-	meta, err := mgr.CreateAsymmetricKey(ctx, "rsa-test-key", "rsa", mk)
+	meta, err := mgr.CreateAsymmetricKey(ctx, "rsa-test-key", "rsa", seal.NewSoftwareKEK(mk))
 	if err != nil {
 		t.Fatalf("CreateAsymmetricKey RSA: %v", err)
 	}
@@ -442,7 +443,7 @@ func TestCreateAsymmetricKey_ECDSA(t *testing.T) {
 	mk := newTestMasterKey(t)
 	ctx := context.Background()
 
-	meta, err := mgr.CreateAsymmetricKey(ctx, "ecdsa-test-key", "ecdsa", mk)
+	meta, err := mgr.CreateAsymmetricKey(ctx, "ecdsa-test-key", "ecdsa", seal.NewSoftwareKEK(mk))
 	if err != nil {
 		t.Fatalf("CreateAsymmetricKey ECDSA: %v", err)
 	}
@@ -458,7 +459,7 @@ func TestCreateAsymmetricKey_ECDSA(t *testing.T) {
 func TestCreateAsymmetricKey_UnsupportedType(t *testing.T) {
 	mgr, _ := newTestManager(t)
 	mk := newTestMasterKey(t)
-	_, err := mgr.CreateAsymmetricKey(context.Background(), "bad-key", "dsa", mk)
+	_, err := mgr.CreateAsymmetricKey(context.Background(), "bad-key", "dsa", seal.NewSoftwareKEK(mk))
 	if err == nil {
 		t.Fatal("unsupported key type should fail")
 	}
@@ -468,7 +469,7 @@ func TestCreateAsymmetricKey_UnsupportedType(t *testing.T) {
 func TestCreateAsymmetricKey_EmptyKeyID(t *testing.T) {
 	mgr, _ := newTestManager(t)
 	mk := newTestMasterKey(t)
-	_, err := mgr.CreateAsymmetricKey(context.Background(), "", "rsa", mk)
+	_, err := mgr.CreateAsymmetricKey(context.Background(), "", "rsa", seal.NewSoftwareKEK(mk))
 	if err == nil {
 		t.Fatal("empty keyID should fail")
 	}

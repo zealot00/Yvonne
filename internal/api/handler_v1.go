@@ -20,6 +20,7 @@ import (
 	"yvonne/internal/crypto"
 	"yvonne/internal/lifecycle"
 	"yvonne/internal/memguard"
+	"yvonne/internal/seal"
 )
 
 // encryptRequest 是 /api/v1/encrypt 的请求体。
@@ -100,11 +101,11 @@ func (r *V1Router) handleV1Encrypt(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 用 MasterKey 解密 DEK，然后用 DEK 加密业务明文（优化：单次分配）。
+	// 用 KEK 解密 DEK，然后用 DEK 加密业务明文（优化：单次分配）。
 	var ciphertext []byte
-	err = r.seal.MasterKeyRef(func(mk *memguard.SecureBuffer) error {
+	err = r.seal.KEKRef(func(kek seal.KEK) error {
 		// 解密 DEK。
-		plaintextDEK, e := crypto.DecryptGCM(mk, meta.EncryptedMaterial)
+		plaintextDEK, e := kek.UnwrapDEK(meta.EncryptedMaterial)
 		if e != nil {
 			return e
 		}
@@ -214,11 +215,11 @@ func (r *V1Router) handleV1Decrypt(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 3. 用 MasterKey 解密 DEK，然后用 DEK 解密业务密文（优化：零中间拷贝）。
+	// 3. 用 KEK 解密 DEK，然后用 DEK 解密业务密文（优化：零中间拷贝）。
 	var plaintextSB *memguard.SecureBuffer
-	err = r.seal.MasterKeyRef(func(mk *memguard.SecureBuffer) error {
+	err = r.seal.KEKRef(func(kek seal.KEK) error {
 		// 解密 DEK。
-		plaintextDEK, e := crypto.DecryptGCM(mk, meta.EncryptedMaterial)
+		plaintextDEK, e := kek.UnwrapDEK(meta.EncryptedMaterial)
 		if e != nil {
 			return e
 		}
