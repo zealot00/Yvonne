@@ -176,3 +176,40 @@ jobs:
       - name: Run API integration tests
         run: |
           go test ./internal/api/ -tags=integration -race -v -timeout 60s
+
+  # 6. 基准测试 + 自动生成可视化报告
+  benchmark:
+    name: Benchmark + Report
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run benchmarks
+        run: |
+          go test ./internal/lifecycle/ -bench "Benchmark" -benchmem -benchtime=1s -run=^$ -timeout 120s > bench_results.txt 2>&1
+          grep "Benchmark" bench_results.txt | grep -v "PASS\|ok\|FAIL" > bench_parsed.txt
+
+      - name: Generate benchmark report
+        run: |
+          go run scripts/gen_bench_chart.go -input bench_parsed.txt -output docs/benchmark-report.html
+
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report
+          path: docs/benchmark-report.html
+
+      - name: Upload raw results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-raw
+          path: bench_results.txt

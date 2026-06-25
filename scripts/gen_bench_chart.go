@@ -16,10 +16,10 @@ import (
 )
 
 type BenchResult struct {
-	Name     string
-	KEKType  string // "Software" | "HSM" | "N/A"
-	NsPerOp  float64
-	BytesPerOp float64
+	Name        string
+	KEKType     string // "Software" | "HSM" | "N/A"
+	NsPerOp     float64
+	BytesPerOp  float64
 	AllocsPerOp float64
 }
 
@@ -128,8 +128,12 @@ func genBarChart(title string, pairs []PairData, getValue func(PairData) (float6
 	maxVal := 0.0
 	for _, p := range pairs {
 		sw, hsm := getValue(p)
-		if sw > maxVal { maxVal = sw }
-		if hsm > maxVal { maxVal = hsm }
+		if sw > maxVal {
+			maxVal = sw
+		}
+		if hsm > maxVal {
+			maxVal = hsm
+		}
 	}
 
 	chartW := 900
