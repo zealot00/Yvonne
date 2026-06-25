@@ -55,10 +55,20 @@ func NewAppRoleAuthenticator() *AppRoleAuthenticator {
 
 // RegisterPolicy 注册一个角色及其 Token 与 Policy。
 // 用于初始化阶段加载配置。
+//
+// 如果 roleID 已存在，旧 token 会被清除（覆盖注册）。
 func (a *AppRoleAuthenticator) RegisterPolicy(roleID, token string, policy *Policy) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	policy.RoleID = roleID
+
+	// 清除该 roleID 的旧 token（如果有）。
+	for oldToken, oldRole := range a.tokens {
+		if oldRole == roleID {
+			delete(a.tokens, oldToken)
+		}
+	}
+
 	a.tokens[token] = roleID
 	a.policies[roleID] = policy
 }
