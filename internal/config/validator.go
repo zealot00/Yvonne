@@ -80,12 +80,28 @@ func Validate(cfg *Config) error {
 		errs = append(errs, "auth.approle.secret_id_length must be >= 32")
 	}
 	switch cfg.Auth.JWT.SigningMethod {
-	case "RS256", "ES256":
+	case "RS256", "RS384", "RS512",
+		"ES256", "ES384", "ES512",
+		"HS256", "HS384", "HS512",
+		"": // JWT 未启用时允许空
 	default:
-		errs = append(errs, "auth.jwt.signing_method must be RS256 or ES256")
+		errs = append(errs, "auth.jwt.signing_method must be RS256/384/512, ES256/384/512, or HS256/384/512")
 	}
-	if cfg.Auth.JWT.TokenTTL <= 0 {
-		errs = append(errs, "auth.jwt.token_ttl must be > 0")
+	// JWT 验签密钥校验：非对称必须有公钥文件，HMAC 必须有 secret。
+	if cfg.Auth.JWT.SigningMethod != "" {
+		if cfg.Auth.JWT.Issuer == "" {
+			errs = append(errs, "auth.jwt.issuer is required when jwt is enabled")
+		}
+		switch cfg.Auth.JWT.SigningMethod[:2] {
+		case "RS", "ES":
+			if cfg.Auth.JWT.VerifyingKeyPath == "" {
+				errs = append(errs, "auth.jwt.verifying_key_path is required for RSA/ECDSA")
+			}
+		case "HS":
+			if cfg.Auth.JWT.Secret == "" {
+				errs = append(errs, "auth.jwt.secret is required for HMAC")
+			}
+		}
 	}
 
 	// --- Audit ---

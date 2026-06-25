@@ -269,22 +269,54 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 	lifecycleMgr.StartSoftDeleteReaper(lifecycle.DefaultSoftDeleteTTL, nil)
 
 	// 强制装配认证器（Cluster 模式绝不允许 nil authenticator）。
+	// 支持两种认证方式：AppRole（静态 Token）和 JWT（动态 Token）。
 	var authenticator auth.Authenticator
+
+	// 构建 PolicyStore（AppRole 和 JWT 共用）。
+	policyStore := auth.NewMemoryPolicyStore()
+
+	// 1. 加载 AppRole（如果配置）。
 	if len(cfg.Auth.AppRoles) > 0 {
-		authenticator = auth.NewAppRoleAuthenticator()
+		appAuth := auth.NewAppRoleAuthenticator()
 		for _, r := range cfg.Auth.AppRoles {
-			authenticator.(*auth.AppRoleAuthenticator).RegisterPolicy(r.RoleID, r.Token, &auth.Policy{
+			policy := &auth.Policy{
 				RoleID:         r.RoleID,
 				AllowedKeys:    r.AllowedKeys,
 				AllowedActions: r.AllowedActions,
-			})
+			}
+			appAuth.RegisterPolicy(r.RoleID, r.Token, policy)
+			policyStore.AddPolicy(policy)
 		}
-		log.Printf("CLUSTER MODE: authenticator loaded with %d AppRole(s)", len(cfg.Auth.AppRoles))
-	} else {
+		authenticator = appAuth
+		log.Printf("CLUSTER MODE: AppRole authenticator loaded with %d role(s)", len(cfg.Auth.AppRoles))
+	}
+
+	// 2. 加载 JWT（如果配置）。
+	if cfg.Auth.JWT.SigningMethod != "" {
+		jwtAuth, err := auth.NewJWTAuthenticator(auth.JWTConfig{
+			SigningMethod:    cfg.Auth.JWT.SigningMethod,
+			Secret:           cfg.Auth.JWT.Secret,
+			VerifyingKeyPath: cfg.Auth.JWT.VerifyingKeyPath,
+			Issuer:           cfg.Auth.JWT.Issuer,
+			Audience:         cfg.Auth.JWT.Audience,
+			RoleClaim:        cfg.Auth.JWT.RoleClaim,
+		}, policyStore)
+		if err != nil {
+			auditLog.Close()
+			_ = pgStore.Close(ctx)
+			panic(fmt.Sprintf("FATAL: JWT authenticator init failed: %v", err))
+		}
+		// 如果同时配置了 AppRole，JWT 优先（生产推荐 JWT）。
+		authenticator = jwtAuth
+		log.Printf("CLUSTER MODE: JWT authenticator loaded (alg=%s, issuer=%s, role_claim=%s)",
+			cfg.Auth.JWT.SigningMethod, cfg.Auth.JWT.Issuer, cfg.Auth.JWT.RoleClaim)
+	}
+
+	if authenticator == nil {
 		// 致命约束：Cluster 模式无认证器 = 裸奔，拒绝启动。
 		auditLog.Close()
 		_ = pgStore.Close(ctx)
-		panic("FATAL: Cluster mode requires a valid authenticator (configure auth.app_roles in config)")
+		panic("FATAL: Cluster mode requires a valid authenticator (configure auth.app_roles or auth.jwt)")
 	}
 
 	// 装配 V1Router（注入认证器，绝不传 nil）。

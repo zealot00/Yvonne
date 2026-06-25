@@ -93,6 +93,18 @@ func (a *AppRoleAuthenticator) Authenticate(ctx context.Context, token string) (
 	return nil, ErrUnauthorized
 }
 
+// LookupPolicy 实现 PolicyStore 接口。
+// 允许 AppRoleAuthenticator 同时作为 JWT 的 PolicyStore。
+func (a *AppRoleAuthenticator) LookupPolicy(roleID string) (*Policy, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	p, ok := a.policies[roleID]
+	if !ok {
+		return nil, nil
+	}
+	return p, nil
+}
+
 // IsKeyAllowed 检查 keyID 是否在 Policy 允许范围内。
 // 支持通配符："*" 匹配所有，"order-*" 匹配 "order-001" 等。
 func (p *Policy) IsKeyAllowed(keyID string) bool {

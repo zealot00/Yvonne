@@ -56,6 +56,7 @@ type AuditModeConf struct {
 // Cluster 模式启动时必须至少配置一个角色，否则 panic。
 type AuthModeConf struct {
 	AppRoles []AppRoleEntry `json:"app_roles" yaml:"app_roles"`
+	JWT      JWTConfig      `json:"jwt"       yaml:"jwt"`
 }
 
 // AppRoleEntry 是单个 AppRole 的配置（Cluster 模式认证）。

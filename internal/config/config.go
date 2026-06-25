@@ -79,11 +79,29 @@ type AppRoleConfig struct {
 }
 
 type JWTConfig struct {
-	SigningMethod    string   `json:"signing_method"     yaml:"signing_method"` // "RS256" | "ES256"
-	TokenTTL         Duration `json:"token_ttl"          yaml:"token_ttl"`      // 默认 15m
-	Issuer           string   `json:"issuer"             yaml:"issuer"`
-	SigningKeyPath   string   `json:"signing_key_path"   yaml:"signing_key_path"`   // 私钥文件路径
-	VerifyingKeyPath string   `json:"verifying_key_path" yaml:"verifying_key_path"` // 公钥文件路径
+	// 算法配置：支持 RS256/RS384/RS512、ES256/ES384/ES512、HS256/HS384/HS512。
+	SigningMethod string `json:"signing_method" yaml:"signing_method"`
+
+	// HMAC 对称密钥（仅 HS256/384/512 使用）。生产建议用非对称。
+	Secret string `json:"secret" yaml:"secret"`
+
+	// 非对称密钥文件路径（RSA 公钥 PEM 或 ECDSA 公钥 PEM）。
+	VerifyingKeyPath string `json:"verifying_key_path" yaml:"verifying_key_path"`
+
+	// 标准 Claims 校验。
+	Issuer   string   `json:"issuer"   yaml:"issuer"`   // 必须匹配
+	Audience []string `json:"audience" yaml:"audience"` // 必须匹配其一
+
+	// 角色字段提取：从哪个 claim 中读取 RoleID。
+	// 常见值："sub"（默认）、"role"、"roles"（取第一个）、"x-role-id"。
+	// 支持嵌套点号路径，如 "custom.role"。
+	RoleClaim string `json:"role_claim" yaml:"role_claim"`
+
+	// TokenTTL 仅用于签发场景（Yvonne 作为 IdP）。验签时不限制 TTL（由 exp claim 决定）。
+	TokenTTL Duration `json:"token_ttl" yaml:"token_ttl"`
+
+	// SigningKeyPath 仅用于签发场景（Yvonne 作为 IdP）。验签不需要。
+	SigningKeyPath string `json:"signing_key_path" yaml:"signing_key_path"`
 }
 
 // AuditConfig 防篡改审计配置。
