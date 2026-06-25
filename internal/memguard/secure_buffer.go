@@ -2,7 +2,9 @@
 package memguard
 
 import (
+	"encoding/base64"
 	"runtime"
+	"sync"
 	"sync/atomic"
 )
 
@@ -13,14 +15,15 @@ import (
 //   - 唯一访问途径是 WithKey 闭包；闭包结束后调用方不应保留对 secret 的引用。
 //   - Wipe 后任何 WithKey 调用都会 panic——use-after-free 视为不可恢复的致命错误。
 //   - Wipe 使用 clear() + runtime.KeepAlive() 覆写内存并阻止编译器死代码消除 (DCE)。
-//
-// 非目标（当前版本刻意保持极简）：
-//   - 不做 mlock / mmap；防 swap 由更上层的平台封装负责。
-//   - 不内置并发互斥；调用方需保证 Wipe 与 WithKey 不并发执行。
+//   - 内置 RWMutex 保护 WithKey 与 Wipe 的并发安全。
 type SecureBuffer struct {
+	mu        sync.RWMutex
 	data      []byte
 	destroyed atomic.Bool
 }
+
+// base64StdEncoding 是 Base64 标准编码的包级缓存（避免每次分配）。
+var base64StdEncoding = base64.StdEncoding
 
 // NewSecureBuffer 从已有切片构造 SecureBuffer，并立即清零入参 src，
 // 避免双份明文同时驻留在不同栈帧/堆上。
@@ -57,9 +60,11 @@ func (s *SecureBuffer) Wipe() {
 	if s.destroyed.Load() {
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.data != nil {
 		clear(s.data)
-		runtime.KeepAlive(s.data) // 关键：防 DCE，必须紧跟在 clear 之后
+		runtime.KeepAlive(s.data)
 	}
 	s.destroyed.Store(true)
 }
@@ -67,13 +72,15 @@ func (s *SecureBuffer) Wipe() {
 // WithKey 在闭包作用域内暴露明文密钥供使用。
 //
 // 若 SecureBuffer 已被 Wipe，立即 panic（use-after-free 是不可恢复的致命错误）。
-//
-// 调用方约束：闭包内严禁保存 secret 引用（如赋值给外部变量、启动 goroutine 异步使用），
-// 否则会破坏 SecureBuffer 的内存隔离保证——一旦 Wipe，外部持有的引用将指向被清零的内存，
-// 造成难以追踪的数据损坏。
+// 持有读锁期间 Wipe 会阻塞，确保闭包内不会读到被清零的内存。
 func (s *SecureBuffer) WithKey(action func(secret []byte) error) error {
 	if s.destroyed.Load() {
 		panic("FATAL: Use after free in SecureBuffer")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.destroyed.Load() {
+		panic("FATAL: Use after free in SecureBuffer (wiped during WithKey)")
 	}
 	return action(s.data)
 }

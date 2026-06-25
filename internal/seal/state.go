@@ -64,6 +64,10 @@ type VaultState struct {
 	// emergencySealed 标记是否已触发紧急封印。
 	// 一旦为 true，进程生命周期内不可逆，拒绝一切 API 请求（包括 unseal）。
 	emergencySealed atomic.Bool
+
+	// onEmergencySeal 是紧急封印时的回调（如清空 lifecycle DEK 缓存）。
+	// 可为 nil。通过 SetEmergencySealCallback 注入。
+	onEmergencySeal func()
 }
 
 // NewVaultState 创建 VaultState，初始状态为 Sealed。
@@ -316,7 +320,20 @@ func (v *VaultState) EmergencySeal(ctx context.Context) {
 	}
 	v.wipeCollectedShares()
 
+	// 联动清空外部缓存（如 lifecycle DEK 缓存）。
+	if v.onEmergencySeal != nil {
+		v.onEmergencySeal()
+	}
+
 	v.state.Store(int32(StateSealed))
+}
+
+// SetEmergencySealCallback 注入紧急封印时的回调。
+// 用于联动清空 lifecycle Manager 的 DEK 缓存，防止 EmergencySeal 后缓存仍可用。
+func (v *VaultState) SetEmergencySealCallback(fn func()) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.onEmergencySeal = fn
 }
 
 // IsEmergencySealed 返回是否已触发紧急封印。

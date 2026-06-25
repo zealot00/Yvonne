@@ -56,6 +56,12 @@ func metadataKey(keyID string, version int) string {
 	return fmt.Sprintf("key:%s:v:%d", keyID, version)
 }
 
+// latestVersionKey 返回存储最新版本号索引的 key。
+// 用于 O(1) 查找最新版本，避免 O(N) 线性扫描。
+func latestVersionKey(keyID string) string {
+	return fmt.Sprintf("latest:%s", keyID)
+}
+
 // Manager 管理业务 DEK 的生命周期。
 type Manager struct {
 	store         storage.KVStore
@@ -219,6 +225,8 @@ func (m *Manager) CreateKey(ctx context.Context, keyID string, kek seal.KEK, rot
 		plaintextDEK.Wipe()
 		return nil, nil, fmt.Errorf("lifecycle: save metadata: %w", err)
 	}
+	// 写入 latest 版本索引（O(1) 查询优化）。
+	_ = m.setLatestVersion(ctx, keyID, 1)
 
 	return &meta, plaintextDEK, nil
 }
@@ -298,6 +306,7 @@ func (m *Manager) CreateAsymmetricKey(ctx context.Context, keyID, algoType strin
 	if err := m.saveMetadata(ctx, meta); err != nil {
 		return nil, fmt.Errorf("lifecycle: save metadata: %w", err)
 	}
+	_ = m.setLatestVersion(ctx, keyID, 1)
 
 	return &meta, nil
 }
@@ -337,7 +346,42 @@ func (m *Manager) loadMetadata(ctx context.Context, keyID string, version int) (
 	return &meta, nil
 }
 
+// latestVersionKey 返回存储最新版本号的元数据键。
+const latestVersionPrefix = "meta:latest:"
+
+func latestVersionMetadataKey(keyID string) string {
+	return latestVersionPrefix + keyID
+}
+
+// getLatestVersion 从 DB 读取最新版本号元数据（O(1) 查询，避免 O(N) 扫描）。
+// 如果元数据不存在（旧数据或首次创建），回退到 findLatestVersionScan。
+func (m *Manager) getLatestVersion(ctx context.Context, keyID string) (int, error) {
+	data, err := m.store.Get(ctx, latestVersionMetadataKey(keyID))
+	if err == nil && len(data) > 0 {
+		var v int
+		if err := json.Unmarshal(data, &v); err == nil && v > 0 {
+			return v, nil
+		}
+	}
+	// 回退到扫描（兼容旧数据）。
+	return m.findLatestVersionScan(ctx, keyID)
+}
+
+// setLatestVersion 写入最新版本号元数据。
+func (m *Manager) setLatestVersion(ctx context.Context, keyID string, version int) error {
+	data, err := json.Marshal(version)
+	if err != nil {
+		return err
+	}
+	return m.store.Put(ctx, latestVersionMetadataKey(keyID), data)
+}
+
 func (m *Manager) findLatestVersion(ctx context.Context, keyID string) (int, error) {
+	return m.getLatestVersion(ctx, keyID)
+}
+
+// findLatestVersionScan 旧的 O(N) 扫描方式（回退兼容）。
+func (m *Manager) findLatestVersionScan(ctx context.Context, keyID string) (int, error) {
 	for v := 1; ; v++ {
 		key := metadataKey(keyID, v)
 		_, err := m.store.Get(ctx, key)
@@ -354,11 +398,29 @@ func (m *Manager) findLatestVersion(ctx context.Context, keyID string) (int, err
 }
 
 // findLatestVersionInTx 在事务内查找最新版本号，用 RowLocker 避免重入锁。
+// 优先读取 meta:latest:{keyID} 元数据（O(1)），回退到扫描。
 func (m *Manager) findLatestVersionInTx(ctx context.Context, txStore storage.KVStore, keyID string) (int, error) {
+	// 先读 latest version 元数据键（加锁防并发轮转幻读）。
 	rl, _ := txStore.(storage.RowLocker)
+	latestKey := latestVersionMetadataKey(keyID)
+
+	var latestData []byte
+	var err error
+	if rl != nil {
+		latestData, err = rl.GetForUpdate(ctx, latestKey)
+	} else {
+		latestData, err = txStore.Get(ctx, latestKey)
+	}
+	if err == nil && len(latestData) > 0 {
+		var v int
+		if json.Unmarshal(latestData, &v) == nil && v > 0 {
+			return v, nil
+		}
+	}
+
+	// 回退到扫描（旧数据兼容）。
 	for v := 1; ; v++ {
 		key := metadataKey(keyID, v)
-		var err error
 		if rl != nil {
 			_, err = rl.GetForUpdate(ctx, key)
 		} else {
@@ -455,6 +517,9 @@ func (m *Manager) RotateKey(ctx context.Context, keyID string, kek seal.KEK) (*K
 			plainDEK.Wipe()
 			return fmt.Errorf("lifecycle: put new version: %w", err)
 		}
+		// 更新 latest 版本索引（O(1) 查询优化）。
+		latestData, _ := json.Marshal(newMeta.Version)
+		_ = txStore.Put(ctx, latestVersionMetadataKey(keyID), latestData)
 
 		plaintextDEK = plainDEK
 		return nil

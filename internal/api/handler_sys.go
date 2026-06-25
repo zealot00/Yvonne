@@ -139,6 +139,11 @@ func (r *V1Router) handleEmergencySeal(w http.ResponseWriter, req *http.Request)
 	// 4. 触发紧急封印。
 	r.seal.EmergencySeal(req.Context())
 
+	// 4b. 清空 DEK 缓存——紧急封印后缓存中的明文 DEK 不可继续使用。
+	if r.manager != nil {
+		r.manager.ClearCache()
+	}
+
 	// 5. 返回响应（审计日志由 auditMiddleware 自动记录，Action=EmergencySeal, Status=success）。
 	writeJSONOK(w, map[string]interface{}{
 		"emergency_sealed": true,

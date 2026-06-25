@@ -218,19 +218,23 @@ func (a *JWTAuthenticator) Authenticate(ctx context.Context, tokenString string)
 		}
 	}
 
-	// 4. 从 Claims 提取 RoleID。
-	roleID := extractRoleID(claims, a.roleClaim)
-	if roleID == "" {
+	// 4. 从 Claims 提取 RoleID（支持单个角色或数组角色）。
+	roleIDs := extractRoleIDs(claims, a.roleClaim)
+	if len(roleIDs) == 0 {
 		return nil, ErrUnauthorized
 	}
 
-	// 5. 从 PolicyStore 查找 Policy。
-	policy, err := a.policyStore.LookupPolicy(roleID)
-	if err != nil {
-		return nil, ErrUnauthorized
+	// 5. 从 PolicyStore 查找 Policy（支持多角色：第一个匹配的 role 生效）。
+	var policy *Policy
+	for _, roleID := range roleIDs {
+		p, err := a.policyStore.LookupPolicy(roleID)
+		if err != nil || p == nil {
+			continue
+		}
+		policy = p
+		break
 	}
 	if policy == nil {
-		// 角色未注册 → 默认拒绝。
 		return nil, ErrUnauthorized
 	}
 
@@ -327,11 +331,12 @@ func matchAudience(tokenAud []string, configAud []string) bool {
 	return false
 }
 
-// extractRoleID 从 JWT Claims 中提取 RoleID。
+// extractRoleIDs 从 JWT Claims 中提取 RoleID 列表（支持多角色合并）。
 //
 // 支持嵌套点号路径（如 "custom.role"）。
-// 支持数组取第一个元素（如 roles: ["admin","user"] → "admin"）。
-func extractRoleID(claims jwt.MapClaims, path string) string {
+// 支持字符串（单个角色）和数组（多角色，如 roles: ["admin","user"]）。
+// 返回所有角色 ID，调用方可做权限合并（Union）。
+func extractRoleIDs(claims jwt.MapClaims, path string) []string {
 	parts := strings.Split(path, ".")
 	var current interface{} = claims
 
@@ -342,27 +347,37 @@ func extractRoleID(claims jwt.MapClaims, path string) string {
 		case jwt.MapClaims:
 			current = v[part]
 		default:
-			return ""
+			return nil
 		}
 		if current == nil {
-			return ""
+			return nil
 		}
 	}
 
-	// 最终值转为 string。
+	// 最终值转为 role ID 列表。
 	switch v := current.(type) {
 	case string:
-		return v
+		return []string{v}
 	case []interface{}:
-		if len(v) > 0 {
-			if s, ok := v[0].(string); ok {
-				return s
+		var roles []string
+		for _, item := range v {
+			if s, ok := item.(string); ok && s != "" {
+				roles = append(roles, s)
 			}
 		}
-		return ""
+		return roles
 	case float64:
-		return fmt.Sprintf("%v", v)
+		return []string{fmt.Sprintf("%v", v)}
 	default:
+		return nil
+	}
+}
+
+// extractRoleID 保持向后兼容（返回第一个角色）。
+func extractRoleID(claims jwt.MapClaims, path string) string {
+	roles := extractRoleIDs(claims, path)
+	if len(roles) == 0 {
 		return ""
 	}
+	return roles[0]
 }

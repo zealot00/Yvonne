@@ -255,21 +255,27 @@ func startYvonne(cfg *config.YvonneConfig) {
 		log.Printf("server error: %v", err)
 	}
 
-	// 优雅停机：取消全局 context（通知 Daemon 退出）→ 关闭 HTTP（10s 超时）。
-	rootCancel()
+	// 优雅停机顺序（防 in-flight panic）：
+	// 1. 取消全局 context（通知 Daemon 退出 + 停止后台任务）
+	// 2. HTTP Shutdown（拒绝新请求，等待 in-flight 完成，10s 超时）
+	// 3. srv.Close() 由 defer 触发（Wipe masterKey + Close audit + Close DB）
+	//
+	// 关键：HTTP Shutdown 必须在 Wipe 之前完成，防止 in-flight 请求读到已清零密钥。
+	rootCancel() // 先通知 Daemon 退出
+
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("http shutdown error: %v", err)
+		log.Printf("WARNING: http shutdown timeout/error: %v (in-flight requests may be interrupted)", err)
 	}
 	if adminHTTPSrv != nil {
 		if err := adminHTTPSrv.Shutdown(shutdownCtx); err != nil {
-			log.Printf("admin http shutdown error: %v", err)
+			log.Printf("WARNING: admin http shutdown error: %v", err)
 		}
 	}
 
-	// srv.Close() 由 defer 触发：释放连接池、Wipe masterKey、Close audit。
+	// HTTP 完全停止后，srv.Close() 由 defer 触发：Wipe masterKey + Close audit + Close DB。
 	log.Printf("yvonne stopped")
 }
 

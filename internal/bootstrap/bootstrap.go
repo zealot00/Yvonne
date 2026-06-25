@@ -283,6 +283,13 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 	// 启动回收站自动清理（90 天 TTL）。
 	lifecycleMgr.StartSoftDeleteReaper(lifecycle.DefaultSoftDeleteTTL, nil)
 
+	// 紧急封印联动：EmergencySeal 时同步清空 DEK 缓存。
+	if vs, ok := unsealer.(*seal.VaultState); ok {
+		vs.SetEmergencySealCallback(func() {
+			lifecycleMgr.ClearCache()
+		})
+	}
+
 	// 强制装配认证器（Cluster 模式绝不允许 nil authenticator）。
 	// 支持两种认证方式：AppRole（静态 Token）和 JWT（动态 Token）。
 	var authenticator auth.Authenticator

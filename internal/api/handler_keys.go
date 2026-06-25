@@ -424,6 +424,10 @@ func (r *V1Router) handleGenerateDataKey(w http.ResponseWriter, req *http.Reques
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(out)
 
-	// 5. rawDEK 由 defer clear 擦除（函数返回时执行）。
+	// 5. 立即擦除 JSON 序列化缓冲（含 base64 编码的明文 DEK）。
+	clear(out)
+	runtime.KeepAlive(out)
+
+	// 6. rawDEK 由 defer clear 擦除（函数返回时执行）。
 	// plainDEK 由 defer Wipe 擦除。
 }

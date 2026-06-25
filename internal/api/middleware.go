@@ -15,7 +15,10 @@
 package api
 
 import (
+	"bufio"
 	"encoding/hex"
+	"errors"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -26,6 +29,7 @@ import (
 )
 
 // statusRecorder 拦截 WriteHeader 调用，记录最终状态码。
+// 同时保留 http.Flusher / http.Hijacker / http.Pusher 接口透传。
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
@@ -34,6 +38,29 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
+}
+
+// Flush 实现 http.Flusher，透传给底层 ResponseWriter（流式响应支持）。
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Hijack 实现 http.Hijacker，透传给底层 ResponseWriter（WebSocket 支持）。
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if h, ok := r.ResponseWriter.(http.Hijacker); ok {
+		return h.Hijack()
+	}
+	return nil, nil, errors.New("api: ResponseWriter does not support Hijack")
+}
+
+// Push 实现 http.Pusher，透传给底层 ResponseWriter（HTTP/2 Server Push）。
+func (r *statusRecorder) Push(target string, opts *http.PushOptions) error {
+	if p, ok := r.ResponseWriter.(http.Pusher); ok {
+		return p.Push(target, opts)
+	}
+	return http.ErrNotSupported
 }
 
 // RequireAuth 是认证+授权中间件，置于所有业务 API 路由最外层。
