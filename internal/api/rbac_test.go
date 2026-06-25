@@ -88,7 +88,7 @@ func doRequestWithToken(t *testing.T, r *V1Router, method, path, token string, b
 // createKey 辅助：用 masterKey 创建密钥。
 func createKey(t *testing.T, mgr *lifecycle.Manager, mk *memguard.SecureBuffer, keyID string) {
 	t.Helper()
-	if _, _, err := mgr.CreateKey(context.Background(), keyID, mk, 0); err != nil {
+	if _, _, err := mgr.CreateKey(context.Background(), keyID, seal.NewSoftwareKEK(mk), 0); err != nil {
 		t.Fatalf("CreateKey %s: %v", keyID, err)
 	}
 }

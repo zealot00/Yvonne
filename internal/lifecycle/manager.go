@@ -58,11 +58,15 @@ func metadataKey(keyID string, version int) string {
 
 // Manager 管理业务 DEK 的生命周期。
 type Manager struct {
-	store    storage.KVStore
-	mu       sync.Mutex
-	cache    *dekCache
-	notifier Notifier // 可为 nil（MemoryStore 无需 NOTIFY）
+	store         storage.KVStore
+	mu            sync.Mutex
+	cache         *dekCache
+	notifier      Notifier
+	maxGlobalKeys int // 0=不限制
 }
+
+// ErrQuotaExceeded 全局密钥配额超限。
+var ErrQuotaExceeded = errors.New("lifecycle: global key quota exceeded")
 
 // Notifier 接口用于在 Rotate/Shred 后触发集群缓存失效通知。
 // PostgresKVStore 实现此接口；MemoryStore 不实现（单机无需通知）。
@@ -76,6 +80,14 @@ func NewManager(store storage.KVStore) *Manager {
 		store: store,
 		cache: newDekCache(),
 	}
+}
+
+// SetMaxGlobalKeys 设置全局密钥数量上限（0=不限制）。
+// 超限时 CreateKey 返回 ErrQuotaExceeded。
+func (m *Manager) SetMaxGlobalKeys(max int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.maxGlobalKeys = max
 }
 
 // SetNotifier 注入集群缓存失效通知器。
@@ -163,6 +175,17 @@ func (m *Manager) CreateKey(ctx context.Context, keyID string, kek seal.KEK, rot
 	}
 	if kek == nil {
 		return nil, nil, errors.New("lifecycle: kek is nil")
+	}
+
+	// 全局密钥配额检查。
+	if m.maxGlobalKeys > 0 {
+		count, err := m.countKeys(ctx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("lifecycle: quota check: %w", err)
+		}
+		if count >= m.maxGlobalKeys {
+			return nil, nil, ErrQuotaExceeded
+		}
 	}
 
 	// 生成 32 字节随机 DEK。
@@ -763,6 +786,30 @@ func (m *Manager) reapExpiredSoftDeletes(ttl time.Duration, onReaped func(keyID 
 // ReapNow 立即执行一次回收站清理（用于测试或手动触发）。
 func (m *Manager) ReapNow(ttl time.Duration, onReaped func(keyID string, version int)) {
 	m.reapExpiredSoftDeletes(ttl, onReaped)
+}
+
+// countKeys 统计当前全局唯一 KeyID 数量（用于配额检查）。
+// 通过 ScanPrefix 扫描 "key:" 前缀，去重 KeyID。
+func (m *Manager) countKeys(ctx context.Context) (int, error) {
+	scanner, ok := m.store.(storage.PrefixScanner)
+	if !ok {
+		return 0, nil // 不支持扫描的 store 不限制
+	}
+
+	items, err := scanner.ScanPrefix(ctx, "key:")
+	if err != nil {
+		return 0, err
+	}
+
+	seen := make(map[string]bool)
+	for _, data := range items {
+		var meta KeyMetadata
+		if err := json.Unmarshal(data, &meta); err != nil {
+			continue
+		}
+		seen[meta.KeyID] = true
+	}
+	return len(seen), nil
 }
 
 // ErrKeyNotActive 表示密钥非 Active 状态，拒绝加密操作。
