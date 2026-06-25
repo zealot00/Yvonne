@@ -6,6 +6,32 @@
 
 **核心思路**：引入 `KEK`（Key Encryption Key）抽象接口，统一软件 CMK 和 HSM backend。7 个生产调用点从 `MasterKeyRef` 改为 `KEKRef`。`softwareKEK` 内部调 `crypto.EncryptGCM`/`DecryptGCM`，密文格式与现状字节级一致（零数据迁移）。
 
+## 新增要求（用户追加）
+
+### 要求 A：HSM 依赖可插拔
+
+HSM 相关代码通过 **build tag** 隔离，默认编译不包含 HSM 依赖：
+
+- `//go:build hsm` — HSM 后端实现（PKCS#11/TPM/Mock）
+- `//go:build !hsm` — stub 实现（返回 "HSM not compiled in"）
+- 默认 `go build` 产出无 HSM 依赖的二进制
+- `go build -tags hsm` 启用 HSM 支持
+- bootstrap 的 `case "hsm"` 在 `!hsm` 编译时返回明确 error
+
+### 要求 B：国密算法支持（SM2/SM3/SM4）
+
+引入 `CryptoSuite`（密码套件）抽象，运行时可选标准算法或国密算法：
+
+| 类别 | 标准算法 | 国密算法 |
+|---|---|---|
+| 对称加密 | AES-256-GCM | SM4-GCM |
+| 哈希 | SHA-256 | SM3 |
+| HMAC | HMAC-SHA256 | HMAC-SM3 |
+| 非对称签名 | ECDSA P-256 | SM2 |
+| 密钥包装 | RSA-4096 OAEP | SM2 包装 |
+
+通过配置 `crypto.suite: "standard" | "gmsm"` 选择，默认 standard（向后兼容）。
+
 ## 架构设计
 
 ### 1. KEK 抽象接口（新建 `internal/seal/kek.go`）
@@ -176,3 +202,174 @@ type UnsealModeConf struct {
 - TPM 2.0 backend（`internal/seal/tpm_backend.go`，build tag `tpm && linux`）— 对接 TPM 待办
 - 软件→HSM 迁移工具（re-wrap DEK：softwareKEK.UnwrapDEK → hsmKEK.WrapDEK）
 - 产物签名（cosign/sigstore）
+
+---
+
+## 补充设计：HSM 依赖可插拔
+
+### Build Tag 隔离策略
+
+HSM 后端代码通过 Go build tag 隔离，默认编译**零 HSM 依赖**：
+
+```
+internal/seal/
+├── kek.go                  // KEK 接口 + softwareKEK（无 build tag，始终编译）
+├── hsm.go                  // CryptoBackend 接口定义（无 build tag）
+├── hsm_unsealer.go         // HSMUnsealer + BackendRef（无 build tag，仅接口层）
+├── hsm_mock.go             // MockHSMBackend（//go:build hsm || test，测试可用）
+├── hsm_stub.go             // stub：buildHSMBackend 返回 error（//go:build !hsm）
+├── pkcs11_backend.go       // PKCS#11 实现（//go:build hsm && pkcs11）
+└── tpm_backend.go          // TPM 实现（//go:build hsm && tpm && linux）
+```
+
+### 编译矩阵
+
+| 命令 | HSM 支持 | 适用场景 |
+|---|---|---|
+| `go build` | ❌ 无 | 默认（轻量，无 CGO，无 HSM 库依赖） |
+| `go build -tags hsm` | ✅ Mock | 测试 HSM 路径（无真实硬件） |
+| `go build -tags 'hsm,pkcs11'` | ✅ PKCS#11 | 生产 HSM（需 PKCS#11 库） |
+| `go build -tags 'hsm,tpm'` | ✅ TPM | TPM 2.0 硬件（Linux） |
+
+### hsm_stub.go（默认编译时）
+
+```go
+//go:build !hsm
+
+package seal
+
+import "errors"
+
+func buildHSMBackend(cfg HSMConfig) (CryptoBackend, error) {
+    return nil, errors.New("seal: HSM support not compiled in (rebuild with -tags hsm)")
+}
+```
+
+### hsm_mock.go（HSM tag 或测试时）
+
+```go
+//go:build hsm || test
+
+package seal
+
+func buildHSMBackend(cfg HSMConfig) (CryptoBackend, error) {
+    return NewMockHSMBackend()
+}
+```
+
+### bootstrap 适配
+
+`buildClusterMode` 中的 `case "hsm"` 始终存在（无 build tag），但调用的 `buildHSMBackend` 由 build tag 决定实现。默认编译时 `unseal.type=hsm` 会返回明确 error，不会 panic。
+
+### 依赖隔离
+
+- `go.mod` 中 HSM 相关依赖（如 PKCS#11 CGO 绑定）用 build tag 隔离，不污染默认编译
+- 国密库同理（见下文）
+
+---
+
+## 补充设计：国密算法支持（SM2/SM3/SM4）
+
+### CryptoSuite 抽象
+
+新建 `internal/crypto/suite.go`，定义密码套件接口：
+
+```go
+package crypto
+
+type Suite string
+
+const (
+    SuiteStandard Suite = "standard" // AES-256-GCM + SHA-256 + ECDSA P-256
+    SuiteGMSM     Suite = "gmsm"     // SM4-GCM + SM3 + SM2
+)
+
+// Cipher 套件：对称加密抽象
+type Cipher interface {
+    Encrypt(key *memguard.SecureBuffer, plaintext []byte) ([]byte, error)
+    Decrypt(key *memguard.SecureBuffer, ciphertext []byte) (*memguard.SecureBuffer, error)
+    KeySize() int // 32 (AES-256) 或 16 (SM4)
+}
+
+// Hash 套件：哈希抽象
+type Hash interface {
+    Sum(data []byte) []byte
+    Size() int // 32 (SHA-256) 或 32 (SM3)
+    HMAC(key, data []byte) []byte
+}
+```
+
+### 两个实现
+
+**标准套件**（`internal/crypto/suite_standard.go`，无 build tag）：
+- `StandardCipher`：AES-256-GCM（现有 `EncryptGCM`/`DecryptGCM`）
+- `StandardHash`：SHA-256 + HMAC-SHA256（现有 `crypto/sha256` + `crypto/hmac`）
+
+**国密套件**（`internal/crypto/suite_gmsm.go`，`//go:build gmsm`）：
+- `GMSMCipher`：SM4-GCM
+- `GMSMHash`：SM3 + HMAC-SM3
+- 依赖 `github.com/tjfoc/gmsm`（或 `github.com/emmansun/gmsm`）
+
+### 编译矩阵
+
+| 命令 | 国密支持 | 适用场景 |
+|---|---|---|
+| `go build` | ❌ 无 | 默认（标准算法） |
+| `go build -tags gmsm` | ✅ 国密 | 国密合规场景 |
+
+### 配置
+
+```json
+{
+  "crypto": {
+    "suite": "gmsm"
+  }
+}
+```
+
+- `crypto.suite = "standard"`（默认）：用 `StandardCipher` + `StandardHash`
+- `crypto.suite = "gmsm"`：用 `GMSMCipher` + `GMSMHash`（需 `-tags gmsm` 编译）
+- 启动时检测：`suite=gmsm` 但编译无 gmsm tag → panic
+
+### 影响面分析
+
+| 模块 | 改动 |
+|---|---|
+| `crypto/gcm.go` | `EncryptGCM`/`DecryptGCM` 改为 `StandardCipher` 的方法 |
+| `crypto/envelope.go` | `GenerateDataKey` 接收 `Cipher` 接口 |
+| `seal/kek.go` | `softwareKEK` 接收 `Cipher` 实例（而非硬编码 AES-GCM） |
+| `audit/logger.go` | 哈希链用 `Hash` 接口（HMAC-SHA256 或 HMAC-SM3） |
+| `KeyMetadata` | 新增 `CipherType` 字段（`"aes-256-gcm"` 或 `"sm4-gcm"`） |
+| `config` | 新增 `CryptoConfig.Suite` 字段 |
+
+### 向后兼容
+
+- `crypto.suite` 默认 `"standard"`，现有行为不变
+- 现有 `EncryptGCM`/`DecryptGCM` 函数保留（包装 `StandardCipher`）
+- `KeyMetadata.CipherType` omitempty，空值默认 AES-256-GCM
+
+### 国密合规说明
+
+- SM2/SM3/SM4 符合 GB/T 32918、GB/T 32905、GB/T 32907
+- 国密套件 + HSM 模式 = 满足金融/政务场景的"商密合规"
+- 审计日志哈希链用 HMAC-SM3，符合 GM/T 0054
+- README 需补充国密合规声明（非正式认证，仅算法实现）
+
+### 实施优先级
+
+国密支持作为 **0.3.0 的可选里程碑**（不阻塞 HSM 重构）：
+1. 里程碑 1-4（HSM 重构）先完成
+2. 里程碑 5：CryptoSuite 抽象 + 标准套件迁移
+3. 里程碑 6：国密套件实现（`-tags gmsm`）+ 测试
+
+## 更新后的里程碑总览
+
+| 里程碑 | 内容 | 依赖 |
+|---|---|---|
+| 1 | KEK 抽象层 | 无 |
+| 2 | lifecycle.Manager 签名迁移 | 1 |
+| 3 | 7 调用点 + admin 适配 | 2 |
+| 4 | bootstrap HSM 装配（build tag 隔离） | 3 |
+| 5 | CryptoSuite 抽象 + 标准套件迁移 | 4 |
+| 6 | 国密套件（SM2/SM3/SM4，`-tags gmsm`） | 5 |
+
