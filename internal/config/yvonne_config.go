@@ -85,13 +85,18 @@ type StorageModeConf struct {
 // Type 取值：
 //   - "shamir"：Shamir 门限解封（Cluster 默认）
 //   - "local_pki"：本地 PKI 自动解封（用本地私钥解封 Master Key）
+//   - "hsm"：HSM 硬件安全模块（CMK 永不离开芯片，需 -tags hsm 编译）
 //   - "auto"：Dev 模式专用，自动生成临时 Master Key 跳过解封
 type UnsealModeConf struct {
-	Type            string `json:"type"              yaml:"type"`              // "shamir" | "local_pki" | "auto"
-	TotalShares     int    `json:"total_shares"      yaml:"total_shares"`      // Shamir：总份数
-	Threshold       int    `json:"threshold"         yaml:"threshold"`         // Shamir：门限
-	PKIKeyPath      string `json:"pki_key_path"      yaml:"pki_key_path"`      // local_pki：私钥路径
-	AutoResealAfter string `json:"auto_reseal_after" yaml:"auto_reseal_after"` // 自动重新封印超时
+	Type            string `json:"type"              yaml:"type"`
+	TotalShares     int    `json:"total_shares"      yaml:"total_shares"`
+	Threshold       int    `json:"threshold"         yaml:"threshold"`
+	PKIKeyPath      string `json:"pki_key_path"      yaml:"pki_key_path"`
+	AutoResealAfter string `json:"auto_reseal_after" yaml:"auto_reseal_after"`
+
+	// HSM 字段（Type=="hsm" 时生效，需 -tags hsm 编译）。
+	HSMBackend string `json:"hsm_backend,omitempty" yaml:"hsm_backend,omitempty"` // "mock"|"pkcs11"（未来）|"tpm"（未来）
+	HSMKeyID   string `json:"hsm_key_id,omitempty"  yaml:"hsm_key_id,omitempty"`  // HSM 内密钥标识
 }
 
 // LoadYvonneConfig 从 JSON 配置文件加载 YvonneConfig。
@@ -208,7 +213,7 @@ func validateClusterConfig(cfg *YvonneConfig) error {
 	}
 
 	switch cfg.Unseal.Type {
-	case "shamir", "local_pki":
+	case "shamir", "local_pki", "hsm":
 		// 合法。
 	case "auto":
 		errs = append(errs, "cluster mode must NOT use unseal.type='auto' (dev-only)")

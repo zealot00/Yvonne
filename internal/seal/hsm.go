@@ -42,3 +42,12 @@ const (
 	HSMDisabled HSMMode = false
 	HSMEnabled  HSMMode = true
 )
+
+// HSMConfig 是 HSM 后端配置（与 build tag 无关，始终可用）。
+type HSMConfig struct {
+	Backend string // "mock" | "pkcs11"（未来）| "tpm"（未来）
+	KeyID   string // HSM 内密钥标识
+	LibPath string // PKCS#11 库路径（未来）
+	Slot    int    // PKCS#11 slot（未来）
+	PIN     string // PKCS#11 PIN（未来）
+}

@@ -240,22 +240,37 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 	if threshold == 0 {
 		threshold = 3
 	}
+	// 按解封策略装配。
+	var unsealer seal.Unsealer
 	vault := seal.NewVaultState(totalShares, threshold, 30*time.Minute)
 
-	// 按解封策略装配。
 	switch cfg.Unseal.Type {
 	case "shamir":
-		// Shamir 模式：启动时 Sealed，等待外部 ProvideShare。
+		unsealer = vault
 		log.Printf("CLUSTER MODE assembled: %s (sealed, awaiting shamir shares)", cfg.PrintSummary())
 	case "local_pki":
-		// Local PKI 模式：自动解封。
 		pkiUnsealer := seal.NewLocalPKIUnsealer(cfg.Unseal.PKIKeyPath, vault, pgStore)
 		if err := pkiUnsealer.AutoUnseal(ctx); err != nil {
 			auditLog.Close()
 			_ = pgStore.Close(ctx)
 			log.Fatalf("bootstrap: FATAL local_pki auto-unseal failed: %v", err)
 		}
+		unsealer = vault
 		log.Printf("CLUSTER MODE assembled: %s (auto-unsealed via local_pki)", cfg.PrintSummary())
+	case "hsm":
+		// HSM 模式：CMK 永不离开芯片，通过 CryptoBackend.Wrap/Unwrap 工作。
+		// HSM 依赖可插拔：默认编译无 HSM 支持，buildHSMBackend 返回 error。
+		backend, err := seal.BuildHSMBackend(seal.HSMConfig{
+			Backend: cfg.Unseal.HSMBackend,
+			KeyID:   cfg.Unseal.HSMKeyID,
+		})
+		if err != nil {
+			auditLog.Close()
+			_ = pgStore.Close(ctx)
+			panic(fmt.Sprintf("bootstrap: FATAL HSM backend init failed: %v", err))
+		}
+		unsealer = seal.NewHSMUnsealer(backend)
+		log.Printf("CLUSTER MODE assembled: %s (HSM mode, backend=%s)", cfg.PrintSummary(), cfg.Unseal.HSMBackend)
 	default:
 		auditLog.Close()
 		_ = pgStore.Close(ctx)
@@ -320,7 +335,7 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 	}
 
 	// 装配 V1Router（注入认证器，绝不传 nil）。
-	v1Router := api.NewV1Router(vault, auditLog, lifecycleMgr, metricsReg, authenticator)
+	v1Router := api.NewV1Router(unsealer, auditLog, lifecycleMgr, metricsReg, authenticator)
 
 	// 装配 Admin Web UI。
 	adminSrv := buildAdminServer(cfg, vault)
@@ -328,7 +343,7 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 	// 装配 RotationDaemon（Cluster 模式专用）。
 	// 使用 AdvisoryLocker 实现集群选主，确保只有一个节点执行轮转。
 	locker := storage.NewAdvisoryLocker(pgStore.Pool(), 0x796F6E6E65) // "yonne" 的 int64
-	daemon := lifecycle.NewRotationDaemon(lifecycleMgr, vault, locker, func(entry lifecycle.AuditEntry) error {
+	daemon := lifecycle.NewRotationDaemon(lifecycleMgr, unsealer, locker, func(entry lifecycle.AuditEntry) error {
 		// 桥接 lifecycle.AuditEntry → audit.LogEntry。
 		return auditLog.Record(audit.LogEntry{
 			TraceID:   "",
@@ -345,7 +360,7 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 		AdminServer:    adminSrv,
 		AuditLog:       auditLog,
 		Metrics:        metricsReg,
-		VaultState:     vault,
+		VaultState:     unsealer,
 		Store:          pgStore,
 		PGStore:        pgStore,
 		Manager:        lifecycleMgr,
@@ -364,11 +379,11 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 //   - 未配置时默认 127.0.0.1:8250
 //
 // 安全：管理页面强制绑 127.0.0.1，禁止 0.0.0.0。
-func buildAdminServer(cfg *config.YvonneConfig, vault *seal.VaultState) *admin.Server {
+func buildAdminServer(cfg *config.YvonneConfig, unsealer seal.Unsealer) *admin.Server {
 	// Dev 模式强制启用 admin UI。
 	if cfg.Mode == config.ModeDev {
 		log.Printf("DEV MODE: admin web UI forced enabled")
-		return admin.NewServer(vault)
+		return admin.NewServer(unsealer)
 	}
 
 	// Cluster 模式按配置。
@@ -378,5 +393,5 @@ func buildAdminServer(cfg *config.YvonneConfig, vault *seal.VaultState) *admin.S
 	}
 
 	log.Printf("admin web UI enabled at %s:%d", cfg.Server.Admin.BindAddr, cfg.Server.Admin.BindPort)
-	return admin.NewServer(vault)
+	return admin.NewServer(unsealer)
 }
