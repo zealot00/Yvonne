@@ -26,7 +26,8 @@ type PostgresPoolConfig struct {
 
 // PostgresKVStore 是基于 pgxpool 的 KVStore 实现。
 type PostgresKVStore struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	health *healthState
 }
 
 // NewPostgresKVStore 用默认配置连接池。
@@ -75,12 +76,50 @@ func NewPostgresKVStoreWithConfig(ctx context.Context, cfg PostgresPoolConfig) (
 		return nil, fmt.Errorf("postgres: ensure schema: %w", err)
 	}
 
-	return &PostgresKVStore{pool: pool}, nil
+	store := &PostgresKVStore{pool: pool}
+	store.health = newHealthState(func(ctx context.Context) error {
+		return pool.Ping(ctx)
+	})
+	return store, nil
 }
 
 // Pool 返回底层 *pgxpool.Pool。
 func (p *PostgresKVStore) Pool() *pgxpool.Pool {
 	return p.pool
+}
+
+// Ping 检查数据库连接。
+func (p *PostgresKVStore) Ping(ctx context.Context) error {
+	return p.pool.Ping(ctx)
+}
+
+// IsHealthy 返回数据库健康状态。
+func (p *PostgresKVStore) IsHealthy() bool {
+	if p.health == nil {
+		return true // 无健康检查器时默认健康
+	}
+	return p.health.IsHealthy()
+}
+
+// StartHealthCheck 启动后台健康检查（默认 10 秒间隔）。
+func (p *PostgresKVStore) StartHealthCheck(interval time.Duration) {
+	if p.health != nil {
+		p.health.StartHealthCheck(interval)
+	}
+}
+
+// StopHealthCheck 停止后台健康检查。
+func (p *PostgresKVStore) StopHealthCheck() {
+	if p.health != nil {
+		p.health.StopHealthCheck()
+	}
+}
+
+// markUnhealthy 标记数据库不健康（DB 操作失败时调用）。
+func (p *PostgresKVStore) markUnhealthy() {
+	if p.health != nil {
+		p.health.SetUnhealthy()
+	}
 }
 
 // Put 写入 key/value。
@@ -96,6 +135,7 @@ func (p *PostgresKVStore) Put(ctx context.Context, key string, value []byte) err
 		 ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v`,
 		key, value)
 	if err != nil {
+		p.markUnhealthy()
 		return fmt.Errorf("postgres: put: %w", err)
 	}
 	return nil
@@ -110,6 +150,7 @@ func (p *PostgresKVStore) Get(ctx context.Context, key string) ([]byte, error) {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
+		p.markUnhealthy()
 		return nil, fmt.Errorf("postgres: get: %w", err)
 	}
 	return v, nil

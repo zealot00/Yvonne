@@ -18,6 +18,7 @@ import (
 	"bufio"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -103,7 +104,9 @@ func (r *V1Router) RequireAuth(authenticator auth.Authenticator, action string, 
 
 		// 4. RBAC 校验：Action 是否允许。
 		if !policy.IsActionAllowed(action) {
-			writeJSONError(w, http.StatusForbidden, "action not allowed")
+			writeJSONError(w, http.StatusForbidden, fmt.Sprintf(
+				"access denied: role %q does not have action %q (allowed: %v)",
+				policy.RoleID, action, policy.AllowedActions))
 			return
 		}
 
@@ -128,6 +131,19 @@ func authorizeBodyKeyID(req *http.Request, keyID string) bool {
 		return true // Dev 模式无认证器，允许所有
 	}
 	return policy.IsKeyAllowed(keyID)
+}
+
+// authorizeBodyKeyIDWithDetail 同 authorizeBodyKeyID，但返回详细 error。
+func authorizeBodyKeyIDWithDetail(req *http.Request, keyID string) error {
+	policy := auth.PolicyFromContext(req.Context())
+	if policy == nil {
+		return nil // Dev 模式
+	}
+	if !policy.IsKeyAllowed(keyID) {
+		return fmt.Errorf("access denied: role %q cannot access key %q (allowed keys: %v)",
+			policy.RoleID, keyID, policy.AllowedKeys)
+	}
+	return nil
 }
 
 // extractKeyIDFromPath 从 URL 路径提取 key_id（仅对 /api/v1/keys/{key_id}/... 有效）。

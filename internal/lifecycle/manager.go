@@ -98,6 +98,11 @@ func (m *Manager) SetMaxGlobalKeys(max int) {
 
 // SetNotifier 注入集群缓存失效通知器。
 // 在 bootstrap 装配阶段调用（仅 PostgresKVStore 需注入）。
+// Store 返回底层 KVStore（供 Core 健康检查）。
+func (m *Manager) Store() storage.KVStore {
+	return m.store
+}
+
 func (m *Manager) SetNotifier(n Notifier) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

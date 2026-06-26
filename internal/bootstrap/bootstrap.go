@@ -329,6 +329,10 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 	// 装配 lifecycle Manager。
 	lifecycleMgr := lifecycle.NewManager(pgStore)
 
+	// 启动 PG 健康检查（degraded 模式：PG 断连时写操作拒绝，缓存 DEK 仍可解密）。
+	pgStore.StartHealthCheck(10 * time.Second)
+	log.Printf("PG health check started (10s interval, degraded mode on disconnect)")
+
 	// 启动回收站自动清理（90 天 TTL）。
 	lifecycleMgr.StartSoftDeleteReaper(lifecycle.DefaultSoftDeleteTTL, nil)
 

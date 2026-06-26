@@ -23,6 +23,7 @@ import (
 //
 // 所有方法接收 *auth.Policy 做资源级授权（nil Policy = Dev 模式放行）。
 // 所有方法内置：Sealed 拦截 → 授权校验 → 业务调用 → 审计记录。
+// PG 断连时进入 degraded 模式：写操作拒绝，读操作用缓存。
 type Core struct {
 	manager    *lifecycle.Manager
 	seal       seal.Unsealer
@@ -89,6 +90,9 @@ func (c *Core) CreateKey(ctx context.Context, keyID string, rotationPeriodDays i
 	if err := c.requireUnsealed(); err != nil {
 		return nil, err
 	}
+	if err := c.requireWritable(); err != nil {
+		return nil, err
+	}
 	if err := c.authorize(policy, "CreateKey", keyID); err != nil {
 		return nil, err
 	}
@@ -130,6 +134,9 @@ func (c *Core) RotateKey(ctx context.Context, keyID string, policy *auth.Policy)
 	if err := c.requireUnsealed(); err != nil {
 		return nil, err
 	}
+	if err := c.requireWritable(); err != nil {
+		return nil, err
+	}
 	if err := c.authorize(policy, "KeyOp", keyID); err != nil {
 		return nil, err
 	}
@@ -160,6 +167,9 @@ func (c *Core) ShredKey(ctx context.Context, keyID string, version int, policy *
 	if err := c.requireUnsealed(); err != nil {
 		return err
 	}
+	if err := c.requireWritable(); err != nil {
+		return err
+	}
 	if err := c.authorize(policy, "KeyOp", keyID); err != nil {
 		return err
 	}
@@ -176,6 +186,9 @@ func (c *Core) SoftDeleteKey(ctx context.Context, keyID string, version int, pol
 	if err := c.requireUnsealed(); err != nil {
 		return err
 	}
+	if err := c.requireWritable(); err != nil {
+		return err
+	}
 	if err := c.authorize(policy, "KeyOp", keyID); err != nil {
 		return err
 	}
@@ -190,6 +203,9 @@ func (c *Core) SoftDeleteKey(ctx context.Context, keyID string, version int, pol
 // RestoreKey 恢复软删除的密钥版本。
 func (c *Core) RestoreKey(ctx context.Context, keyID string, version int, policy *auth.Policy) error {
 	if err := c.requireUnsealed(); err != nil {
+		return err
+	}
+	if err := c.requireWritable(); err != nil {
 		return err
 	}
 	if err := c.authorize(policy, "KeyOp", keyID); err != nil {
@@ -334,25 +350,54 @@ func (c *Core) Decrypt(ctx context.Context, keyID string, ciphertext []byte, pol
 // requireUnsealed 检查 vault 是否已解封。
 func (c *Core) requireUnsealed() error {
 	if c.seal.IsEmergencySealed() {
-		return errors.New("service: vault is emergency sealed")
+		return errors.New("vault is emergency sealed: all operations refused until process restart + Shamir unseal")
 	}
 	if c.seal.IsSealed() {
-		return errors.New("service: vault is sealed")
+		return errors.New("vault is sealed: run unseal ceremony to resume operations")
 	}
 	return nil
 }
 
+// requireWritable 检查 DB 是否可用（写操作前调用）。
+// degraded 模式下拒绝写操作，返回 503 等价错误。
+func (c *Core) requireWritable() error {
+	if c.manager == nil {
+		return nil
+	}
+	store := c.manager.Store()
+	if store == nil {
+		return nil
+	}
+	hc, ok := store.(storageHealthChecker)
+	if !ok {
+		return nil // 非健康检查 store（MemoryStore/BoltDB）不限制
+	}
+	if !hc.IsHealthy() {
+		return errors.New("database unavailable (degraded mode): write operations refused, cached DEKs still available for decrypt")
+	}
+	return nil
+}
+
+// storageHealthChecker 是 service 层需要的最小健康检查接口。
+// 避免直接 import storage 包（循环依赖）。
+type storageHealthChecker interface {
+	IsHealthy() bool
+}
+
 // authorize 检查 Policy 是否允许指定 action + keyID。
 // nil Policy = Dev 模式放行。
+// 错误消息包含 role/key/allowed 详情，便于运维诊断。
 func (c *Core) authorize(policy *auth.Policy, action, keyID string) error {
 	if policy == nil {
 		return nil // Dev 模式
 	}
 	if !policy.IsActionAllowed(action) {
-		return fmt.Errorf("service: action %q not allowed for role %q", action, policy.RoleID)
+		return fmt.Errorf("access denied: role %q does not have action %q on key %q (allowed actions: %v)",
+			policy.RoleID, action, keyID, policy.AllowedActions)
 	}
 	if !policy.IsKeyAllowed(keyID) {
-		return fmt.Errorf("service: key %q not allowed for role %q", keyID, policy.RoleID)
+		return fmt.Errorf("access denied: role %q cannot access key %q (allowed keys: %v)",
+			policy.RoleID, keyID, policy.AllowedKeys)
 	}
 	return nil
 }

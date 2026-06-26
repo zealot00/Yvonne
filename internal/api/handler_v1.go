@@ -83,8 +83,8 @@ func (r *V1Router) handleV1Encrypt(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// 资源级授权校验：body.KeyID 必须在 Policy.AllowedKeys 范围内。
-	if !authorizeBodyKeyID(req, body.KeyID) {
-		writeJSONError(w, http.StatusForbidden, "resource access denied")
+	if err := authorizeBodyKeyIDWithDetail(req, body.KeyID); err != nil {
+		writeJSONError(w, http.StatusForbidden, err.Error())
 		return
 	}
 
@@ -185,8 +185,8 @@ func (r *V1Router) handleV1Decrypt(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// 资源级授权校验：body.KeyID 必须在 Policy.AllowedKeys 范围内。
-	if !authorizeBodyKeyID(req, body.KeyID) {
-		writeJSONError(w, http.StatusForbidden, "resource access denied")
+	if err := authorizeBodyKeyIDWithDetail(req, body.KeyID); err != nil {
+		writeJSONError(w, http.StatusForbidden, err.Error())
 		return
 	}
 
