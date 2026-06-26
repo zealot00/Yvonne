@@ -1,0 +1,46 @@
+[Unit]
+Description=Yvonne KMS - Key Management Service
+Documentation=https://github.com/zealot00/Yvonne
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=yvonne
+Group=yvonne
+
+# 二进制路径
+ExecStart=/usr/local/bin/yvonne server --config /etc/yvonne/config.json
+
+# 环境变量（DSN 等敏感信息不写入配置文件）
+Environment="YVONNE_STORAGE_DSN=postgresql://postgres:pass@127.0.0.1:5432/yvonne"
+# Environment="YVONNE_SERVER_ADMIN_ADMIN_TOKEN=your-admin-token"
+
+# 工作目录
+WorkingDirectory=/var/lib/yvonne
+
+# 文件权限
+UMask=0077
+
+# 资源限制
+LimitNOFILE=65536
+MemoryMax=512M
+
+# 安全加固
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/log/yvonne /var/lib/yvonne
+
+# 优雅停机
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# 重启策略
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=3
+
+[Install]
+WantedBy=multi-user.target

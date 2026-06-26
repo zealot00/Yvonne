@@ -1,0 +1,121 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "graphTooltip": 0,
+  "id": null,
+  "panels": [
+    {
+      "title": "API Request Rate",
+      "type": "graph",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "rate(yvonne_api_requests_total[1m])",
+          "legendFormat": "{{method}} {{path}} {{status}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
+    },
+    {
+      "title": "API Latency (p99)",
+      "type": "graph",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, rate(yvonne_api_request_duration_seconds_bucket[5m]))",
+          "legendFormat": "p99 latency",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.50, rate(yvonne_api_request_duration_seconds_bucket[5m]))",
+          "legendFormat": "p50 latency",
+          "refId": "B"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 }
+    },
+    {
+      "title": "Error Rate (4xx/5xx)",
+      "type": "graph",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "rate(yvonne_api_requests_total{status=~\"4..|5..\"}[1m])",
+          "legendFormat": "errors",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 }
+    },
+    {
+      "title": "Vault State",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "yvonne_vault_sealed",
+          "legendFormat": "sealed",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 8 }
+    },
+    {
+      "title": "Active DEK Count",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "yvonne_keys_total{state=\"active\"}",
+          "legendFormat": "active keys",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 8 }
+    },
+    {
+      "title": "Go Memory (alloc)",
+      "type": "graph",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "go_memstats_alloc_bytes",
+          "legendFormat": "alloc",
+          "refId": "A"
+        },
+        {
+          "expr": "go_memstats_sys_bytes",
+          "legendFormat": "sys",
+          "refId": "B"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 }
+    },
+    {
+      "title": "Go Goroutines",
+      "type": "graph",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "go_goroutines",
+          "legendFormat": "goroutines",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 }
+    }
+  ],
+  "schemaVersion": 27,
+  "style": "dark",
+  "tags": ["yvonne", "kms"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Yvonne KMS Dashboard",
+  "uid": "yvonne-kms",
+  "version": 1
+}
