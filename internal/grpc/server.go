@@ -187,7 +187,10 @@ func (s *Server) Decrypt(ctx context.Context, req *pb.DecryptRequest) (*pb.Decry
 	}
 	defer result.Plaintext.Wipe()
 
-	// Copy 明文到 response（不 defer clear，因为 response 持有引用）。
+	// Copy 明文到 response。
+	// 注意（BUG-11）：plainBytes 在 protobuf 序列化期间会短暂驻留在堆上。
+	// gRPC 框架在 handler 返回后立即序列化 response，序列化完成后 plainBytes 可被 GC。
+	// 完全消除此窗口需自定义 protobuf Codec，当前接受此限制（与 HTTP JSON 路径一致）。
 	var plainBytes []byte
 	_ = result.Plaintext.WithKey(func(d []byte) error {
 		plainBytes = make([]byte, len(d))

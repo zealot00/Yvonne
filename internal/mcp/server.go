@@ -111,6 +111,12 @@ func (s *Server) registerTools() {
 			return errorResult("invalid base64 ciphertext"), nil, nil
 		}
 
+		// PD-7: 限制密文大小（防 AI 解密大块数据泄漏）。
+		const maxMCPDecryptSize = 64 * 1024 // 64KB
+		if len(ciphertext) > maxMCPDecryptSize {
+			return errorResult("ciphertext too large for MCP (max 64KB)"), nil, nil
+		}
+
 		policy := &auth.Policy{
 			RoleID:         "mcp-agent",
 			AllowedKeys:    s.config.AllowedKeys,

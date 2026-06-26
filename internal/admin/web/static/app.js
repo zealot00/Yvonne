@@ -14,11 +14,40 @@ const state = {
 
 // ----------------------------- 工具函数 -----------------------------
 
+// getAdminToken 从 URL hash 或 localStorage 读取 admin token（BUG-10 修复）。
+function getAdminToken() {
+  // 优先从 URL hash 读取（#token=xxx），其次 localStorage。
+  const hashMatch = window.location.hash.match(/token=([^&]+)/);
+  if (hashMatch) {
+    const token = decodeURIComponent(hashMatch[1]);
+    localStorage.setItem('yvonne_admin_token', token);
+    // 清除 hash 中的 token（防泄漏到日志/书签）。
+    window.location.hash = '';
+    return token;
+  }
+  return localStorage.getItem('yvonne_admin_token') || '';
+}
+
 async function fetchJSON(url, opts = {}) {
+  const token = getAdminToken();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) {
+    headers['Authorization'] = 'Bearer ' + token;
+  }
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: { ...headers, ...(opts.headers || {}) },
     ...opts,
   });
+  // 401 时清除 token 并提示重新输入。
+  if (res.status === 401) {
+    localStorage.removeItem('yvonne_admin_token');
+    const token = prompt('Admin Token required:');
+    if (token) {
+      localStorage.setItem('yvonne_admin_token', token);
+      return fetchJSON(url, opts); // 重试一次。
+    }
+    throw new Error('unauthorized');
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data.error || `HTTP ${res.status}`);

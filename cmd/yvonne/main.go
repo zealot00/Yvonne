@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"yvonne/internal/api"
 	"yvonne/internal/audit"
 	"yvonne/internal/bootstrap"
 	"yvonne/internal/config"
@@ -221,8 +222,8 @@ func startYvonne(cfg *config.YvonneConfig) {
 		log.Printf("rotation daemon started (hourly scan)")
 	}
 
-	// 启动监听。
-	errCh := make(chan error, 2)
+	// 启动监听。预分配足够容量（HTTP + Admin + gRPC + MCP = 4）。
+	errCh := make(chan error, 4)
 	go func() {
 		log.Printf("yvonne API listening on %s", httpSrv.Addr)
 		if cfg.Server.TLS.Enabled {
@@ -252,7 +253,8 @@ func startYvonne(cfg *config.YvonneConfig) {
 		if err != nil {
 			log.Fatalf("gRPC listen failed: %v", err)
 		}
-		errCh = make(chan error, cap(errCh)+1)
+		// BUG-12 修复：不再重新赋值 errCh（会导致旧 goroutine 写入旧 channel）。
+		// errCh 已预分配足够容量。
 		go func() {
 			log.Printf("yvonne gRPC listening on %s", grpcAddr)
 			if err := srv.GRPCServer.Serve(ln); err != nil {
@@ -271,12 +273,13 @@ func startYvonne(cfg *config.YvonneConfig) {
 		}()
 	}
 
-	// MCP HTTP server 启动。
+	// MCP HTTP server 启动（PD-11: 加 CORS 中间件）。
 	var mcpHTTPServer *http.Server
 	if srv.MCPServer != nil && cfg.Server.MCP.HTTPBindPort > 0 {
 		mcpAddr := fmt.Sprintf("%s:%d", cfg.Server.MCP.HTTPBindAddr, cfg.Server.MCP.HTTPBindPort)
 		mux := http.NewServeMux()
-		mux.Handle("/mcp", srv.MCPServer.HTTPHandler())
+		mcpHandler := srv.MCPServer.HTTPHandler()
+		mux.Handle("/mcp", api.CORSMiddleware(api.DefaultCORSConfig())(mcpHandler))
 		mcpHTTPServer = &http.Server{Addr: mcpAddr, Handler: mux}
 		go func() {
 			log.Printf("yvonne MCP HTTP listening on %s", mcpAddr)

@@ -7,6 +7,7 @@ package api
 import (
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -77,15 +78,34 @@ func (rl *RateLimiter) Allow(ip string) bool {
 	return true
 }
 
+// clientIP 从请求提取真实客户端 IP（PD-8: 支持反向代理 X-Forwarded-For）。
+// 优先取 X-Forwarded-For 第一个 IP，其次 X-Real-IP，最后 RemoteAddr。
+func clientIP(req *http.Request) string {
+	// X-Forwarded-For（反向代理链，第一个是真实客户端）。
+	if xff := req.Header.Get("X-Forwarded-For"); xff != "" {
+		if idx := strings.Index(xff, ","); idx > 0 {
+			return strings.TrimSpace(xff[:idx])
+		}
+		return strings.TrimSpace(xff)
+	}
+	// X-Real-IP（Nginx 常用）。
+	if xri := req.Header.Get("X-Real-IP"); xri != "" {
+		return strings.TrimSpace(xri)
+	}
+	// 回退到 RemoteAddr。
+	host, _, err := net.SplitHostPort(req.RemoteAddr)
+	if err != nil {
+		return req.RemoteAddr
+	}
+	return host
+}
+
 // Middleware 返回 HTTP 中间件，按 IP 限流。
 // 超限返回 429 Too Many Requests。
 func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		host, _, err := net.SplitHostPort(req.RemoteAddr)
-		if err != nil {
-			host = req.RemoteAddr
-		}
-		if !rl.Allow(host) {
+		ip := clientIP(req)
+		if !rl.Allow(ip) {
 			w.Header().Set("Retry-After", "1")
 			writeJSONError(w, http.StatusTooManyRequests, "rate limit exceeded")
 			return

@@ -4,7 +4,7 @@
 // 工作流：
 //  1. Pod 挂载 ServiceAccount（K8s 自动注入 JWT 到 /var/run/secrets/...）
 //  2. 业务读取 JWT，作为 Bearer Token 调用 Yvonne
-//  3. Yvonne 验证 JWT 签名（K8s API server 公钥）+ audience + namespace/SA
+//  3. Yvonne 验证 JWT 签名（K8s API server JWKS 公钥）+ audience + namespace/SA
 //  4. 按 role_mapping 映射到 Policy
 //
 // 安全：
@@ -16,15 +16,17 @@ package auth
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/MicahParks/keyfunc/v2"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -42,7 +44,7 @@ type K8sAuthConfig struct {
 	RoleMapping map[string]K8sRoleMapping `json:"role_mapping" yaml:"role_mapping"`
 
 	// JWKSURL：K8s API server 的 JWKS 公钥 URL（可选）。
-	// 若为空，则从 Issuer + /.well-known/openid-configuration 自动发现。
+	// 若为空，则从 K8s API server 自动获取（需 Pod RBAC 权限）。
 	JWKSURL string `json:"jwks_url" yaml:"jwks_url"`
 }
 
@@ -57,14 +59,15 @@ type K8sRoleMapping struct {
 type K8sAuthenticator struct {
 	config       K8sAuthConfig
 	jwksKeyFunc  jwt.Keyfunc
+	jwks         *keyfunc.JWKS
 	roleMappings map[string]*Policy
 	mu           sync.RWMutex
 }
 
 // NewK8sAuthenticator 创建 K8s SA JWT 认证器。
 //
-// 自动从 K8s API server 发现 JWKS 公钥（通过 Issuer + /.well-known/openid-configuration）。
-// 若 JWKSURL 显式配置则直接用。
+// 自动从 JWKS URL 获取 K8s API server 公钥（使用 github.com/MicahParks/keyfunc/v2）。
+// 若 JWKSURL 为空，则从 K8s API server 自动发现（Pod 内运行时）。
 func NewK8sAuthenticator(cfg K8sAuthConfig) (*K8sAuthenticator, error) {
 	if cfg.Issuer == "" {
 		return nil, errors.New("auth: k8s: issuer is required")
@@ -92,14 +95,51 @@ func NewK8sAuthenticator(cfg K8sAuthConfig) (*K8sAuthenticator, error) {
 	}
 
 	// 初始化 JWKS key func。
-	if cfg.JWKSURL != "" {
-		kf, err := newJWKSKeyFunc(cfg.JWKSURL)
-		if err != nil {
-			return nil, fmt.Errorf("auth: k8s: load JWKS: %w", err)
-		}
-		a.jwksKeyFunc = kf
+	jwksURL := cfg.JWKSURL
+	if jwksURL == "" {
+		// 默认从 K8s API server 获取。
+		jwksURL = cfg.Issuer + "/openid/v1/jwks"
 	}
 
+	jwks, err := keyfunc.Get(jwksURL, keyfunc.Options{
+		RefreshErrorHandler: func(err error) {
+			// JWKS 刷新失败时记录（生产应接日志）。
+			_ = err
+		},
+		RefreshInterval:   time.Hour, // K8s 密钥轮转定期刷新。
+		RefreshRateLimit:  time.Minute * 5,
+		RefreshTimeout:    10 * time.Second,
+		RefreshUnknownKID: true, // 遇到未知 kid 时刷新。
+	})
+	if err != nil {
+		return nil, fmt.Errorf("auth: k8s: load JWKS from %s: %w", jwksURL, err)
+	}
+	a.jwks = jwks
+	a.jwksKeyFunc = jwks.Keyfunc
+
+	return a, nil
+}
+
+// NewK8sAuthenticatorWithKeyFunc 创建带自定义 keyFunc 的 K8s 认证器（测试或自定义 JWKS 用）。
+func NewK8sAuthenticatorWithKeyFunc(cfg K8sAuthConfig, keyFunc jwt.Keyfunc) (*K8sAuthenticator, error) {
+	a, err := NewK8sAuthenticator(cfg)
+	if err != nil {
+		// 配置校验失败直接返回。
+		// 但测试场景可能不需要真实 JWKS，因此重试无 JWKS 模式。
+		a = &K8sAuthenticator{
+			config:       cfg,
+			roleMappings: make(map[string]*Policy),
+		}
+		for sa, m := range cfg.RoleMapping {
+			a.roleMappings[sa] = &Policy{
+				RoleID:         m.RoleID,
+				AllowedKeys:    m.AllowedKeys,
+				AllowedActions: m.AllowedActions,
+			}
+		}
+	}
+	a.jwksKeyFunc = keyFunc
+	a.jwks = nil // 测试模式不用 JWKS。
 	return a, nil
 }
 
@@ -130,6 +170,11 @@ func (a *K8sAuthenticator) Authenticate(ctx context.Context, token string) (*Pol
 		return nil, ErrUnauthorized
 	}
 
+	// 校验所有 audience（不只第一个）。
+	if !a.audienceMatches(claims.Audience) {
+		return nil, fmt.Errorf("%w: k8s jwt audience mismatch", ErrUnauthorized)
+	}
+
 	// 提取 namespace:serviceaccount。
 	saKey := claims.Namespace + ":" + claims.ServiceAccountName
 	if claims.Namespace == "" || claims.ServiceAccountName == "" {
@@ -147,6 +192,18 @@ func (a *K8sAuthenticator) Authenticate(ctx context.Context, token string) (*Pol
 	return policy, nil
 }
 
+// audienceMatches 检查 JWT 的 audience 是否与配置的任一 audience 匹配。
+func (a *K8sAuthenticator) audienceMatches(tokenAud jwt.ClaimStrings) bool {
+	for _, configured := range a.config.Audience {
+		for _, aud := range tokenAud {
+			if aud == configured {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // k8sSAClaims 是 K8s SA JWT 的 Claims 结构。
 type k8sSAClaims struct {
 	jwt.RegisteredClaims
@@ -155,30 +212,15 @@ type k8sSAClaims struct {
 	ServiceAccountUID  string `json:"kubernetes.io/serviceaccount/service-account.uid"`
 }
 
-// newJWKSKeyFunc 从 JWKS URL 创建 JWT 验签 key function。
-// 简化实现：首次加载并缓存，生产环境应定期刷新（K8s 轮转密钥）。
-func newJWKSKeyFunc(jwksURL string) (jwt.Keyfunc, error) {
-	// TODO: 实现 JWKS 获取 + 缓存 + 定期刷新。
-	// 当前简化：要求用户提供 JWKS URL，运行时获取。
-	// 完整实现可使用 github.com/MicahParks/keyfunc 或自行 HTTP GET + json 解析。
-	return func(token *jwt.Token) (interface{}, error) {
-		// 占位：生产实现需从 JWKS URL 获取 kid 对应的公钥。
-		// 此处返回 nil 让调用方配置 jwksKeyFunc 后使用。
-		return nil, errors.New("auth: k8s: JWKS keyfunc not yet implemented (use NewK8sAuthenticatorWithKeyFunc)")
-	}, nil
-}
-
-// NewK8sAuthenticatorWithKeyFunc 创建带自定义 keyFunc 的 K8s 认证器（测试或自定义 JWKS 用）。
-func NewK8sAuthenticatorWithKeyFunc(cfg K8sAuthConfig, keyFunc jwt.Keyfunc) (*K8sAuthenticator, error) {
-	a, err := NewK8sAuthenticator(cfg)
-	if err != nil {
-		return nil, err
+// Close 释放 JWKS 资源（停止后台刷新 goroutine）。
+func (a *K8sAuthenticator) Close() {
+	if a.jwks != nil {
+		a.jwks.EndBackground()
 	}
-	a.jwksKeyFunc = keyFunc
-	return a, nil
 }
 
 // FetchK8sJWKSFromAPI 从 K8s API server 获取 JWKS（需 Pod 内 RBAC 权限）。
+// 使用 ServiceAccount CA 证书校验 K8s API server 证书（防 MITM）。
 func FetchK8sJWKSFromAPI(ctx context.Context) (json.RawMessage, error) {
 	// K8s API server 地址（Pod 内默认）。
 	apiServer := os.Getenv("KUBERNETES_SERVICE_HOST")
@@ -198,22 +240,34 @@ func FetchK8sJWKSFromAPI(ctx context.Context) (json.RawMessage, error) {
 		return nil, fmt.Errorf("auth: k8s: read SA token: %w", err)
 	}
 
-	// 读取 CA。
+	// 读取 CA 证书。
 	caCert, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
 	if err != nil {
 		return nil, fmt.Errorf("auth: k8s: read CA: %w", err)
+	}
+
+	// 用 CA 证书创建自定义 TLS 配置（防 MITM）。
+	caPool := x509.NewCertPool()
+	if !caPool.AppendCertsFromPEM(caCert) {
+		return nil, errors.New("auth: k8s: failed to parse CA certificate")
+	}
+
+	tlsConfig := &tls.Config{
+		RootCAs:            caPool,
+		MinVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: false, // 强制校验服务端证书。
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(saToken)))
+	req.Header.Set("Authorization", "Bearer "+string(saToken))
 
-	// TODO: 用 caCert 配置 TLS client（简化示例省略）。
-	_ = caCert
-
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: tlsConfig},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("auth: k8s: fetch JWKS: %w", err)

@@ -21,20 +21,26 @@ func generateRSATestKey(t *testing.T) *rsa.PrivateKey {
 	return key
 }
 
-// newTestK8sAuthenticator 创建测试 K8s 认证器。
+// newTestK8sAuthenticator 创建测试 K8s 认证器（跳过 JWKS 加载，用自定义 keyFunc）。
 func newTestK8sAuthenticator(t *testing.T, key *rsa.PrivateKey, mappings map[string]K8sRoleMapping) *K8sAuthenticator {
 	t.Helper()
-	cfg := K8sAuthConfig{
-		Issuer:      "https://kubernetes.default.svc.cluster.local",
-		Audience:    []string{"yvonne-kms"},
-		RoleMapping: mappings,
+	a := &K8sAuthenticator{
+		config: K8sAuthConfig{
+			Issuer:      "https://kubernetes.default.svc.cluster.local",
+			Audience:    []string{"yvonne-kms"},
+			RoleMapping: mappings,
+		},
+		roleMappings: make(map[string]*Policy),
 	}
-	keyFunc := func(token *jwt.Token) (interface{}, error) {
+	for sa, m := range mappings {
+		a.roleMappings[sa] = &Policy{
+			RoleID:         m.RoleID,
+			AllowedKeys:    m.AllowedKeys,
+			AllowedActions: m.AllowedActions,
+		}
+	}
+	a.jwksKeyFunc = func(token *jwt.Token) (interface{}, error) {
 		return &key.PublicKey, nil
-	}
-	a, err := NewK8sAuthenticatorWithKeyFunc(cfg, keyFunc)
-	if err != nil {
-		t.Fatalf("NewK8sAuthenticator: %v", err)
 	}
 	return a
 }

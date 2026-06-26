@@ -6,6 +6,7 @@ package service
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"time"
@@ -23,14 +24,25 @@ import (
 // 所有方法接收 *auth.Policy 做资源级授权（nil Policy = Dev 模式放行）。
 // 所有方法内置：Sealed 拦截 → 授权校验 → 业务调用 → 审计记录。
 type Core struct {
-	manager  *lifecycle.Manager
-	seal     seal.Unsealer
-	auditLog audit.Auditor
+	manager    *lifecycle.Manager
+	seal       seal.Unsealer
+	auditLog   audit.Auditor
+	adminToken string // EmergencySeal 校验用
 }
 
-// NewCore 创建 Core 实例。
-func NewManager(mgr *lifecycle.Manager, s seal.Unsealer, log audit.Auditor) *Core {
+// NewCore 创建 Core 实例（PD-9: 重命名为 NewCore，旧名保持兼容）。
+func NewCore(mgr *lifecycle.Manager, s seal.Unsealer, log audit.Auditor) *Core {
 	return &Core{manager: mgr, seal: s, auditLog: log}
+}
+
+// NewManager 别名（向后兼容，PD-9 建议用 NewCore）。
+func NewManager(mgr *lifecycle.Manager, s seal.Unsealer, log audit.Auditor) *Core {
+	return NewCore(mgr, s, log)
+}
+
+// SetAdminToken 设置 EmergencySeal 用的 admin token（BUG-8 修复）。
+func (c *Core) SetAdminToken(token string) {
+	c.adminToken = token
 }
 
 // === 系统管理 ===
@@ -46,8 +58,15 @@ func (c *Core) Health(ctx context.Context) (state string, emergencySealed bool, 
 	return "unsealed", false, nil
 }
 
-// EmergencySeal 紧急封印。
+// EmergencySeal 紧急封印。校验 adminToken 后触发。
 func (c *Core) EmergencySeal(ctx context.Context, adminToken string) error {
+	if c.adminToken == "" {
+		return errors.New("service: emergency seal not configured (no admin token)")
+	}
+	if subtle.ConstantTimeCompare([]byte(adminToken), []byte(c.adminToken)) != 1 {
+		c.recordAudit(ctx, "EmergencySeal", "", 0, "denied", "invalid admin token")
+		return errors.New("service: invalid admin token")
+	}
 	c.seal.EmergencySeal(ctx)
 	if c.manager != nil {
 		c.manager.ClearCache()

@@ -206,6 +206,7 @@ func buildDevMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, metrics
 
 	// Core service 层（共享给 gRPC/MCP）。
 	core := service.NewManager(lifecycleMgr, vault, auditLog)
+	core.SetAdminToken(cfg.Server.Admin.AdminToken)
 
 	// gRPC server（Dev 模式可选，默认启用）。
 	var grpcSrv *grpc.Server
@@ -440,6 +441,7 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 
 	// Core service 层。
 	core := service.NewManager(lifecycleMgr, unsealer, auditLog)
+	core.SetAdminToken(cfg.Server.Admin.AdminToken)
 
 	// gRPC server。
 	var grpcSrv *grpc.Server
