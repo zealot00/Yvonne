@@ -77,12 +77,28 @@ func NewPostgresKVStoreWithConfig(ctx context.Context, cfg PostgresPoolConfig) (
 
 	schema := `CREATE TABLE IF NOT EXISTS yvonne_kv_str (
 		k TEXT PRIMARY KEY,
-		v BYTEA NOT NULL
-	);`
+		v BYTEA NOT NULL,
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+
+	-- 前缀扫描优化索引（LIKE 'prefix%' 走索引）。
+	CREATE INDEX IF NOT EXISTS idx_yvonne_kv_str_k_prefix ON yvonne_kv_str (k varchar_pattern_ops);
+
+	-- updated_at 索引（按时间排序查询，如回收站 reaper）。
+	CREATE INDEX IF NOT EXISTS idx_yvonne_kv_str_updated_at ON yvonne_kv_str (updated_at);`
+
 	if _, err := pool.Exec(ctx, schema); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("postgres: ensure schema: %w", err)
 	}
+
+	// 兼容旧表：若 updated_at 列不存在则添加（ALTER TABLE IF NOT EXISTS PG 11+ 不支持列级）。
+	// 用 DO 块安全添加。
+	pool.Exec(ctx, `DO $$ BEGIN
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='yvonne_kv_str' AND column_name='updated_at') THEN
+			ALTER TABLE yvonne_kv_str ADD COLUMN updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+		END IF;
+	END $$`)
 
 	store := &PostgresKVStore{pool: pool}
 	store.health = newHealthState(func(ctx context.Context) error {
@@ -139,8 +155,8 @@ func (p *PostgresKVStore) Put(ctx context.Context, key string, value []byte) err
 		return p.Delete(ctx, key)
 	}
 	_, err := p.pool.Exec(ctx,
-		`INSERT INTO yvonne_kv_str (k, v) VALUES ($1, $2)
-		 ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v`,
+		`INSERT INTO yvonne_kv_str (k, v, updated_at) VALUES ($1, $2, NOW())
+		 ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v, updated_at = NOW()`,
 		key, value)
 	if err != nil {
 		p.markUnhealthy()

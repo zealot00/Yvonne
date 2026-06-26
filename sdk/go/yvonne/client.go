@@ -111,11 +111,15 @@ type GenerateDataKeyResponse struct {
 
 // Health 健康检查（无需认证）。
 func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
-	var resp HealthResponse
+	var resp struct {
+		OK   bool           `json:"ok"`
+		Data HealthResponse `json:"data"`
+		Err  string         `json:"error"`
+	}
 	if err := c.get(ctx, "/api/v1/sys/health", &resp); err != nil {
 		return nil, err
 	}
-	return &resp, nil
+	return &resp.Data, nil
 }
 
 // CreateKey 创建密钥。
