@@ -1,0 +1,18 @@
+apiVersion: v2
+name: yvonne
+description: Yvonne KMS - Self-hosted Key Management Service with envelope encryption, Shamir's secret sharing, and auditable key lifecycle.
+type: application
+version: 0.4.0
+appVersion: "0.4.0"
+keywords:
+  - kms
+  - encryption
+  - security
+  - shamir
+  - envelope-encryption
+home: https://github.com/zealot00/Yvonne
+sources:
+  - https://github.com/zealot00/Yvonne
+maintainers:
+  - name: Yvonne Team
+icon: https://raw.githubusercontent.com/zealot00/Yvonne/main/docs/logo.png

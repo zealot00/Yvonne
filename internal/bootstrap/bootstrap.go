@@ -378,6 +378,38 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 			cfg.Auth.JWT.SigningMethod, cfg.Auth.JWT.Issuer, cfg.Auth.JWT.RoleClaim)
 	}
 
+	// 3. 加载 K8s SA 认证（如果配置）。
+	var k8sAuth *auth.K8sAuthenticator
+	if cfg.Auth.K8s.Enabled {
+		mappings := make(map[string]auth.K8sRoleMapping, len(cfg.Auth.K8s.RoleMapping))
+		for sa, m := range cfg.Auth.K8s.RoleMapping {
+			mappings[sa] = auth.K8sRoleMapping{
+				RoleID:         m.RoleID,
+				AllowedKeys:    m.AllowedKeys,
+				AllowedActions: m.AllowedActions,
+			}
+		}
+		k8sAuth, err = auth.NewK8sAuthenticator(auth.K8sAuthConfig{
+			Issuer:      cfg.Auth.K8s.Issuer,
+			Audience:    cfg.Auth.K8s.Audience,
+			RoleMapping: mappings,
+			JWKSURL:     cfg.Auth.K8s.JWKSURL,
+		})
+		if err != nil {
+			auditLog.Close()
+			_ = pgStore.Close(ctx)
+			panic(fmt.Sprintf("FATAL: K8s authenticator init failed: %v", err))
+		}
+		log.Printf("CLUSTER MODE: K8s SA authenticator loaded (%d mappings, issuer=%s)",
+			len(mappings), cfg.Auth.K8s.Issuer)
+	}
+
+	// 多认证器链：AppRole + JWT + K8s（按顺序尝试）。
+	if k8sAuth != nil {
+		authenticator = auth.NewMultiAuthenticator(authenticator, k8sAuth)
+		log.Printf("CLUSTER MODE: MultiAuthenticator enabled (existing + K8s SA)")
+	}
+
 	if authenticator == nil {
 		// 致命约束：Cluster 模式无认证器 = 裸奔，拒绝启动。
 		auditLog.Close()

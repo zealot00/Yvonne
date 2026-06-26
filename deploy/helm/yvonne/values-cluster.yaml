@@ -1,0 +1,98 @@
+# Cluster 模式预设：生产部署（PostgreSQL + 多副本 + TLS）
+# 用法：helm install yvonne deploy/helm/yvonne -f deploy/helm/yvonne/values-cluster.yaml
+
+mode: cluster
+replicaCount: 3
+
+image:
+  pullPolicy: IfNotPresent
+
+config:
+  mode: cluster
+  server:
+    bind_addr: "0.0.0.0"
+    bind_port: 8400
+    tls:
+      enabled: true
+      cert_file: /etc/yvonne/tls/tls.crt
+      key_file: /etc/yvonne/tls/tls.key
+      min_version: "TLS1.3"
+    admin:
+      enabled: true
+      bind_addr: "127.0.0.1"
+      bind_port: 8250
+      admin_token: "CHANGE_ME_IN_PRODUCTION"  # 生产用 --set-config 覆盖
+    grpc:
+      enabled: true
+      bind_addr: "0.0.0.0"
+      bind_port: 8251
+      tls:
+        enabled: true
+    mcp:
+      enabled: false  # 生产按需启用
+
+  storage:
+    backend: postgres
+    dsn: "postgres://yvonne:CHANGE_ME@yvonne-postgresql:5432/yvonne?sslmode=require"
+
+  unseal:
+    strategy: shamir  # shamir | localpki | hsm
+
+  auth:
+    app_roles:
+      - role_id: "admin"
+        token: "CHANGE_ME_ADMIN_TOKEN"
+        allowed_keys: ["*"]
+        allowed_actions: ["Encrypt", "Decrypt", "CreateKey", "KeyOp", "AuditQuery"]
+    jwt:
+      signing_method: "RS256"
+      verifying_key_path: "/etc/yvonne/jwt/pub.pem"
+      issuer: "yvonne-kms"
+      audience: ["yvonne-clients"]
+      role_claim: "sub"
+
+  audit:
+    dir: /var/log/yvonne
+    filename: audit.log
+    retention_days: 365
+    syslog_enabled: false
+
+persistence:
+  enabled: false  # Cluster 模式用外部 PG，无需本地存储
+
+resources:
+  limits:
+    cpu: 2000m
+    memory: 1Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+# 启用 PostgreSQL 子 chart
+postgresql:
+  enabled: true
+  auth:
+    postgresPassword: "CHANGE_ME_PG"
+    username: yvonne
+    password: "CHANGE_ME_PG"
+    database: yvonne
+  primary:
+    persistence:
+      size: 50Gi
+      storageClass: "fast-ssd"
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8400"
+  prometheus.io/path: "/metrics"
+
+# 反亲和：Pod 分散到不同节点
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: yvonne
+          topologyKey: kubernetes.io/hostname

@@ -1,0 +1,12 @@
+{{- if .Values.config.server.tls.enabled }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "yvonne.fullname" . }}-tls
+  labels:
+    {{- include "yvonne.labels" . | nindent 4 }}
+type: kubernetes.io/tls
+data:
+  tls.crt: {{ .Files.Get "tls.crt" | default "" | b64enc | quote }}
+  tls.key: {{ .Files.Get "tls.key" | default "" | b64enc | quote }}
+{{- end }}

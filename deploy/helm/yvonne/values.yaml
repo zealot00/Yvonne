@@ -1,0 +1,184 @@
+# Yvonne KMS Helm Chart 默认配置
+#
+# 部署模式：
+#   helm install yvonne deploy/helm/yvonne -f deploy/helm/yvonne/values-dev.yaml    # Dev
+#   helm install yvonne deploy/helm/yvonne -f deploy/helm/yvonne/values-cluster.yaml # Cluster
+
+# -- 镜像配置
+image:
+  repository: yvonne/kms
+  tag: "0.4.0"
+  pullPolicy: IfNotPresent
+  # pullSecrets: []  # 私有仓库时配置
+
+# -- 副本数（Cluster 模式建议 >=2）
+replicaCount: 1
+
+# -- 运行模式：dev | cluster
+mode: dev
+
+# -- Yvonne 完整配置（注入 ConfigMap）
+# 与 config.json 结构一致，支持环境变量覆盖
+config:
+  mode: dev
+
+  server:
+    bind_addr: "0.0.0.0"
+    bind_port: 8400
+    read_timeout: "30s"
+    write_timeout: "30s"
+    tls:
+      enabled: false
+      # cert_file: /etc/yvonne/tls/tls.crt
+      # key_file: /etc/yvonne/tls/tls.key
+      min_version: "TLS1.3"
+    admin:
+      enabled: true
+      bind_addr: "127.0.0.1"
+      bind_port: 8250
+      admin_token: ""  # 生产必填，从 Secret 注入
+    grpc:
+      enabled: true
+      bind_addr: "0.0.0.0"
+      bind_port: 8251
+      tls:
+        enabled: false
+    mcp:
+      enabled: false
+      stdio: false
+      http_bind_addr: "127.0.0.1"
+      http_bind_port: 8252
+      token: ""  # 从 Secret 注入
+      allowed_keys: []
+
+  storage:
+    # dev 模式用 boltdb（emptyDir），cluster 模式用 postgres
+    backend: boltdb
+    path: /data/yvonne.boltdb
+    # dsn: "postgres://yvonne:pass@postgres:5432/yvonne?sslmode=disable"
+
+  unseal:
+    # dev 模式 auto，cluster 模式 shamir/localpki/hsm
+    strategy: auto
+
+  auth:
+    # dev 模式无需配置，cluster 模式配置 app_roles 或 jwt
+    app_roles: []
+    jwt:
+      signing_method: ""
+      verifying_key_path: ""
+      issuer: ""
+      audience: []
+      role_claim: "sub"
+      secret: ""
+
+  audit:
+    dir: /var/log/yvonne
+    filename: audit.log
+    retention_days: 180
+    syslog_enabled: false
+    syslog_tag: yvonne-kms
+
+# -- 环境变量（覆盖 config 字段）
+env:
+  YVONNE_MODE: ""
+  YVONNE_SERVER_BIND_ADDR: ""
+  YVONNE_SERVER_BIND_PORT: ""
+  YVONNE_STORAGE_BACKEND: ""
+  YVONNE_STORAGE_DSN: ""
+  YVONNE_AUDIT_DIR: ""
+
+# -- 从 Secret 注入敏感配置
+envFromSecret:
+  # adminToken 从 Secret 注入
+  adminToken:
+    name: yvonne-secrets
+    key: admin-token
+  # mcpToken:
+  #   name: yvonne-secrets
+  #   key: mcp-token
+
+# -- 持久化存储（Dev 模式 BoltDB 需要）
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 10Gi
+  mountPath: /data
+
+# -- Service 配置
+service:
+  type: ClusterIP
+  httpPort: 8400
+  grpcPort: 8251
+  mcpPort: 8252
+  adminPort: 8250
+  annotations: {}
+
+# -- 资源限制
+resources:
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+# -- Pod 安全上下文
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# -- 容器安全上下文
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# -- 探针
+livenessProbe:
+  httpGet:
+    path: /api/v1/sys/health
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 30
+  timeoutSeconds: 5
+
+readinessProbe:
+  httpGet:
+    path: /api/v1/sys/health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+
+# -- 优雅停机
+terminationGracePeriodSeconds: 30
+
+# -- Pod 注解
+podAnnotations: {}
+
+# -- 节点选择
+nodeSelector: {}
+
+# -- 亲和性
+affinity: {}
+
+# -- 容忍
+tolerations: []
+
+# -- PostgreSQL 子 chart（可选，cluster 模式推荐启用）
+postgresql:
+  enabled: false
+  # auth:
+  #   postgresPassword: yvonne
+  #   username: yvonne
+  #   password: yvonne
+  #   database: yvonne
+  # primary:
+  #   persistence:
+  #     size: 20Gi

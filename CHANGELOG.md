@@ -11,6 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TPM 2.0 hardware-bound CMK unseal (planned, `CryptoBackend` interface ready)
 - PKCS#11 HSM integration (planned, interface defined in `internal/seal/hsm.go`)
 
+## [0.4.1] - 2026-06-26
+
+### Added
+- **Kubernetes Helm Chart** — 一键部署
+  - `deploy/helm/yvonne/` 完整 chart
+  - StatefulSet + Service（HTTP/gRPC/MCP 三端口）+ ConfigMap + Secret
+  - Dev/Cluster 两套 values 预设
+  - 可选 PostgreSQL 子 chart
+  - 探针 + 优雅停机 + 反亲和 + Pod 安全上下文
+- **K8s ServiceAccount JWT 认证** — `K8sAuthenticator`
+  - Pod 内业务免 Token，用 SA JWT 自动认证
+  - `namespace:serviceaccount` → Policy 映射
+  - audience + issuer 校验
+  - `MultiAuthenticator` 链（AppRole + JWT + K8s 共存）
+- `internal/auth/multi_authenticator.go` — 多认证器链
+- `K8sAuthConfig` 配置（`auth.k8s.enabled/issuer/audience/role_mapping`）
+
+### Tests Added
+- `internal/auth/k8s_authenticator_test.go` (8): 合法 token、错误 audience、未映射 SA、过期、空 token、错误 issuer、配置校验、多 namespace
+
 ## [0.4.0] - 2026-06-26
 
 ### Added

@@ -57,6 +57,23 @@ type AuditModeConf struct {
 type AuthModeConf struct {
 	AppRoles []AppRoleEntry `json:"app_roles" yaml:"app_roles"`
 	JWT      JWTConfig      `json:"jwt"       yaml:"jwt"`
+	K8s      K8sAuthConfig  `json:"k8s"       yaml:"k8s"`
+}
+
+// K8sAuthConfig 是 Kubernetes ServiceAccount JWT 认证配置。
+type K8sAuthConfig struct {
+	Enabled     bool                      `json:"enabled"      yaml:"enabled"`
+	Issuer      string                    `json:"issuer"       yaml:"issuer"`
+	Audience    []string                  `json:"audience"     yaml:"audience"`
+	RoleMapping map[string]K8sRoleMapping `json:"role_mapping" yaml:"role_mapping"`
+	JWKSURL     string                    `json:"jwks_url"     yaml:"jwks_url"`
+}
+
+// K8sRoleMapping 是 K8s SA 到 Policy 的映射。
+type K8sRoleMapping struct {
+	RoleID         string   `json:"role_id"          yaml:"role_id"`
+	AllowedKeys    []string `json:"allowed_keys"     yaml:"allowed_keys"`
+	AllowedActions []string `json:"allowed_actions"  yaml:"allowed_actions"`
 }
 
 // AppRoleEntry 是单个 AppRole 的配置（Cluster 模式认证）。

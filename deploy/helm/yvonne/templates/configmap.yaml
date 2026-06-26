@@ -1,0 +1,62 @@
+{{- $config := .Values.config -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "yvonne.fullname" . }}-config
+  labels:
+    {{- include "yvonne.labels" . | nindent 4 }}
+data:
+  config.json: |
+    {
+      "mode": {{ $config.mode | quote }},
+      "server": {
+        "bind_addr": {{ $config.server.bind_addr | quote }},
+        "bind_port": {{ $config.server.bind_port }},
+        "read_timeout": {{ $config.server.read_timeout | quote }},
+        "write_timeout": {{ $config.server.write_timeout | quote }},
+        "tls": {
+          "enabled": {{ $config.server.tls.enabled }},
+          {{- if $config.server.tls.cert_file }}
+          "cert_file": {{ $config.server.tls.cert_file | quote }},
+          "key_file": {{ $config.server.tls.key_file | quote }},
+          {{- end }}
+          "min_version": {{ $config.server.tls.min_version | quote }}
+        },
+        "admin": {
+          "enabled": {{ $config.server.admin.enabled }},
+          "bind_addr": {{ $config.server.admin.bind_addr | quote }},
+          "bind_port": {{ $config.server.admin.bind_port }}
+        },
+        "grpc": {
+          "enabled": {{ $config.server.grpc.enabled }},
+          "bind_addr": {{ $config.server.grpc.bind_addr | quote }},
+          "bind_port": {{ $config.server.grpc.bind_port }}
+        },
+        "mcp": {
+          "enabled": {{ $config.server.mcp.enabled }},
+          "stdio": {{ $config.server.mcp.stdio }},
+          "http_bind_addr": {{ $config.server.mcp.http_bind_addr | quote }},
+          "http_bind_port": {{ $config.server.mcp.http_bind_port }},
+          "allowed_keys": {{ toJson $config.server.mcp.allowed_keys }}
+        }
+      },
+      "storage": {
+        "backend": {{ $config.storage.backend | quote }},
+        {{- if $config.storage.path }}
+        "path": {{ $config.storage.path | quote }},
+        {{- end }}
+        {{- if $config.storage.dsn }}
+        "dsn": {{ $config.storage.dsn | quote }}
+        {{- end }}
+      },
+      "unseal": {
+        "strategy": {{ $config.unseal.strategy | quote }}
+      },
+      "audit": {
+        "dir": {{ $config.audit.dir | quote }},
+        "filename": {{ $config.audit.filename | quote }},
+        "retention_days": {{ $config.audit.retention_days }},
+        "syslog_enabled": {{ $config.audit.syslog_enabled }},
+        "syslog_tag": {{ $config.audit.syslog_tag | quote }}
+      }
+    }

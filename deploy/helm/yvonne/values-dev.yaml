@@ -1,0 +1,47 @@
+# Dev 模式预设：零配置快速启动
+# 用法：helm install yvonne deploy/helm/yvonne -f deploy/helm/yvonne/values-dev.yaml
+
+mode: dev
+replicaCount: 1
+
+config:
+  mode: dev
+  server:
+    bind_addr: "0.0.0.0"
+    bind_port: 8400
+    tls:
+      enabled: false
+    admin:
+      enabled: true
+      bind_addr: "0.0.0.0"
+      bind_port: 8250
+    grpc:
+      enabled: true
+      bind_addr: "0.0.0.0"
+      bind_port: 8251
+    mcp:
+      enabled: false
+
+  storage:
+    backend: boltdb
+    path: /data/yvonne.boltdb
+
+  unseal:
+    strategy: auto
+
+  audit:
+    dir: /var/log/yvonne
+    filename: audit.log
+
+# Dev 模式用 emptyDir（重启数据丢失）
+persistence:
+  enabled: true
+  size: 1Gi
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi

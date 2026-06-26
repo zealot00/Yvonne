@@ -1,0 +1,136 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "yvonne.fullname" . }}
+  labels:
+    {{- include "yvonne.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "yvonne.fullname" . }}
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "yvonne.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "yvonne.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: yvonne
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          args:
+            - server
+            - --config
+            - /etc/yvonne/config.json
+          ports:
+            - name: http
+              containerPort: {{ .Values.config.server.bind_port }}
+              protocol: TCP
+            - name: grpc
+              containerPort: {{ .Values.config.server.grpc.bind_port }}
+              protocol: TCP
+            - name: mcp
+              containerPort: {{ .Values.config.server.mcp.http_bind_port }}
+              protocol: TCP
+            - name: admin
+              containerPort: {{ .Values.config.server.admin.bind_port }}
+              protocol: TCP
+          env:
+            {{- range $k, $v := .Values.env }}
+            {{- if $v }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.config.server.admin.admin_token }}
+            - name: YVONNE_SERVER_ADMIN_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "yvonne.fullname" . }}-secrets
+                  key: admin-token
+            {{- end }}
+            {{- if .Values.config.server.mcp.token }}
+            - name: YVONNE_SERVER_MCP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "yvonne.fullname" . }}-secrets
+                  key: mcp-token
+            {{- end }}
+            {{- if .Values.config.auth.jwt.secret }}
+            - name: YVONNE_AUTH_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "yvonne.fullname" . }}-secrets
+                  key: jwt-secret
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/yvonne
+              readOnly: true
+            {{- if .Values.persistence.enabled }}
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath }}
+            {{- end }}
+            - name: audit
+              mountPath: /var/log/yvonne
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "yvonne.fullname" . }}-config
+        - name: audit
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        {{- if not .Values.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if .Values.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - {{ .Values.persistence.accessMode }}
+        {{- if .Values.persistence.storageClass }}
+        storageClassName: {{ .Values.persistence.storageClass }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}
+  {{- end }}
