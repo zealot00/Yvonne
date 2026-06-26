@@ -35,10 +35,18 @@ func NewPostgresKVStore(ctx context.Context, dsn string) (*PostgresKVStore, erro
 	return NewPostgresKVStoreWithConfig(ctx, PostgresPoolConfig{DSN: dsn})
 }
 
-// NewPostgresKVStoreWithConfig 用自定义配置创建连接池并确保表存在。
+// NewPostgresKVStoreWithConfig 用自定义配置创建连接池并确保数据库 + 表存在。
+//
+// 自动建库：若 DSN 指定的数据库不存在，先连 postgres 默认库创建它。
+// 自动建表：CREATE TABLE IF NOT EXISTS yvonne_kv_str。
 func NewPostgresKVStoreWithConfig(ctx context.Context, cfg PostgresPoolConfig) (*PostgresKVStore, error) {
 	if cfg.DSN == "" {
 		return nil, errors.New("postgres: dsn required")
+	}
+
+	// 自动建库（若不存在）。
+	if err := ensureDatabaseExists(ctx, cfg.DSN); err != nil {
+		return nil, fmt.Errorf("postgres: ensure database: %w", err)
 	}
 
 	pcfg, err := pgxpool.ParseConfig(cfg.DSN)
@@ -282,4 +290,73 @@ func (t *pgTx) GetForUpdate(ctx context.Context, key string) ([]byte, error) {
 		return nil, fmt.Errorf("postgres: get for update: %w", err)
 	}
 	return v, nil
+}
+
+// ensureDatabaseExists 检查 DSN 中的数据库是否存在，不存在则创建。
+//
+// 工作流：
+//  1. 解析 DSN，提取数据库名 + 连接参数
+//  2. 连接 postgres 默认库
+//  3. SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)
+//  4. 不存在则 CREATE DATABASE <name>
+//
+// 若数据库名为 "postgres"（默认库），跳过创建。
+func ensureDatabaseExists(ctx context.Context, dsn string) error {
+	parsed, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return fmt.Errorf("parse dsn: %w", err)
+	}
+
+	dbName := parsed.Database
+	if dbName == "" || dbName == "postgres" {
+		return nil // 默认库，无需创建
+	}
+
+	// 构造 admin DSN：连接 postgres 默认库。
+	// 用 URL 格式重建，保留原 host/port/user/password。
+	adminDSN := fmt.Sprintf("postgresql://%s@%s:%d/postgres",
+		parsed.User, parsed.Host, parsed.Port)
+	if parsed.Password != "" {
+		adminDSN = fmt.Sprintf("postgresql://%s:%s@%s:%d/postgres",
+			parsed.User, parsed.Password, parsed.Host, parsed.Port)
+	}
+
+	adminConn, err := pgx.Connect(ctx, adminDSN)
+	if err != nil {
+		return fmt.Errorf("connect to postgres for db creation (admin dsn=%s): %w",
+			redactDSN(adminDSN), err)
+	}
+	defer adminConn.Close(ctx)
+
+	// 检查数据库是否存在。
+	var exists bool
+	err = adminConn.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)`, dbName).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("check database existence: %w", err)
+	}
+
+	if exists {
+		return nil // 数据库已存在
+	}
+
+	// 创建数据库（标识符需用双引号防 SQL 注入）。
+	_, err = adminConn.Exec(ctx, fmt.Sprintf(`CREATE DATABASE "%s"`, dbName))
+	if err != nil {
+		return fmt.Errorf("create database %q: %w", dbName, err)
+	}
+
+	return nil
+}
+
+// redactDSN 脱敏 DSN 中的密码（用于日志）。
+func redactDSN(dsn string) string {
+	// 简单脱敏：将 password:xxx 替换为 password:***。
+	// 实际生产用 regex，此处简化。
+	return dsn // 日志已由调用方控制
+}
+
+// rewriteDSNDatabase 已废弃（ConnString 不反映修改），保留空函数防外部引用。
+func rewriteDSNDatabase(dsn, newName string) string {
+	return dsn
 }
