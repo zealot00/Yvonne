@@ -2,7 +2,6 @@
 package api
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -103,7 +102,7 @@ func (r *V1Router) handleImportKey(w http.ResponseWriter, req *http.Request) {
 	var version int
 	err = r.seal.KEKRef(func(kek seal.KEK) error {
 		meta, e := r.manager.ImportKey(
-			context.Background(),
+			req.Context(),
 			body.KeyID,
 			body.TransitKeyID,
 			wrapped,

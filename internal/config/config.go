@@ -36,9 +36,10 @@ type TLSConfig struct {
 // AdminServerConfig 管理页面相关配置。
 // 管理页面默认仅绑定 127.0.0.1，生产环境强烈建议通过反向代理 + mTLS 暴露。
 type AdminServerConfig struct {
-	Enabled  bool   `json:"enabled"  yaml:"enabled"`
-	BindAddr string `json:"bind_addr" yaml:"bind_addr"` // 强制 127.0.0.1，禁止 0.0.0.0
-	BindPort int    `json:"bind_port" yaml:"bind_port"`
+	Enabled    bool   `json:"enabled"     yaml:"enabled"`
+	BindAddr   string `json:"bind_addr"   yaml:"bind_addr"` // 强制 127.0.0.1，禁止 0.0.0.0
+	BindPort   int    `json:"bind_port"   yaml:"bind_port"`
+	AdminToken string `json:"admin_token" yaml:"admin_token"` // 全站认证 Token（Basic Auth password 或 Bearer）
 }
 
 // StorageConfig 持久化后端配置。

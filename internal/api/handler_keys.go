@@ -8,7 +8,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -22,7 +21,8 @@ import (
 
 // createKeyRequest 是 POST /api/v1/keys 的请求体。
 type createKeyRequest struct {
-	KeyID string `json:"key_id"`
+	KeyID     string `json:"key_id"`
+	ReturnDEK *bool  `json:"return_dek,omitempty"` // 可选，默认 true；false 时不返回明文 DEK
 }
 
 // createKeyResponse 返回新创建的密钥信息。
@@ -73,7 +73,7 @@ func (r *V1Router) handleCreateKey(w http.ResponseWriter, req *http.Request) {
 	}
 
 	err = r.seal.KEKRef(func(kek seal.KEK) error {
-		m, pdek, e := r.manager.CreateKey(context.Background(), body.KeyID, kek, 0)
+		m, pdek, e := r.manager.CreateKey(req.Context(), body.KeyID, kek, 0)
 		if e != nil {
 			return e
 		}
@@ -90,6 +90,26 @@ func (r *V1Router) handleCreateKey(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer plaintextDEK.Wipe()
+
+	// 判断是否需要返回明文 DEK（默认 true）。
+	returnDEK := true
+	if body.ReturnDEK != nil {
+		returnDEK = *body.ReturnDEK
+	}
+
+	// 响应：强制 no-store 防止明文 DEK 被缓存。
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
+
+	if !returnDEK {
+		// 不返回明文 DEK（客户端只能通过 GDK 获取）。
+		writeJSONOK(w, createKeyResponse{
+			KeyID:        meta.KeyID,
+			Version:      meta.Version,
+			PlaintextDEK: nil, // 明文 DEK 已在 defer 中 Wipe
+		})
+		return
+	}
 
 	// 取出明文 DEK 用于响应（base64 编码）。
 	var dekBytes []byte
@@ -173,7 +193,7 @@ func (r *V1Router) handleRotateKey(w http.ResponseWriter, req *http.Request, key
 	var newVersion int
 
 	err := r.seal.KEKRef(func(kek seal.KEK) error {
-		m, pdek, e := r.manager.RotateKey(context.Background(), keyID, kek)
+		m, pdek, e := r.manager.RotateKey(req.Context(), keyID, kek)
 		if e != nil {
 			return e
 		}
@@ -234,7 +254,7 @@ func (r *V1Router) handleShredKey(w http.ResponseWriter, req *http.Request, keyI
 		return
 	}
 
-	if err := r.manager.ShredKey(context.Background(), keyID, body.Version); err != nil {
+	if err := r.manager.ShredKey(req.Context(), keyID, body.Version); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "shred key failed")
 		return
 	}
@@ -284,7 +304,7 @@ func (r *V1Router) handleSoftDeleteKey(w http.ResponseWriter, req *http.Request,
 		return
 	}
 
-	if err := r.manager.SoftDeleteKey(context.Background(), keyID, body.Version); err != nil {
+	if err := r.manager.SoftDeleteKey(req.Context(), keyID, body.Version); err != nil {
 		if err == lifecycle.ErrKeyDestroyed {
 			writeJSONError(w, http.StatusBadRequest, "key is already destroyed")
 			return
@@ -334,7 +354,7 @@ func (r *V1Router) handleRestoreKey(w http.ResponseWriter, req *http.Request, ke
 		return
 	}
 
-	if err := r.manager.RestoreKey(context.Background(), keyID, body.Version); err != nil {
+	if err := r.manager.RestoreKey(req.Context(), keyID, body.Version); err != nil {
 		if err == lifecycle.ErrKeyDestroyed {
 			writeJSONError(w, http.StatusBadRequest, "key is destroyed, cannot restore")
 			return
@@ -416,11 +436,13 @@ func (r *V1Router) handleGenerateDataKey(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
-	// 4. 写入 HTTP 响应。
+	// 4. 写入 HTTP 响应（强制 no-store 防止明文 DEK 被缓存）。
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(out)
 

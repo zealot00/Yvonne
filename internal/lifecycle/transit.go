@@ -158,7 +158,7 @@ func (t *TransitKeyManager) UnwrapWithTransitKey(keyID string, wrappedMaterial [
 			rand.Reader,
 			rsaPriv,
 			wrappedMaterial,
-			nil, // label
+			nil, // label=nil（BYOK 客户端约定不使用 label；与 local_pki 的 CMK 解密区分）
 		)
 		return e
 	})

@@ -550,8 +550,8 @@ else
     { print }
   ')
 
-  # 验证 A: 方法体含 Combine 调用
-  if ! echo "$method_body" | grep -qE '\bCombine\s*\('; then
+  # 验证 A: 方法体含 Combine 或 CombineWithThreshold 调用
+  if ! echo "$method_body" | grep -qE '\bCombine(WithThreshold)?\s*\('; then
     violations_ck7+=("$ps_file:$ps_line  ProvideShare 未调用 Combine（无法重组 Master Key）")
   fi
 

@@ -680,6 +680,7 @@ func TestIntegration_Metrics(t *testing.T) {
 
 	// 获取指标。
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
@@ -859,6 +860,7 @@ func TestIntegration_KeyOps_UnknownAction(t *testing.T) {
 func TestIntegration_MetricsContentType(t *testing.T) {
 	r, _, _, _, _ := newIntegrationRouter(t)
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	ct := rec.Header().Get("Content-Type")

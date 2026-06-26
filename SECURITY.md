@@ -10,6 +10,18 @@
 
 ## Security Fixes by Version
 
+### 0.3.1
+- **BUG-2**: Request context propagation (client disconnect cancels DB queries)
+- **BUG-3**: Panic recovery logs stack trace (no silent swallow)
+- **BUG-4**: `CombineWithThreshold` strict threshold validation (prevents garbage output)
+- **BUG-5**: `RotateKey` post-tx panic protection (plainDEK Wipe on panic)
+- **PD-1**: Admin UI full-site Basic Auth (when `admin_token` configured)
+- **PD-2**: HMAC Secret copied to `[]byte` (avoids string immutability)
+- **PD-3**: Dev mode `/metrics` loopback-only
+- **PD-4**: `Cache-Control: no-store` on DEK-bearing responses
+- **PD-5**: IP rate limiting (token bucket, 100 req/s burst 1000)
+- **PD-6**: CORS middleware (configurable origins)
+
 ### 0.3.0
 - **SecureBuffer race condition**: `sync.RWMutex` added (WithKey=RLock, Wipe=Lock)
 - **O(N) version scan**: `meta:latest:{keyID}` index (O(1) lookup + phantom read prevention)

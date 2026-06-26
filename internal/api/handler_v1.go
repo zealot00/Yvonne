@@ -88,7 +88,7 @@ func (r *V1Router) handleV1Encrypt(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := req.Context()
 
 	// 强制请求 Active 版本（状态机硬编码：只有 Active 能加密）。
 	meta, err := r.manager.GetActiveKey(ctx, body.KeyID)
@@ -202,7 +202,7 @@ func (r *V1Router) handleV1Decrypt(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := req.Context()
 
 	// 2. 精准请求对应版本（状态机强制：Destroyed 拒绝）。
 	meta, err := r.manager.GetKeyForDecrypt(ctx, body.KeyID, int(version))

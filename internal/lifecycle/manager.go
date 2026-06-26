@@ -533,6 +533,15 @@ func (m *Manager) RotateKey(ctx context.Context, keyID string, kek seal.KEK) (*K
 	}
 
 	// 事务提交成功后：失效本地缓存 + 通知集群其他节点。
+	// 若此阶段 panic（如网络故障），确保 plaintextDEK 被 Wipe。
+	defer func() {
+		if r := recover(); r != nil {
+			if plaintextDEK != nil {
+				plaintextDEK.Wipe()
+			}
+			panic(r) // re-panic 保持错误传播
+		}
+	}()
 	m.cache.invalidate(keyID)
 	m.notifyCluster(keyID)
 

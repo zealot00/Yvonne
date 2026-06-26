@@ -192,9 +192,12 @@ func gfEval(x byte, coef []byte) byte {
 // 返回：*memguard.SecureBuffer，内含重组后的明文。
 //
 // 安全：
-//   - 重组结果直接进 SecureBuffer。
-//   - 任何错误路径都清空临时缓冲。
+//   - 重组结果直接进 SecureBuffer（memguard.NewSecureBuffer）。
+//   - 任何错误路径都清空临时缓冲（defer clear）。
 //   - 不假设输入 shares 已去重——若存在重复 x，返回错误。
+//
+// 注意：本函数不校验 threshold（包级函数无此上下文）。
+// 调用方应使用 CombineWithThreshold 进行严格校验，或自行确保份数足够。
 func Combine(shares [][]byte) (*memguard.SecureBuffer, error) {
 	if len(shares) < 2 {
 		return nil, fmt.Errorf("%w: need at least 2 shares, got %d", errInvalidShareFormat, len(shares))
@@ -269,4 +272,15 @@ func Combine(shares [][]byte) (*memguard.SecureBuffer, error) {
 	sb := memguard.NewSecureBuffer(plain)
 	handedOff = true
 	return sb, nil
+}
+
+// CombineWithThreshold 在 Combine 基础上校验 share 数量是否达到 threshold。
+// threshold <= 0 时退化为 Combine（不校验）。
+// 用于 VaultState.ProvideShare 等已知 threshold 的场景，防止传入不足的分片
+// 导致拉格朗日插值产生无意义垃圾数据。
+func CombineWithThreshold(shares [][]byte, threshold int) (*memguard.SecureBuffer, error) {
+	if threshold > 0 && len(shares) < threshold {
+		return nil, fmt.Errorf("%w: need at least %d shares (threshold), got %d", errInvalidShareFormat, threshold, len(shares))
+	}
+	return Combine(shares)
 }

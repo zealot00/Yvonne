@@ -92,6 +92,7 @@ func (s *Server) requireAdminToken(next http.HandlerFunc) http.HandlerFunc {
 }
 
 // ServeHTTP 实现 http.Handler。
+// 若设置了 adminToken，所有请求（含页面）必须通过 Basic Auth 或 Bearer Token。
 func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// 统一安全响应头。
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -99,5 +100,39 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Content-Security-Policy",
 		"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'")
+
+	// 若设置了 adminToken，强制全站认证（含页面 + API + 静态资源）。
+	if s.adminToken != "" {
+		if !s.authenticate(req) {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Yvonne Admin"`)
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+	}
 	s.mux.ServeHTTP(w, req)
+}
+
+// authenticate 支持两种认证方式：
+// 1. Basic Auth: username 任意，password = adminToken
+// 2. Bearer Token: Authorization: Bearer <adminToken>
+func (s *Server) authenticate(req *http.Request) bool {
+	// 尝试 Basic Auth。
+	if user, pass, ok := req.BasicAuth(); ok {
+		// username 不校验（任意），password 必须等于 adminToken。
+		if subtle.ConstantTimeCompare([]byte(pass), []byte(s.adminToken)) == 1 {
+			_ = user // username 不参与校验
+			return true
+		}
+		return false
+	}
+	// 尝试 Bearer Token。
+	auth := req.Header.Get("Authorization")
+	const prefix = "Bearer "
+	if len(auth) > len(prefix) && auth[:len(prefix)] == prefix {
+		token := auth[len(prefix):]
+		if subtle.ConstantTimeCompare([]byte(token), []byte(s.adminToken)) == 1 {
+			return true
+		}
+	}
+	return false
 }

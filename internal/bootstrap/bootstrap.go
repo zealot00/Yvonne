@@ -390,7 +390,11 @@ func buildAdminServer(cfg *config.YvonneConfig, unsealer seal.Unsealer) *admin.S
 	// Dev 模式强制启用 admin UI。
 	if cfg.Mode == config.ModeDev {
 		log.Printf("DEV MODE: admin web UI forced enabled")
-		return admin.NewServer(unsealer)
+		srv := admin.NewServer(unsealer)
+		if cfg.Server.Admin.AdminToken != "" {
+			srv.SetAdminToken(cfg.Server.Admin.AdminToken)
+		}
+		return srv
 	}
 
 	// Cluster 模式按配置。
@@ -400,5 +404,12 @@ func buildAdminServer(cfg *config.YvonneConfig, unsealer seal.Unsealer) *admin.S
 	}
 
 	log.Printf("admin web UI enabled at %s:%d", cfg.Server.Admin.BindAddr, cfg.Server.Admin.BindPort)
-	return admin.NewServer(unsealer)
+	srv := admin.NewServer(unsealer)
+	if cfg.Server.Admin.AdminToken != "" {
+		srv.SetAdminToken(cfg.Server.Admin.AdminToken)
+		log.Printf("admin web UI: Basic Auth enabled (admin_token configured)")
+	} else {
+		log.Printf("WARNING: admin web UI has no admin_token — UNPROTECTED (bind 127.0.0.1 only)")
+	}
+	return srv
 }

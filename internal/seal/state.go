@@ -233,7 +233,7 @@ func (v *VaultState) ProvideShare(share []byte) (unsealed bool, err error) {
 	// 达阈值：触发 Combine。无论成败，立即清空 collectedShares。
 	defer v.wipeCollectedShares()
 
-	combined, err := Combine(v.collectedShares)
+	combined, err := CombineWithThreshold(v.collectedShares, v.threshold)
 	if err != nil {
 		return false, fmt.Errorf("seal: combine shares: %w", err)
 	}

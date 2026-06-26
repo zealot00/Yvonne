@@ -13,6 +13,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Kubernetes KMS v2 plugin (planned, gRPC over Unix socket)
 - OpenAPI spec + SDK (Go/Java/Python)
 
+## [0.3.1] - 2026-06-26
+
+### Fixed
+- **BUG-2**: `context.Background()` → `req.Context()` in all handlers (8 sites)
+  - Client disconnect now propagates to lifecycle.Manager + DB queries
+- **BUG-3**: `auditMiddleware` panic recovery now logs stack trace
+  - `log.Printf` + `debug.Stack()` before 500 response (no more silent swallow)
+- **BUG-4**: `CombineWithThreshold` added for strict threshold validation
+  - `VaultState.ProvideShare` now uses `CombineWithThreshold` (prevents garbage output)
+- **BUG-5**: `RotateKey` post-tx panic protection
+  - `defer recover` + `Wipe` before `cache.invalidate` / `notifyCluster`
+- **BUG-6**: RSA-OAEP label documented (transit=nil vs local_pki="yvonne-master-key")
+- **PD-1**: Admin UI Basic Auth (full-site auth when `admin_token` configured)
+- **PD-2**: HMAC Secret copied to `[]byte` (avoids string immutability)
+- **PD-3**: Dev mode `/metrics` loopback-only restriction
+- **PD-4**: `CreateKey` + `GenerateDataKey` response `Cache-Control: no-store`
+  - Optional `return_dek=false` to skip plaintext DEK in response
+
+### Added
+- **PD-5**: Rate limiting middleware (IP-based token bucket, 100 req/s burst 1000)
+- **PD-6**: CORS middleware (configurable `AllowedOrigins`, OPTIONS preflight)
+- `CombineWithThreshold` — strict threshold validation for Shamir Combine
+- `SetRateLimit` — runtime rate limit configuration
+- `CORSMiddleware` — configurable CORS with preflight handling
+- `AdminServerConfig.AdminToken` — full-site admin UI auth
+
+### Tests Added
+- Rate limiter (5 tests): burst, over-limit, IP isolation, middleware, concurrency
+- CORS (4 tests): allow-all, preflight, disallowed, no-origin
+- CombineWithThreshold (4 tests): sufficient, insufficient, zero-threshold, backward compat
+
 ## [0.3.0] - 2026-06-25
 
 ### Added

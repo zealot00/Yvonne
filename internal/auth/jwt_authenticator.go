@@ -135,7 +135,13 @@ func NewJWTAuthenticator(cfg JWTConfig, policyStore PolicyStore) (*JWTAuthentica
 		if cfg.Secret == "" {
 			return nil, errors.New("auth: jwt: secret required for HMAC")
 		}
-		verifyKey = []byte(cfg.Secret)
+		// 复制 secret 到 []byte（HMAC 验证需要 []byte）。
+		// 注意：Go string 不可变，cfg.Secret 本身无法 clear。
+		// 安全建议：配置文件加载后应立即擦除文件读取 buffer（由 config loader 负责）。
+		// 此处至少避免多次引用同一 string，减少明文驻留窗口。
+		hmacKey := make([]byte, len(cfg.Secret))
+		copy(hmacKey, cfg.Secret)
+		verifyKey = hmacKey
 	default:
 		return nil, fmt.Errorf("auth: jwt: unsupported algorithm family %q", cfg.SigningMethod[:2])
 	}

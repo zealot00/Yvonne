@@ -13,6 +13,7 @@
 package api
 
 import (
+	"net"
 	"net/http"
 
 	"yvonne/internal/audit"
@@ -32,6 +33,7 @@ type V1Router struct {
 	adminToken    string
 	transitMgr    *lifecycle.TransitKeyManager
 	auditDir      string // 审计日志目录（查询用），可为空
+	rateLimiter   *RateLimiter
 	mux           *http.ServeMux
 }
 
@@ -46,10 +48,16 @@ func NewV1Router(s seal.Unsealer, auditLog audit.Auditor, mgr *lifecycle.Manager
 		metrics:       reg,
 		authenticator: authenticator,
 		transitMgr:    lifecycle.NewTransitKeyManager(),
+		rateLimiter:   NewRateLimiter(100, 1000), // 默认 100 req/s，突发 1000（测试友好）
 		mux:           http.NewServeMux(),
 	}
 	r.register()
 	return r
+}
+
+// SetRateLimit 调整速率限制参数。
+func (r *V1Router) SetRateLimit(rate float64, burst int) {
+	r.rateLimiter = NewRateLimiter(rate, burst)
 }
 
 // SetAdminToken 设置紧急封印 Admin Token。
@@ -79,14 +87,35 @@ func (r *V1Router) register() {
 	// 可观测性。
 	// metrics 含内部状态（请求量/延迟/失败率），生产应认证保护。
 	// Cluster 模式有 authenticator → 包裹 RequireAuth("Metrics")。
-	// Dev 模式无 authenticator → 直接暴露（仅 127.0.0.1）。
+	// Dev 模式无 authenticator → 仅允许 127.0.0.1 loopback 访问。
 	if r.metrics != nil {
 		if r.authenticator != nil {
 			r.mux.Handle("/metrics", r.auditMiddleware("Metrics", r.RequireAuth(r.authenticator, "Metrics", metricsHandler(r.metrics).ServeHTTP)))
 		} else {
-			r.mux.Handle("/metrics", metricsHandler(r.metrics))
+			r.mux.Handle("/metrics", r.loopbackOnly(metricsHandler(r.metrics)))
 		}
 	}
+}
+
+// loopbackOnly 限制仅 127.0.0.1 / ::1 可访问（Dev 模式防护）。
+// RemoteAddr 为空时放行（兼容 httptest 等无网络地址的测试场景）。
+func (r *V1Router) loopbackOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		host, _, err := net.SplitHostPort(req.RemoteAddr)
+		if err != nil {
+			host = req.RemoteAddr
+		}
+		if host == "" {
+			// 无 RemoteAddr（httptest 内联测试），放行。
+			next.ServeHTTP(w, req)
+			return
+		}
+		if host != "127.0.0.1" && host != "::1" && host != "localhost" {
+			writeJSONError(w, http.StatusForbidden, "metrics endpoint allows loopback only")
+			return
+		}
+		next.ServeHTTP(w, req)
+	})
 }
 
 // authAndSeal 组合认证 + Sealed 检查。
@@ -107,6 +136,18 @@ func metricsHandler(reg *metrics.Registry) http.Handler {
 }
 
 func (r *V1Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	// 最外层：IP 级速率限制（防暴力枚举）。
+	if r.rateLimiter != nil {
+		host, _, err := net.SplitHostPort(req.RemoteAddr)
+		if err != nil {
+			host = req.RemoteAddr
+		}
+		if !r.rateLimiter.Allow(host) {
+			w.Header().Set("Retry-After", "1")
+			writeJSONError(w, http.StatusTooManyRequests, "rate limit exceeded")
+			return
+		}
+	}
 	r.mux.ServeHTTP(w, req)
 }
 

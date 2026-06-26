@@ -18,8 +18,10 @@ import (
 	"bufio"
 	"encoding/hex"
 	"errors"
+	"log"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -167,9 +169,13 @@ func (r *V1Router) auditMiddleware(action string, next http.HandlerFunc) http.Ha
 		func() {
 			defer func() {
 				if recov := recover(); recov != nil {
+					// 记录完整堆栈到日志（防静默吞异常）。
+					log.Printf("PANIC in handler %s: %v\n%s", req.URL.Path, recov, debug.Stack())
 					if rec.status == http.StatusOK {
 						writeJSONError(rec, http.StatusInternalServerError, "internal error")
 					}
+					// 不 re-panic：http.Server 已接管连接，re-panic 会导致连接强制关闭
+					// 而无错误响应。记录堆栈 + 返回 500 已是最安全处理。
 				}
 			}()
 			next(rec, req)
