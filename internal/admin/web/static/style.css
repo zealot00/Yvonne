@@ -154,3 +154,26 @@ th { color: var(--muted); font-weight: 500; }
 }
 .toast.error { border-left-color: var(--danger); }
 .toast.ok { border-left-color: var(--ok); }
+
+/* 密钥列表样式 */
+.key-list { margin-top: 16px; }
+.key-table { width: 100%; border-collapse: collapse; }
+.key-table th, .key-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.key-table th { color: var(--accent); font-size: 13px; }
+.key-id { font-family: monospace; color: var(--ok); }
+.btn-small {
+  padding: 4px 10px;
+  font-size: 12px;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: var(--text);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.btn-small:hover { background: rgba(255,255,255,0.2); }
+.stats { color: var(--muted); font-size: 13px; margin-top: 12px; }
+.loading { color: var(--muted); }

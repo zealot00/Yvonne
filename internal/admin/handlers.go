@@ -2,6 +2,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -29,6 +30,61 @@ func (s *Server) handleSealStatus(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// handleListKeys 返回密钥列表（仅 KeyID + 最新版本，不含明文）。
+func (s *Server) handleListKeys(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.manager == nil {
+		// 未注入 manager（Sealed 状态或 Dev 模式无 manager）。
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true,"data":{"keys":[]}}`))
+		return
+	}
+
+	// Sealed 状态无法查询。
+	if s.seal.IsSealed() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"ok":false,"error":"vault is sealed"}`))
+		return
+	}
+
+	keyIDs, err := s.manager.ListKeyIDs(req.Context())
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"ok":false,"error":"failed to list keys"}`))
+		return
+	}
+
+	// 返回精简列表（不含明文/密文）。
+	type keyInfo struct {
+		KeyID string `json:"key_id"`
+	}
+	resp := struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Keys []keyInfo `json:"keys"`
+		} `json:"data"`
+	}{
+		OK: true,
+	}
+	resp.Data.Keys = make([]keyInfo, 0, len(keyIDs))
+	for _, id := range keyIDs {
+		resp.Data.Keys = append(resp.Data.Keys, keyInfo{KeyID: id})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// 确保 context 引用（ListKeyIDs 接口需要）。
+var _ = context.Background
 
 // handleSeal 触发重新封印（清零 Master Key）。
 func (s *Server) handleSeal(w http.ResponseWriter, req *http.Request) {

@@ -114,6 +114,9 @@ func startTestServer(t *testing.T, core *service.Core, authenticator auth.Authen
 	t.Cleanup(func() { ln.Close() })
 
 	// 从 core 提取 vault（通过反射或直接传参）——简化：测试用 nil vault，Sealed 检查跳过。
+	// 注册 wipingCodec（与生产一致）。
+	RegisterWipingCodec()
+
 	srv := grpc.NewServer(grpc.UnaryInterceptor(
 		InterceptorChain(authenticator, testVault),
 	))

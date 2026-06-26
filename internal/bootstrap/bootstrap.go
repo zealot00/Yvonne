@@ -59,8 +59,11 @@ type Server struct {
 	RotationDaemon *lifecycle.RotationDaemon
 }
 
-// buildGRPCServer 创建 gRPC server 实例（含拦截器链）。
+// buildGRPCServer 创建 gRPC server 实例（含拦截器链 + 敏感数据擦除 codec）。
 func buildGRPCServer(core *service.Core, authenticator auth.Authenticator, vault seal.Unsealer) *grpc.Server {
+	// 注册 wipingCodec（覆盖默认 proto codec，序列化后清理明文 DEK）。
+	grpcsrv.RegisterWipingCodec()
+
 	srv := grpc.NewServer(grpc.UnaryInterceptor(
 		grpcsrv.InterceptorChain(authenticator, vault),
 	))
@@ -203,6 +206,7 @@ func buildDevMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, metrics
 
 	// 装配 Admin Web UI（Dev 模式默认启用，绑 127.0.0.1:8250）。
 	adminSrv := buildAdminServer(cfg, vault)
+	adminSrv.SetManager(lifecycleMgr) // P1: Admin UI 密钥列表
 
 	// Core service 层（共享给 gRPC/MCP）。
 	core := service.NewManager(lifecycleMgr, vault, auditLog)

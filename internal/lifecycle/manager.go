@@ -886,5 +886,33 @@ func (m *Manager) countKeys(ctx context.Context) (int, error) {
 	return len(seen), nil
 }
 
+// ListKeyIDs 返回所有唯一 KeyID（用于 Admin UI 密钥列表）。
+// 仅返回 KeyID，不含元数据/明文/密文。
+func (m *Manager) ListKeyIDs(ctx context.Context) ([]string, error) {
+	scanner, ok := m.store.(storage.PrefixScanner)
+	if !ok {
+		return nil, nil // 不支持扫描的 store 返回空列表
+	}
+
+	items, err := scanner.ScanPrefix(ctx, "key:")
+	if err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]bool)
+	var keyIDs []string
+	for _, data := range items {
+		var meta KeyMetadata
+		if err := json.Unmarshal(data, &meta); err != nil {
+			continue
+		}
+		if !seen[meta.KeyID] {
+			seen[meta.KeyID] = true
+			keyIDs = append(keyIDs, meta.KeyID)
+		}
+	}
+	return keyIDs, nil
+}
+
 // ErrKeyNotActive 表示密钥非 Active 状态，拒绝加密操作。
 var ErrKeyNotActive = errors.New("lifecycle: key is not active, encrypt refused")

@@ -13,6 +13,7 @@
 package admin
 
 import (
+	"context"
 	"crypto/subtle"
 	"embed"
 	"io/fs"
@@ -24,11 +25,20 @@ import (
 //go:embed web/static/*
 var staticFS embed.FS
 
+// 确保 context 包被引用。
+var _ = context.Background
+
 // Server 是管理页面的 HTTP 服务器。
 type Server struct {
 	seal       seal.Unsealer
+	manager    keyLister // 可选：密钥列表查询
 	adminToken string
 	mux        *http.ServeMux
+}
+
+// keyLister 是 admin 查询密钥列表所需的最小接口。
+type keyLister interface {
+	ListKeyIDs(ctx context.Context) ([]string, error)
 }
 
 // NewServer 创建管理页面 Server。Sealed 状态下也允许访问（否则无法 Unseal）。
@@ -48,6 +58,11 @@ func (s *Server) SetAdminToken(token string) {
 	s.adminToken = token
 }
 
+// SetManager 注入 lifecycle.Manager 用于密钥列表查询。
+func (s *Server) SetManager(mgr keyLister) {
+	s.manager = mgr
+}
+
 func (s *Server) register() {
 	// 静态资源：/static/* 来自 embed.FS
 	// Go 1.21 ServeMux 不支持 "GET /path" 方法前缀，用 path 注册 + handler 内检查 Method。
@@ -63,6 +78,8 @@ func (s *Server) register() {
 	// 管理页面 API。
 	// seal-status 不需认证（用于探活/概览）。
 	s.mux.HandleFunc("/admin/api/seal-status", s.handleSealStatus)
+	// keys 列表需认证（含密钥元数据）。
+	s.mux.HandleFunc("/admin/api/keys", s.requireAdminToken(s.handleListKeys))
 	// seal/unseal 需要认证（如果设置了 adminToken）。
 	s.mux.HandleFunc("/admin/api/seal", s.requireAdminToken(s.handleSeal))
 	s.mux.HandleFunc("/admin/api/unseal", s.requireAdminToken(s.handleUnseal))

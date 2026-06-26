@@ -252,15 +252,76 @@ async function doUnsealSingle(textarea) {
   renderUnseal();
 }
 
-function renderKeys() {
+async function renderKeys() {
   const root = document.getElementById('view');
   root.innerHTML = '';
 
-  root.appendChild(el('div', { class: 'card' }, [
+  const card = el('div', { class: 'card' }, [
     el('h2', {}, '密钥列表'),
-    el('div', { class: 'note' }, '密钥管理请通过 KMS API 操作。此处仅展示状态概览。'),
-    el('div', { class: 'empty' }, '通过 API 创建密钥后，此处将展示密钥列表。'),
-  ]));
+    el('div', { class: 'note' }, '仅展示 KeyID，不含明文/密文。管理操作请通过 KMS API。'),
+  ]);
+  root.appendChild(card);
+
+  // 加载密钥列表。
+  const listDiv = el('div', { class: 'key-list' }, [el('p', { class: 'loading' }, '加载中...')]);
+  card.appendChild(listDiv);
+
+  try {
+    const resp = await fetchJSON('/admin/api/keys');
+    const keys = resp.data?.keys || [];
+
+    listDiv.innerHTML = '';
+
+    if (keys.length === 0) {
+      listDiv.appendChild(el('div', { class: 'empty' }, '暂无密钥。通过 API 创建：curl -X POST /api/v1/keys -d \'{"key_id":"my-key"}\''));
+      return;
+    }
+
+    // 渲染密钥列表。
+    const table = el('table', { class: 'key-table' }, [
+      el('thead', {}, [
+        el('tr', {}, [
+          el('th', {}, 'Key ID'),
+          el('th', {}, '操作'),
+        ]),
+      ]),
+    ]);
+
+    const tbody = el('tbody', {});
+    for (const key of keys) {
+      const row = el('tr', {}, [
+        el('td', { class: 'key-id' }, key.key_id),
+        el('td', {}, [
+          el('button', {
+            class: 'btn-small',
+            onclick: () => copyEncryptExample(key.key_id),
+          }, '复制加密示例'),
+        ]),
+      ]);
+      tbody.appendChild(row);
+    }
+    table.appendChild(tbody);
+    listDiv.appendChild(table);
+
+    // 统计。
+    listDiv.appendChild(el('p', { class: 'stats' }, `共 ${keys.length} 个密钥`));
+
+  } catch (e) {
+    listDiv.innerHTML = '';
+    listDiv.appendChild(el('div', { class: 'error' }, '加载失败: ' + e.message));
+  }
+}
+
+// copyEncryptExample 复制加密 curl 示例到剪贴板。
+function copyEncryptExample(keyId) {
+  const cmd = `curl -X POST http://localhost:8400/api/v1/encrypt \\
+  -H 'Content-Type: application/json' \\
+  -d '{"key_id":"${keyId}","plaintext":"SGVsbG8="}'`;
+  navigator.clipboard.writeText(cmd).then(() => {
+    toast('已复制加密示例到剪贴板', 'success');
+  }).catch(() => {
+    toast('复制失败，请手动复制: ' + keyId, 'error');
+  });
 }
 
 // ----------------------------- 路由 -----------------------------
