@@ -1,0 +1,508 @@
+openapi: 3.0.3
+info:
+  title: Yvonne KMS API
+  description: |
+    Self-hosted KMS with envelope encryption, auditable key lifecycle,
+    Shamir's secret sharing, and JWT RBAC.
+
+    ## Authentication
+    All endpoints (except Health) require `Authorization: Bearer <token>` header.
+    Tokens are AppRole or JWT tokens configured in `auth.app_roles` or `auth.jwt`.
+
+    ## Envelope
+    All JSON responses use `{"ok": true, "data": {...}}` (success) or
+    `{"ok": false, "error": "message"}` (error).
+  version: 0.4.2
+  contact:
+    name: Yvonne KMS
+    url: https://github.com/zealot00/Yvonne
+  license:
+    name: MIT
+
+servers:
+  - url: http://127.0.0.1:8400
+    description: Dev mode
+  - url: https://kms.internal:8400
+    description: Cluster mode (TLS)
+
+tags:
+  - name: System
+    description: Health, Unseal, Emergency Seal
+  - name: Keys
+    description: Key lifecycle management
+  - name: Crypto
+    description: Encrypt / Decrypt operations
+  - name: Audit
+    description: Audit log query
+  - name: BYOK
+    description: Bring Your Own Key (transit key import)
+
+paths:
+  /api/v1/sys/health:
+    get:
+      tags: [System]
+      summary: Health check
+      description: Returns vault state. No authentication required.
+      operationId: health
+      responses:
+        '200':
+          description: Vault state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /api/v1/sys/unseal:
+    post:
+      tags: [System]
+      summary: Unseal vault with Shamir shares
+      operationId: unseal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [shares]
+              properties:
+                shares:
+                  type: array
+                  items:
+                    type: string
+                    format: byte
+                  description: Base64-encoded Shamir shares
+      responses:
+        '200':
+          description: Unseal result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unsealed: { type: boolean }
+
+  /api/v1/sys/panic:
+    post:
+      tags: [System]
+      summary: Emergency seal (wipe all keys)
+      description: |
+        Irreversible. Wipes MasterKey + DEK cache. Requires admin_token.
+      operationId: emergencySeal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [admin_token, confirm]
+              properties:
+                admin_token: { type: string }
+                confirm: { type: boolean, description: "Must be true" }
+      responses:
+        '200':
+          description: Sealed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  emergency_sealed: { type: boolean }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/keys:
+    post:
+      tags: [Keys]
+      summary: Create a new encryption key
+      operationId: createKey
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key_id]
+              properties:
+                key_id: { type: string, description: "Unique key identifier" }
+                return_dek:
+                  type: boolean
+                  default: true
+                  description: "If false, plaintext DEK not returned"
+      responses:
+        '200':
+          description: Key created
+          headers:
+            Cache-Control:
+              schema: { type: string, example: "no-store" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      key_id: { type: string }
+                      version: { type: integer }
+                      plaintext_dek:
+                        type: string
+                        format: byte
+                        description: Base64 plaintext DEK (empty if return_dek=false)
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/keys/{key_id}/rotate:
+    post:
+      tags: [Keys]
+      summary: Rotate key (create new version)
+      operationId: rotateKey
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/KeyId'
+      responses:
+        '200':
+          description: Rotated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      key_id: { type: string }
+                      version: { type: integer }
+                      plaintext_dek: { type: string, format: byte }
+
+  /api/v1/keys/{key_id}/shred:
+    delete:
+      tags: [Keys]
+      summary: Physically destroy a key version (crypto-shredding)
+      operationId: shredKey
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/KeyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer }
+      responses:
+        '200':
+          description: Destroyed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      key_id: { type: string }
+                      version: { type: integer }
+                      shred: { type: boolean }
+
+  /api/v1/keys/{key_id}/soft-delete:
+    patch:
+      tags: [Keys]
+      summary: Soft delete (move to recycle bin, restorable)
+      operationId: softDeleteKey
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/KeyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer }
+      responses:
+        '200':
+          description: Soft deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+
+  /api/v1/keys/{key_id}/restore:
+    post:
+      tags: [Keys]
+      summary: Restore a soft-deleted key version
+      operationId: restoreKey
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/KeyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer }
+      responses:
+        '200':
+          description: Restored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+
+  /api/v1/keys/{key_id}/generate-data-key:
+    post:
+      tags: [Keys]
+      summary: Generate Data Key (GDK) for client-side envelope encryption
+      operationId: generateDataKey
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/KeyId'
+      responses:
+        '200':
+          description: GDK generated
+          headers:
+            Cache-Control:
+              schema: { type: string, example: "no-store" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      key_id: { type: string }
+                      plaintext_dek: { type: string, format: byte }
+                      ciphertext_dek: { type: string, format: byte }
+
+  /api/v1/keys/transit-pub:
+    get:
+      tags: [BYOK]
+      summary: Get transit public key for BYOK
+      operationId: transitPub
+      responses:
+        '200':
+          description: Transit public key
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      key_id: { type: string }
+                      public_key: { type: string, description: "RSA-4096 PEM" }
+
+  /api/v1/keys/import:
+    post:
+      tags: [BYOK]
+      summary: Import externally encrypted key (BYOK)
+      operationId: importKey
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key_id, transit_key_id, wrapped_material]
+              properties:
+                key_id: { type: string }
+                transit_key_id: { type: string }
+                wrapped_material: { type: string, format: byte }
+      responses:
+        '200':
+          description: Imported
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      key_id: { type: string }
+                      version: { type: integer }
+
+  /api/v1/encrypt:
+    post:
+      tags: [Crypto]
+      summary: Encrypt plaintext
+      operationId: encrypt
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key_id, plaintext]
+              properties:
+                key_id: { type: string }
+                plaintext: { type: string, format: byte, description: "Base64" }
+      responses:
+        '200':
+          description: Encrypted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      ciphertext: { type: string, format: byte }
+                      version: { type: integer }
+        '403':
+          description: Resource access denied (key not in AllowedKeys)
+
+  /api/v1/decrypt:
+    post:
+      tags: [Crypto]
+      summary: Decrypt ciphertext (backward compatible across versions)
+      operationId: decrypt
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key_id, ciphertext]
+              properties:
+                key_id: { type: string }
+                ciphertext: { type: string, format: byte, description: "Versioned ciphertext" }
+      responses:
+        '200':
+          description: Decrypted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      plaintext: { type: string, format: byte }
+                      version: { type: integer }
+        '400':
+          description: Invalid ciphertext or key version destroyed
+        '404':
+          description: Key version not found
+
+  /api/v1/audit/query:
+    post:
+      tags: [Audit]
+      summary: Query audit log
+      operationId: auditQuery
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                start_time: { type: integer, format: int64 }
+                end_time: { type: integer, format: int64 }
+                actor: { type: string }
+                action: { type: string }
+                limit: { type: integer, default: 100 }
+      responses:
+        '200':
+          description: Audit entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      count: { type: integer }
+                      entries:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AuditEntry'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: "AppRole token or JWT"
+
+  parameters:
+    KeyId:
+      name: key_id
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status: { type: string, example: "ok" }
+        sealed: { type: boolean }
+        state: { type: string, example: "unsealed" }
+
+    Error:
+      type: object
+      properties:
+        ok: { type: boolean, example: false }
+        error: { type: string }
+
+    AuditEntry:
+      type: object
+      properties:
+        timestamp: { type: string, format: date-time }
+        action: { type: string }
+        actor: { type: string }
+        resource: { type: string }
+        result: { type: string }
+        trace_id: { type: string }
