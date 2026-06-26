@@ -77,13 +77,18 @@ func Validate(cfg *Config) error {
 	}
 
 	// --- Crypto ---
-	if cfg.Crypto.DEKSize != 32 {
-		errs = append(errs, "crypto.dek_size must be 32 (AES-256)")
+	// DEKSize 按 suite 动态校验（standard=32 AES-256, gmsm=16 SM4-128）。
+	expectedDEKSize := 32 // 默认 standard
+	if cfg.Crypto.Suite == "gmsm" {
+		expectedDEKSize = 16
 	}
-	if cfg.Crypto.RSAKeyBits != 4096 {
+	if cfg.Crypto.DEKSize != 0 && cfg.Crypto.DEKSize != expectedDEKSize {
+		errs = append(errs, fmt.Sprintf("crypto.dek_size must be %d for suite %q (or leave unset for auto)", expectedDEKSize, cfg.Crypto.Suite))
+	}
+	if cfg.Crypto.RSAKeyBits != 0 && cfg.Crypto.RSAKeyBits != 4096 {
 		errs = append(errs, "crypto.rsa_key_bits must be 4096")
 	}
-	if cfg.Crypto.ECDSACurve != "P-256" && cfg.Crypto.ECDSACurve != "P-384" {
+	if cfg.Crypto.ECDSACurve != "" && cfg.Crypto.ECDSACurve != "P-256" && cfg.Crypto.ECDSACurve != "P-384" {
 		errs = append(errs, "crypto.ecdsa_curve must be P-256 or P-384")
 	}
 
