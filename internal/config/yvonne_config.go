@@ -39,6 +39,7 @@ type YvonneConfig struct {
 	Auth    AuthModeConf    `json:"auth"    yaml:"auth"`    // 认证配置（Cluster 必填）
 	Audit   AuditModeConf   `json:"audit"   yaml:"audit"`   // 审计配置（Cluster 必填）
 	Logging LoggingConfig   `json:"logging" yaml:"logging"` // 复用既有 LoggingConfig
+	Crypto  CryptoConfig    `json:"crypto"  yaml:"crypto"`  // 密码套件配置（v1.1 新增 Suite 字段）
 }
 
 // AuditModeConf 是审计配置（Cluster 模式必填）。

@@ -82,9 +82,10 @@ type SealConfig struct {
 // CryptoConfig 密码学引擎参数。
 // 算法白名单在此固化，运行时不允许越界。
 type CryptoConfig struct {
-	DEKSize           int      `json:"dek_size"            yaml:"dek_size"`            // 固定 32（AES-256）
-	RSAKeyBits        int      `json:"rsa_key_bits"        yaml:"rsa_key_bits"`        // 固定 4096
-	ECDSACurve        string   `json:"ecdsa_curve"         yaml:"ecdsa_curve"`         // "P-256" | "P-384"
+	Suite             string   `json:"suite"              yaml:"suite"`                // "standard"(默认) | "gmsm"（v1.1 新增）
+	DEKSize           int      `json:"dek_size"           yaml:"dek_size"`             // standard=32, gmsm=16
+	RSAKeyBits        int      `json:"rsa_key_bits"       yaml:"rsa_key_bits"`         // 固定 4096
+	ECDSACurve        string   `json:"ecdsa_curve"        yaml:"ecdsa_curve"`          // "P-256" | "P-384"
 	DEKRotationPeriod Duration `json:"dek_rotation_period" yaml:"dek_rotation_period"` // 0 表示禁用自动轮转
 }
 

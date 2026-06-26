@@ -29,6 +29,7 @@ import (
 	"yvonne/internal/audit"
 	"yvonne/internal/auth"
 	"yvonne/internal/config"
+	"yvonne/internal/crypto"
 	grpcsrv "yvonne/internal/grpc"
 	"yvonne/internal/lifecycle"
 	"yvonne/internal/mcp"
@@ -59,6 +60,23 @@ type Server struct {
 	Manager        *lifecycle.Manager
 	MasterKey      *memguard.SecureBuffer
 	RotationDaemon *lifecycle.RotationDaemon
+}
+
+// setVaultCryptoSuite 根据 crypto.suite 配置设置 vault 的密码套件。
+// "gmsm" 需 -tags gmsm 编译，否则 NewGMSMSuite 返回 error。
+func setVaultCryptoSuite(vault *seal.VaultState, cfg *config.YvonneConfig) {
+	switch cfg.Crypto.Suite {
+	case "gmsm":
+		suite, err := crypto.NewGMSMSuite()
+		if err != nil {
+			log.Fatalf("crypto.suite=gmsm but GMSM not compiled in: %v (rebuild with -tags gmsm)", err)
+		}
+		vault.SetCryptoSuite(suite)
+		log.Printf("crypto suite: gmsm (SM4-GCM + SM3)")
+	case "standard", "":
+		vault.SetCryptoSuite(crypto.NewStandardSuite())
+		log.Printf("crypto suite: standard (AES-256-GCM + SHA-256)")
+	}
 }
 
 // buildGRPCServer 创建 gRPC server 实例（含拦截器链 + 敏感数据擦除 codec + 可选 mTLS）。
@@ -197,6 +215,7 @@ func buildDevMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, metrics
 	// 创建 VaultState 并直接 Unseal（Dev 模式跳过 Shamir）。
 	// 用 DirectUnseal 注入临时 Master Key，不走 Shamir.Split（parts=1 数学上无意义）。
 	vault := seal.NewVaultState(1, 1, 0)
+	setVaultCryptoSuite(vault, cfg)
 	if err := vault.DirectUnseal(masterKey); err != nil {
 		masterKey.Wipe()
 		auditLog.Close()
@@ -300,6 +319,7 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 	// 按解封策略装配。
 	var unsealer seal.Unsealer
 	vault := seal.NewVaultState(totalShares, threshold, 30*time.Minute)
+	setVaultCryptoSuite(vault, cfg)
 
 	switch cfg.Unseal.Type {
 	case "shamir":

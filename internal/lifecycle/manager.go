@@ -149,8 +149,9 @@ func (m *Manager) GenerateDataKey(ctx context.Context, keyID string, kek seal.KE
 		return nil, nil, fmt.Errorf("lifecycle: gdk get active key: %w", err)
 	}
 
-	// 2. 生成全新 32 字节随机临时 DEK。
-	plainDEK, err := memguard.NewSecureBufferFromRandom(32)
+	// 2. 生成随机临时 DEK（长度按 KEK 动态：AES=32, SM4=16）。
+	dekSize := dekSizeFromKEK(kek)
+	plainDEK, err := memguard.NewSecureBufferFromRandom(dekSize)
 	if err != nil {
 		return nil, nil, fmt.Errorf("lifecycle: gdk generate random DEK: %w", err)
 	}
@@ -199,8 +200,9 @@ func (m *Manager) CreateKey(ctx context.Context, keyID string, kek seal.KEK, rot
 		}
 	}
 
-	// 生成 32 字节随机 DEK。
-	plaintextDEK, err := memguard.NewSecureBufferFromRandom(32)
+	// 生成随机 DEK（长度按 KEK 动态）。
+	dekSize := dekSizeFromKEK(kek)
+	plaintextDEK, err := memguard.NewSecureBufferFromRandom(dekSize)
 	if err != nil {
 		return nil, nil, fmt.Errorf("lifecycle: generate data key: %w", err)
 	}
@@ -490,7 +492,7 @@ func (m *Manager) RotateKey(ctx context.Context, keyID string, kek seal.KEK) (*K
 			return fmt.Errorf("lifecycle: update old version: %w", err)
 		}
 
-		plainDEK, err := memguard.NewSecureBufferFromRandom(32)
+		plainDEK, err := memguard.NewSecureBufferFromRandom(dekSizeFromKEK(kek))
 		if err != nil {
 			return fmt.Errorf("lifecycle: generate new data key: %w", err)
 		}
@@ -921,3 +923,12 @@ func (m *Manager) ListKeyIDs(ctx context.Context) ([]string, error) {
 
 // ErrKeyNotActive 表示密钥非 Active 状态，拒绝加密操作。
 var ErrKeyNotActive = errors.New("lifecycle: key is not active, encrypt refused")
+
+// dekSizeFromKEK 从 KEK 获取 DEK 密钥长度（v1.1：支持 SM4 16 字节）。
+// KEK 不实现 KEKWithKeySize 时默认 32（AES-256，向后兼容）。
+func dekSizeFromKEK(kek seal.KEK) int {
+	if ks, ok := kek.(seal.KEKWithKeySize); ok {
+		return ks.KeySize()
+	}
+	return 32 // 默认 AES-256
+}

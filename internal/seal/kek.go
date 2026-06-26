@@ -42,31 +42,51 @@ type KEK interface {
 	Type() KEKType
 }
 
-// --- softwareKEK ---
-
-// softwareKEK 包装明文 CMK，用 AES-256-GCM 加解密 DEK。
-// 密文格式 = [12B Nonce][Ciphertext+AuthTag]，与 crypto.EncryptGCM 完全一致（向后兼容）。
-type softwareKEK struct {
-	cmk *memguard.SecureBuffer
+// KEKWithKeySize 是支持查询 DEK 密钥长度的 KEK 接口（v1.1 新增）。
+// Manager.CreateKey 通过此接口动态获取 DEK 长度（AES=32, SM4=16）。
+type KEKWithKeySize interface {
+	KEK
+	KeySize() int
 }
 
-// NewSoftwareKEK 创建软件 KEK。
+// --- softwareKEK ---
+
+// softwareKEK 包装明文 CMK，用 Cipher 接口加解密 DEK。
+// 默认用 AES-256-GCM（StandardCipher），支持通过 NewSoftwareKEKWithSuite 切换 SM4-GCM。
+// 密文格式 = [12B Nonce][Ciphertext+AuthTag]，与 crypto.EncryptGCM 完全一致（向后兼容）。
+type softwareKEK struct {
+	cmk    *memguard.SecureBuffer
+	cipher crypto.Cipher
+}
+
+// NewSoftwareKEK 创建软件 KEK（默认 AES-256-GCM，向后兼容）。
 func NewSoftwareKEK(cmk *memguard.SecureBuffer) KEK {
-	return &softwareKEK{cmk: cmk}
+	return &softwareKEK{cmk: cmk, cipher: crypto.NewStandardCipher()}
+}
+
+// NewSoftwareKEKWithSuite 创建软件 KEK，使用指定 CryptoSuite 的 Cipher。
+// 用于国密模式（SM4-GCM）：suite = crypto.NewGMSMSuite()（需 -tags gmsm）。
+func NewSoftwareKEKWithSuite(cmk *memguard.SecureBuffer, suite crypto.CryptoSuite) KEK {
+	return &softwareKEK{cmk: cmk, cipher: suite.Cipher()}
+}
+
+// KeySize 返回 KEK 期望的 DEK 密钥长度（用于 DEK 生成）。
+func (s *softwareKEK) KeySize() int {
+	return s.cipher.KeySize()
 }
 
 func (s *softwareKEK) WrapDEK(plaintextDEK *memguard.SecureBuffer) ([]byte, error) {
 	var ct []byte
 	err := plaintextDEK.WithKey(func(dek []byte) error {
 		var e error
-		ct, e = crypto.EncryptGCM(s.cmk, dek)
+		ct, e = s.cipher.Encrypt(s.cmk, dek)
 		return e
 	})
 	return ct, err
 }
 
 func (s *softwareKEK) UnwrapDEK(ciphertext []byte) (*memguard.SecureBuffer, error) {
-	return crypto.DecryptGCM(s.cmk, ciphertext)
+	return s.cipher.Decrypt(s.cmk, ciphertext)
 }
 
 func (s *softwareKEK) Type() KEKType { return KEKTypeSoftware }

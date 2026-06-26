@@ -140,6 +140,14 @@ func Validate(cfg *Config) error {
 		errs = append(errs, "logging.level must be one of debug|info|warn|error")
 	}
 
+	// --- Crypto（v1.1 新增）---
+	switch cfg.Crypto.Suite {
+	case "", "standard", "gmsm":
+		// 合法值
+	default:
+		errs = append(errs, "crypto.suite must be standard or gmsm")
+	}
+
 	if len(errs) > 0 {
 		return fmt.Errorf("config validation failed:\n  - %s", strings.Join(errs, "\n  - "))
 	}

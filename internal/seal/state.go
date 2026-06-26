@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"yvonne/internal/crypto"
 	"yvonne/internal/memguard"
 )
 
@@ -60,6 +61,10 @@ type VaultState struct {
 
 	autoResealAfter time.Duration
 	cancelReseal    context.CancelFunc // 取消自动重新封印定时器
+
+	// cryptoSuite 是密码套件（v1.1 新增）。
+	// nil 时默认 standard（AES-256-GCM），向后兼容。
+	cryptoSuite crypto.CryptoSuite
 
 	// emergencySealed 标记是否已触发紧急封印。
 	// 一旦为 true，进程生命周期内不可逆，拒绝一切 API 请求（包括 unseal）。
@@ -378,5 +383,21 @@ func (v *VaultState) KEKRef(action func(kek KEK) error) error {
 	if v.state.Load() != int32(StateUnsealed) || v.masterKey == nil {
 		return errors.New("seal: vault is sealed, kek unavailable")
 	}
-	return action(NewSoftwareKEK(v.masterKey))
+	return action(v.getKEK())
+}
+
+// getKEK 返回当前 KEK（按 cryptoSuite 选择 standard 或 gmsm）。
+func (v *VaultState) getKEK() KEK {
+	if v.cryptoSuite != nil {
+		return NewSoftwareKEKWithSuite(v.masterKey, v.cryptoSuite)
+	}
+	return NewSoftwareKEK(v.masterKey) // 默认 standard（向后兼容）
+}
+
+// SetCryptoSuite 设置密码套件（v1.1 新增）。
+// 必须在 Unseal 之前调用。nil 表示默认 standard。
+func (v *VaultState) SetCryptoSuite(suite crypto.CryptoSuite) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.cryptoSuite = suite
 }
