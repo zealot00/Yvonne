@@ -54,6 +54,8 @@ func main() {
 		runBackupRestoreCmd(os.Args[2:])
 	case "audit-verify":
 		runAuditVerifyCmd(os.Args[2:])
+	case "completion":
+		runCompletionCmd(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -78,11 +80,14 @@ Usage:
   yvonne backup-restore --out <path> <share1> <share2> <share3>...
                                      Restore wrapped CMK from Shamir share files.
   yvonne audit-verify --dir <dir>    Verify audit log hash chain integrity.
+  yvonne completion <shell>          Generate shell completion script (bash/zsh/fish).
 
 Examples:
   yvonne server --config config.json
-  yvonne dev --port 9000
-  yvonne unseal-keygen --out /var/run/yvonne/unseal.pem
+  yvonne dev --port 9000 --demo
+  yvonne dev --dashboard
+  yvonne completion bash > /etc/bash_completion.d/yvonne
+  yvonne completion zsh > "${fpath[1]}/_yvonne"
   yvonne init --config config.json --pub-key /tmp/unseal_pub.pem
   yvonne init --config config.json --pub-key /tmp/unseal_pub.pem --wrapped-out /mnt/usb/yvonne-cmk-backup.bin
 
@@ -92,6 +97,11 @@ Flags for 'server':
 Flags for 'dev':
   --port int        Override bind port (default 8200)
   --addr string     Override bind address (default 127.0.0.1)
+  --demo            Auto-create demo keys + print curl examples
+  --dashboard       Auto-open browser to Admin UI on startup
+
+Flags for 'completion':
+  <shell>           Shell name: bash | zsh | fish
 
 Flags for 'unseal-keygen':
   --out string      Output path for private key PEM file (required)
@@ -126,6 +136,8 @@ func runDevCmd(args []string) {
 	fs := flag.NewFlagSet("dev", flag.ExitOnError)
 	port := fs.Int("port", 8200, "bind port")
 	addr := fs.String("addr", "127.0.0.1", "bind address")
+	demo := fs.Bool("demo", false, "auto-create demo keys + print curl examples")
+	dashboard := fs.Bool("dashboard", false, "auto-open browser to Admin UI")
 	_ = fs.Parse(args)
 
 	// 构造 Dev 模式配置（零配置文件）。
@@ -158,6 +170,16 @@ func runDevCmd(args []string) {
 
 	if err := config.ValidateYvonneConfig(cfg); err != nil {
 		log.Fatalf("dev config validation failed: %v", err)
+	}
+
+	// --demo: 启动后异步创建演示密钥 + 打印示例。
+	if *demo {
+		go runDemoSetup(*addr, *port)
+	}
+
+	// --dashboard: 启动后异步打开浏览器。
+	if *dashboard {
+		go runDashboard(*port)
 	}
 
 	startYvonne(cfg)
