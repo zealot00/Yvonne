@@ -28,6 +28,9 @@ Yvonne is built for teams who need centralized key management without surrenderi
 - **GDK (Generate Data Key)**: Client-side envelope encryption. KMS never sees business plaintext.
 - **Cold Storage Backup**: Shamir-split Wrapped CMK to N USB drives. HMAC integrity per shard.
 - **Emergency Seal**: One API call wipes everything. Deep freeze until manual restart + Shamir unseal.
+- **Multi-Protocol API**: HTTP REST + gRPC (full mirror) + MCP (AI agent integration, encrypt + restricted decrypt).
+- **Pluggable Crypto Suite**: AES-256-GCM + SHA-256 (default) or SM4-GCM + SM3 (国密, `-tags gmsm`).
+- **HSM Support**: Pluggable KEK abstraction (`softwareKEK` / `hsmKEK`), CMK never leaves chip.
 
 ### Quick Start
 
@@ -43,9 +46,14 @@ Yvonne is built for teams who need centralized key management without surrenderi
 
 ### Documentation
 
+- [HTTP API Guide](docs/api.md)
+- [gRPC API Guide](docs/grpc-api.md)
+- [MCP (AI Agent) Guide](docs/mcp-api.md)
+- [Benchmark Report](docs/benchmark-report.html)
 - [Deployment Guide](docs/deployment.md)
 - [Test Coverage Report](docs/coverage.md)
 - [Security Policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)
 - [Contributing Guide](CONTRIBUTING.md)
 
 ### Compliance Disclaimer
