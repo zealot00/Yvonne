@@ -13,23 +13,30 @@ import (
 	"time"
 )
 
+// 包级变量（可被测试 mock）。
+var (
+	stdout io.Writer = os.Stdout
+	stderr io.Writer = os.Stderr
+	osExit           = os.Exit
+)
+
 // runCompletionCmd 生成 shell 补全脚本。
 func runCompletionCmd(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: yvonne completion <bash|zsh|fish>")
-		os.Exit(1)
+		fmt.Fprintln(stderr, "usage: yvonne completion <bash|zsh|fish>")
+		osExit(1)
 	}
 	shell := args[0]
 	switch shell {
 	case "bash":
-		fmt.Print(bashCompletion)
+		fmt.Fprint(stdout, bashCompletion)
 	case "zsh":
-		fmt.Print(zshCompletion)
+		fmt.Fprint(stdout, zshCompletion)
 	case "fish":
-		fmt.Print(fishCompletion)
+		fmt.Fprint(stdout, fishCompletion)
 	default:
-		fmt.Fprintf(os.Stderr, "unsupported shell: %s (use bash|zsh|fish)\n", shell)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "unsupported shell: %s (use bash|zsh|fish)\n", shell)
+		osExit(1)
 	}
 }
 
