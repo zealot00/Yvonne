@@ -75,30 +75,34 @@ func NewPostgresKVStoreWithConfig(ctx context.Context, cfg PostgresPoolConfig) (
 		return nil, fmt.Errorf("postgres: create pool: %w", err)
 	}
 
-	schema := `CREATE TABLE IF NOT EXISTS yvonne_kv_str (
+	// 1. 建表（新库直接含 updated_at，旧库 IF NOT EXISTS 跳过）。
+	if _, err := pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS yvonne_kv_str (
 		k TEXT PRIMARY KEY,
 		v BYTEA NOT NULL,
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-	);
-
-	-- 前缀扫描优化索引（LIKE 'prefix%' 走索引）。
-	CREATE INDEX IF NOT EXISTS idx_yvonne_kv_str_k_prefix ON yvonne_kv_str (k varchar_pattern_ops);
-
-	-- updated_at 索引（按时间排序查询，如回收站 reaper）。
-	CREATE INDEX IF NOT EXISTS idx_yvonne_kv_str_updated_at ON yvonne_kv_str (updated_at);`
-
-	if _, err := pool.Exec(ctx, schema); err != nil {
+	);`); err != nil {
 		pool.Close()
-		return nil, fmt.Errorf("postgres: ensure schema: %w", err)
+		return nil, fmt.Errorf("postgres: ensure table: %w", err)
 	}
 
-	// 兼容旧表：若 updated_at 列不存在则添加（ALTER TABLE IF NOT EXISTS PG 11+ 不支持列级）。
-	// 用 DO 块安全添加。
-	pool.Exec(ctx, `DO $$ BEGIN
+	// 2. 兼容旧表：若 updated_at 列不存在则添加（必须在索引创建之前）。
+	if _, err := pool.Exec(ctx, `DO $$ BEGIN
 		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='yvonne_kv_str' AND column_name='updated_at') THEN
 			ALTER TABLE yvonne_kv_str ADD COLUMN updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 		END IF;
-	END $$`)
+	END $$`); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("postgres: ensure updated_at column: %w", err)
+	}
+
+	// 3. 创建索引（updated_at 列已确保存在）。
+	if _, err := pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_yvonne_kv_str_k_prefix ON yvonne_kv_str (k varchar_pattern_ops);
+		CREATE INDEX IF NOT EXISTS idx_yvonne_kv_str_updated_at ON yvonne_kv_str (updated_at);
+	`); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("postgres: ensure indexes: %w", err)
+	}
 
 	store := &PostgresKVStore{pool: pool}
 	store.health = newHealthState(func(ctx context.Context) error {

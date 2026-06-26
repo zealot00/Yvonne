@@ -11,16 +11,40 @@ package storage
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 )
 
-// seedBenchmarkData 写入 N 条数据用于基准测试。
+// seedBenchmarkData 批量写入 N 条数据用于基准测试。
+// 用批量 INSERT 而非逐条 Put（5000 条 Put 需 5000 次网络往返，太慢）。
 func seedBenchmarkData(t testing.TB, store *PostgresKVStore, n int, prefix string) {
 	t.Helper()
 	ctx := context.Background()
-	for i := 0; i < n; i++ {
-		key := fmt.Sprintf("%s:%06d", prefix, i)
-		store.Put(ctx, key, []byte(fmt.Sprintf("value-%d", i)))
+
+	// 批量 INSERT，每批 500 条。
+	batchSize := 500
+	for start := 0; start < n; start += batchSize {
+		end := start + batchSize
+		if end > n {
+			end = n
+		}
+
+		// 构造多值 INSERT（NOW() 直接写入 SQL，不用参数占位）。
+		args := make([]interface{}, 0, batchSize*2)
+		placeholder := make([]string, 0, batchSize)
+		for i := start; i < end; i++ {
+			key := fmt.Sprintf("%s:%06d", prefix, i)
+			val := []byte(fmt.Sprintf("value-%d", i))
+			paramIdx := (i - start) * 2
+			placeholder = append(placeholder, fmt.Sprintf("($%d, $%d, NOW())", paramIdx+1, paramIdx+2))
+			args = append(args, key, val)
+		}
+
+		query := fmt.Sprintf("INSERT INTO yvonne_kv_str (k, v, updated_at) VALUES %s ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v, updated_at = NOW()",
+			strings.Join(placeholder, ", "))
+		if _, err := store.Pool().Exec(ctx, query, args...); err != nil {
+			t.Fatalf("batch insert (start=%d): %v", start, err)
+		}
 	}
 }
 
