@@ -79,11 +79,9 @@ func (s *Server) CreateKey(ctx context.Context, req *pb.CreateKeyRequest) (*pb.C
 		})
 		result.PlaintextDEK.Wipe()
 	}
-	defer func() {
-		for i := range dekBytes {
-			dekBytes[i] = 0
-		}
-	}()
+	// 注意：不能 defer clear(dekBytes)——protobuf 序列化在函数退出后由框架执行，
+	// defer 会在序列化前清零 response 底层数组，导致客户端收到全零 DEK。
+	// dekBytes 随 protobuf 序列化完成后由 GC 回收（与 BUG-11 同一限制）。
 
 	return &pb.CreateKeyResponse{
 		KeyId:        result.KeyID,
@@ -108,6 +106,7 @@ func (s *Server) RotateKey(ctx context.Context, req *pb.RotateKeyRequest) (*pb.R
 		})
 		result.PlaintextDEK.Wipe()
 	}
+	// 同 CreateKey：不 defer clear（protobuf 序列化窗口限制）。
 
 	return &pb.RotateKeyResponse{
 		KeyId:        result.KeyID,
