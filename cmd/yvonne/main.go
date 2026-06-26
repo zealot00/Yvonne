@@ -13,6 +13,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"log"
@@ -217,6 +218,16 @@ func startYvonne(cfg *config.YvonneConfig) {
 		Handler:      srv.V1Router,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
+	}
+
+	// mTLS：构造 TLSConfig 注入 HTTP server。
+	var tlsCfg *tls.Config
+	if cfg.Server.TLS.Enabled {
+		tlsCfg, err = config.BuildTLSConfig(cfg.Server.TLS)
+		if err != nil {
+			log.Fatalf("TLS config: %v", err)
+		}
+		httpSrv.TLSConfig = tlsCfg
 	}
 
 	// 创建 Admin HTTP Server（Web UI）。

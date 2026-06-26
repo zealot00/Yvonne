@@ -47,10 +47,12 @@ type MCPServerConfig struct {
 }
 
 type TLSConfig struct {
-	Enabled    bool   `json:"enabled"     yaml:"enabled"`
-	CertFile   string `json:"cert_file"   yaml:"cert_file"`
-	KeyFile    string `json:"key_file"    yaml:"key_file"`
-	MinVersion string `json:"min_version" yaml:"min_version"` // 仅允许 "TLS1.2" / "TLS1.3"
+	Enabled      bool   `json:"enabled"       yaml:"enabled"`
+	CertFile     string `json:"cert_file"     yaml:"cert_file"`
+	KeyFile      string `json:"key_file"      yaml:"key_file"`
+	MinVersion   string `json:"min_version"   yaml:"min_version"`     // "TLS1.2" | "TLS1.3"
+	ClientCAFile string `json:"client_ca_file" yaml:"client_ca_file"` // 客户端 CA 证书池（mTLS）
+	ClientAuth   string `json:"client_auth"   yaml:"client_auth"`     // "require" | "optional" | "none"(默认)
 }
 
 // AdminServerConfig 管理页面相关配置。

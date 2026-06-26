@@ -15,6 +15,7 @@ package bootstrap
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log"
@@ -38,6 +39,7 @@ import (
 	"yvonne/internal/storage"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	pb "yvonne/gen/proto/yvonne/v1"
 )
 
@@ -59,14 +61,20 @@ type Server struct {
 	RotationDaemon *lifecycle.RotationDaemon
 }
 
-// buildGRPCServer 创建 gRPC server 实例（含拦截器链 + 敏感数据擦除 codec）。
-func buildGRPCServer(core *service.Core, authenticator auth.Authenticator, vault seal.Unsealer) *grpc.Server {
+// buildGRPCServer 创建 gRPC server 实例（含拦截器链 + 敏感数据擦除 codec + 可选 mTLS）。
+func buildGRPCServer(core *service.Core, authenticator auth.Authenticator, vault seal.Unsealer, tlsCfg *tls.Config) *grpc.Server {
 	// 注册 wipingCodec（覆盖默认 proto codec，序列化后清理明文 DEK）。
 	grpcsrv.RegisterWipingCodec()
 
-	srv := grpc.NewServer(grpc.UnaryInterceptor(
-		grpcsrv.InterceptorChain(authenticator, vault),
-	))
+	opts := []grpc.ServerOption{
+		grpc.UnaryInterceptor(
+			grpcsrv.InterceptorChain(authenticator, vault),
+		),
+	}
+	if tlsCfg != nil {
+		opts = append(opts, grpc.Creds(credentials.NewTLS(tlsCfg)))
+	}
+	srv := grpc.NewServer(opts...)
 	pbServer := grpcsrv.NewServer(core, authenticator)
 	pb.RegisterYvonneServiceServer(srv, pbServer)
 	return srv
@@ -215,7 +223,7 @@ func buildDevMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, metrics
 	// gRPC server（Dev 模式可选，默认启用）。
 	var grpcSrv *grpc.Server
 	if cfg.Server.GRPC.Enabled {
-		grpcSrv = buildGRPCServer(core, nil, vault) // Dev 模式无 authenticator
+		grpcSrv = buildGRPCServer(core, nil, vault, nil) // Dev 模式无 authenticator 无 TLS
 		log.Printf("DEV MODE: gRPC server enabled")
 	}
 
@@ -451,11 +459,12 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 	core := service.NewManager(lifecycleMgr, unsealer, auditLog)
 	core.SetAdminToken(cfg.Server.Admin.AdminToken)
 
-	// gRPC server。
+	// gRPC server（含 mTLS，复用 HTTP 的 TLSConfig）。
 	var grpcSrv *grpc.Server
 	if cfg.Server.GRPC.Enabled {
-		grpcSrv = buildGRPCServer(core, authenticator, unsealer)
-		log.Printf("gRPC server enabled at %s:%d", cfg.Server.GRPC.BindAddr, cfg.Server.GRPC.BindPort)
+		grpcTLS, _ := config.BuildTLSConfig(cfg.Server.GRPC.TLS)
+		grpcSrv = buildGRPCServer(core, authenticator, unsealer, grpcTLS)
+		log.Printf("gRPC server enabled at %s:%d (TLS=%v)", cfg.Server.GRPC.BindAddr, cfg.Server.GRPC.BindPort, grpcTLS != nil)
 	}
 
 	// MCP server。

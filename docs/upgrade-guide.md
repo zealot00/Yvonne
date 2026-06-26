@@ -13,6 +13,7 @@
 - [回滚方案](#回滚方案)
 - [密文格式兼容性](#密文格式兼容性)
 - [数据库 Schema 变更](#数据库-schema-变更)
+- [mTLS 配置（v1.0 新增）](#mtls-配置v10-新增)
 
 ## 升级路线图
 
@@ -25,7 +26,7 @@ v0.1.x (alpha) → v0.2.x (beta) → v0.3.x (RC) → v0.4.x (RC2) → v1.0 (GA)
 | v0.1 → v0.2 | Shamir + 审计链 + BoltDB | ❌ 不兼容（alpha 阶段） |
 | v0.2 → v0.3 | HSM + 国密 + SecureBuffer RWMutex | ✅ 向前兼容 |
 | v0.3 → v0.4 | gRPC + MCP + Service 层 + K8s | ✅ 向前兼容 |
-| v0.4 → v1.0 | GA 稳定版，API 冻结 | ✅ 向前兼容 |
+| v0.4 → v1.0 | GA 稳定版，mTLS + API 冻结 | ✅ 向前兼容 |
 
 ## Breaking Changes 矩阵
 
@@ -37,12 +38,60 @@ v0.1.x (alpha) → v0.2.x (beta) → v0.3.x (RC) → v0.4.x (RC2) → v1.0 (GA)
 | **gRPC API** | ❌ 无 | proto 定义不变 |
 | **密文格式** | ❌ 无 | `[4B Version BE][12B Nonce][CT+Tag]` 不变 |
 | **数据库 Schema** | ❌ 无 | `yvonne_kv_str` 表结构不变 |
-| **配置文件** | ⚠️ 新增字段 | `grpc`/`mcp`/`k8s` 为可选，旧配置无需修改 |
+| **配置文件** | ⚠️ 新增字段 | `tls.client_ca_file`/`tls.client_auth` 为可选，旧配置无需修改 |
 | **Admin UI** | ❌ 无 | 路径/认证不变 |
 | **Go SDK** | ❌ 无 | `yvonne.Client` API 不变 |
 | **环境变量** | ❌ 无 | 所有 0.4.x 环境变量在 1.0 有效 |
 
 **结论：v0.4.x → v1.0 零停服升级，无需数据迁移。**
+
+## mTLS 配置（v1.0 新增）
+
+v1.0 新增 mTLS 客户端证书认证，**默认不启用**（`client_auth: "none"`），向后兼容。
+
+### 启用 mTLS（生产推荐）
+
+```json
+{
+  "server": {
+    "tls": {
+      "enabled": true,
+      "cert_file": "/etc/yvonne/server.crt",
+      "key_file": "/etc/yvonne/server.key",
+      "min_version": "TLS1.3",
+      "client_auth": "require",
+      "client_ca_file": "/etc/yvonne/ca.crt"
+    }
+  }
+}
+```
+
+### client_auth 模式
+
+| 模式 | 行为 | 适用场景 |
+|---|---|---|
+| `none`（默认） | 不校验客户端证书 | Dev 模式 / 内网 |
+| `optional` | 有证书则校验，无证书放行 | 灰度迁移 |
+| `require` | 强制客户端证书 | **生产推荐** |
+
+### gRPC mTLS
+
+gRPC server 复用 `server.grpc.tls` 配置，支持独立的 mTLS：
+```json
+{
+  "server": {
+    "grpc": {
+      "tls": {
+        "enabled": true,
+        "cert_file": "/etc/yvonne/grpc.crt",
+        "key_file": "/etc/yvonne/grpc.key",
+        "client_auth": "require",
+        "client_ca_file": "/etc/yvonne/ca.crt"
+      }
+    }
+  }
+}
+```
 
 ### v0.3.x → v0.4.x
 

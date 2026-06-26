@@ -4,13 +4,20 @@
 
 | Version | Supported          |
 |---------|--------------------|
+| 1.0.x   | ✅ GA (Security fixes) |
+| 0.4.x   | ✅ Security fixes  |
 | 0.3.x   | ✅ Security fixes  |
-| 0.2.x   | ✅ Security fixes  |
-| 0.1.x   | ❌ Pre-release     |
+| < 0.3   | ❌ Pre-release     |
 
 ## Security Fixes by Version
 
-### 0.3.1
+### 1.0.0 (GA)
+- **mTLS**: 客户端证书认证（`RequireAndVerifyClientCert`）
+- **gRPC wipingCodec**: 序列化后清理明文 DEK（BUG-11 系统性修复）
+- **Graceful degradation**: PG 断连不 panic，degraded 模式
+- **Admin UI 认证**: 全站 Basic Auth + 前端 token 注入
+- **K8s JWKS**: 真实 JWKS 获取 + CA 证书校验（防 MITM）
+- **错误消息**: 含 role/key/allowed 详情（运维可诊断）
 - **BUG-2**: Request context propagation (client disconnect cancels DB queries)
 - **BUG-3**: Panic recovery logs stack trace (no silent swallow)
 - **BUG-4**: `CombineWithThreshold` strict threshold validation (prevents garbage output)

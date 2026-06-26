@@ -27,6 +27,21 @@ func Validate(cfg *Config) error {
 		if cfg.Server.TLS.CertFile == "" || cfg.Server.TLS.KeyFile == "" {
 			errs = append(errs, "server.tls.enabled=true requires cert_file and key_file")
 		}
+		// mTLS 校验
+		switch cfg.Server.TLS.ClientAuth {
+		case "require":
+			if cfg.Server.TLS.ClientCAFile == "" {
+				errs = append(errs, "server.tls.client_auth=require requires client_ca_file")
+			}
+		case "optional":
+			if cfg.Server.TLS.ClientCAFile == "" {
+				errs = append(errs, "server.tls.client_auth=optional requires client_ca_file")
+			}
+		case "", "none":
+			// 默认 none，无需 ClientCA
+		default:
+			errs = append(errs, "server.tls.client_auth must be require, optional, or none")
+		}
 	}
 
 	// --- Admin ---

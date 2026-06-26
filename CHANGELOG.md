@@ -8,8 +8,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- TPM 2.0 hardware-bound CMK unseal (planned, `CryptoBackend` interface ready)
 - PKCS#11 HSM integration (planned, interface defined in `internal/seal/hsm.go`)
+- v1.1 国密合规版（planned, see docs/gmsm-roadmap.md）
+
+## [1.0.0] - 2026-06-26 (GA)
+
+### Added
+- **mTLS 客户端证书认证** — 生产部署安全底线
+  - `TLSConfig.ClientCAFile` + `TLSConfig.ClientAuth`（require/optional/none）
+  - `config.BuildTLSConfig()` 构造 `*tls.Config`
+  - HTTP + gRPC 双端口 mTLS 支持
+  - `RequireAndVerifyClientCert` 强制客户端证书校验
+- gRPC wipingCodec（BUG-11 修复：序列化后清理明文 DEK）
+- Admin UI 密钥列表（`GET /admin/api/keys` + 前端渲染）
+- Graceful degradation（PG 断连不 panic，degraded 模式）
+- 生产级错误消息（含 role/key/allowed 详情）
+- `yvonne dev --demo` + `--dashboard`
+- `yvonne completion` (bash/zsh/fish)
+- OpenAPI 3.0 spec + Go SDK
+- Kubernetes Helm Chart + K8s SA JWT 认证
+- gRPC API（14 rpc 全量镜像）+ MCP（AI agent 集成）
+- Service 层抽象（`internal/service.Core`）
+- HSM 后端（可插拔 KEK 抽象 + Mock）
+- 国密套件（SM4-GCM + SM3，`-tags gmsm`）
+- CryptoSuite 抽象（standard + gmsm 可插拔）
+
+### Fixed
+- BUG-1~12: SecureBuffer 竞态/O(N) 版本扫描/JWT 多角色/statusRecorder 接口/GDK 内存逃逸/优雅停机/EmergencySeal 缓存/context 传播/panic 恢复/Combine threshold/RotateKey Wipe/OAEP label/errCh 丢错误
+- gRPC CreateKey defer clear 导致全零 DEK
+- Admin UI 前端不发 auth header
+- K8sAuthenticator JWKS 桩函数 + CA 证书未用
+
+### Security
+- 12 项安全自检脚本全过
+- SecureBuffer RWMutex 防竞态
+- `meta:latest:` 索引防 O(N) 扫描 + 幻读
+- EmergencySeal 同步清空 DEK 缓存
+- RateLimiter 支持 X-Forwarded-For
+- MCP Decrypt 64KB 大小限制 + 白名单
+
+## [0.4.2] - 2026-06-26
 
 ## [0.4.1] - 2026-06-26
 
