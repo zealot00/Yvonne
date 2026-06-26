@@ -5,9 +5,17 @@ GOFLAGS   := -trimpath -buildvcs=false
 BINARY    := bin/yvonne
 PKG       := ./...
 
-.PHONY: all build run test test-integration vet fmt clean tidy coverage security-check ci
+.PHONY: all build run test test-integration vet fmt clean tidy coverage security-check ci proto
 
 all: tidy build
+
+proto:
+	@export PATH=$$PATH:$$(go env GOPATH)/bin; \
+	protoc \
+	  --proto_path=proto \
+	  --go_out=gen/proto --go_opt=paths=source_relative \
+	  --go-grpc_out=gen/proto --go-grpc_opt=paths=source_relative \
+	  proto/yvonne/v1/yvonne.proto
 
 build:
 	$(GO) build $(GOFLAGS) -o $(BINARY) ./cmd/yvonne

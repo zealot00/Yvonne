@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log"
 	"log/syslog"
+	"net/http"
 	"os"
 	"time"
 
@@ -27,17 +28,27 @@ import (
 	"yvonne/internal/audit"
 	"yvonne/internal/auth"
 	"yvonne/internal/config"
+	grpcsrv "yvonne/internal/grpc"
 	"yvonne/internal/lifecycle"
+	"yvonne/internal/mcp"
 	"yvonne/internal/memguard"
 	"yvonne/internal/metrics"
 	"yvonne/internal/seal"
+	"yvonne/internal/service"
 	"yvonne/internal/storage"
+
+	"google.golang.org/grpc"
+	pb "yvonne/gen/proto/yvonne/v1"
 )
 
 // Server 是装配完成的 Yvonne 实例。
 type Server struct {
 	V1Router       *api.V1Router
 	AdminServer    *admin.Server
+	GRPCServer     *grpc.Server
+	MCPServer      *mcp.Server
+	MCPHTTPServer  *http.Server
+	Core           *service.Core
 	AuditLog       audit.Auditor
 	Metrics        *metrics.Registry
 	VaultState     seal.Unsealer
@@ -46,6 +57,16 @@ type Server struct {
 	Manager        *lifecycle.Manager
 	MasterKey      *memguard.SecureBuffer
 	RotationDaemon *lifecycle.RotationDaemon
+}
+
+// buildGRPCServer 创建 gRPC server 实例（含拦截器链）。
+func buildGRPCServer(core *service.Core, authenticator auth.Authenticator, vault seal.Unsealer) *grpc.Server {
+	srv := grpc.NewServer(grpc.UnaryInterceptor(
+		grpcsrv.InterceptorChain(authenticator, vault),
+	))
+	pbServer := grpcsrv.NewServer(core, authenticator)
+	pb.RegisterYvonneServiceServer(srv, pbServer)
+	return srv
 }
 
 // Close 释放所有资源。
@@ -183,11 +204,34 @@ func buildDevMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, metrics
 	// 装配 Admin Web UI（Dev 模式默认启用，绑 127.0.0.1:8250）。
 	adminSrv := buildAdminServer(cfg, vault)
 
+	// Core service 层（共享给 gRPC/MCP）。
+	core := service.NewManager(lifecycleMgr, vault, auditLog)
+
+	// gRPC server（Dev 模式可选，默认启用）。
+	var grpcSrv *grpc.Server
+	if cfg.Server.GRPC.Enabled {
+		grpcSrv = buildGRPCServer(core, nil, vault) // Dev 模式无 authenticator
+		log.Printf("DEV MODE: gRPC server enabled")
+	}
+
+	// MCP server（Dev 模式可选）。
+	var mcpSrv *mcp.Server
+	if cfg.Server.MCP.Enabled {
+		mcpSrv = mcp.NewServer(core, mcp.Config{
+			Token:       cfg.Server.MCP.Token,
+			AllowedKeys: cfg.Server.MCP.AllowedKeys,
+		})
+		log.Printf("DEV MODE: MCP server enabled")
+	}
+
 	log.Printf("DEV MODE assembled: %s", cfg.PrintSummary())
 
 	return &Server{
 		V1Router:    v1Router,
 		AdminServer: adminSrv,
+		GRPCServer:  grpcSrv,
+		MCPServer:   mcpSrv,
+		Core:        core,
 		AuditLog:    auditLog,
 		Metrics:     metricsReg,
 		VaultState:  vault,
@@ -362,9 +406,35 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 		})
 	})
 
+	// Core service 层。
+	core := service.NewManager(lifecycleMgr, unsealer, auditLog)
+
+	// gRPC server。
+	var grpcSrv *grpc.Server
+	if cfg.Server.GRPC.Enabled {
+		grpcSrv = buildGRPCServer(core, authenticator, unsealer)
+		log.Printf("gRPC server enabled at %s:%d", cfg.Server.GRPC.BindAddr, cfg.Server.GRPC.BindPort)
+	}
+
+	// MCP server。
+	var mcpSrv *mcp.Server
+	if cfg.Server.MCP.Enabled {
+		if cfg.Server.MCP.Token == "" {
+			return nil, errors.New("bootstrap: mcp.token is required when mcp.enabled=true")
+		}
+		mcpSrv = mcp.NewServer(core, mcp.Config{
+			Token:       cfg.Server.MCP.Token,
+			AllowedKeys: cfg.Server.MCP.AllowedKeys,
+		})
+		log.Printf("MCP server enabled (stdio=%v, http=%s:%d)", cfg.Server.MCP.Stdio, cfg.Server.MCP.HTTPBindAddr, cfg.Server.MCP.HTTPBindPort)
+	}
+
 	return &Server{
 		V1Router:       v1Router,
 		AdminServer:    adminSrv,
+		GRPCServer:     grpcSrv,
+		MCPServer:      mcpSrv,
+		Core:           core,
 		AuditLog:       auditLog,
 		Metrics:        metricsReg,
 		VaultState:     unsealer,

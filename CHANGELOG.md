@@ -10,6 +10,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - TPM 2.0 hardware-bound CMK unseal (planned, `CryptoBackend` interface ready)
 - PKCS#11 HSM integration (planned, interface defined in `internal/seal/hsm.go`)
+
+## [0.4.0] - 2026-06-26
+
+### Added
+- **gRPC API** — 全量镜像 11 个 HTTP 端点
+  - `proto/yvonne/v1/yvonne.proto` 服务定义
+  - `internal/grpc/server.go` 实现 YvonneService
+  - `internal/grpc/interceptor.go` 认证/审计/Sealed 拦截器链
+  - 健康检查（Health 豁免认证）
+  - 复用 `auth.Authenticator` 接口（JWT/AppRole）
+- **MCP（Model Context Protocol）支持** — AI agent 安全集成
+  - 官方 SDK `github.com/modelcontextprotocol/go-sdk`
+  - 2 个 Tools：`yvonne_encrypt` + `yvonne_decrypt`
+  - 双传输：stdio（子进程）+ Streamable HTTP（`/mcp`）
+  - 独立 `mcp_token` 鉴权（ConstantTimeCompare）
+  - Decrypt 强约束：`AllowedKeys` 白名单 + 全量审计
+  - 不暴露 emergency seal/unseal/shred 等危险操作
+- **Service 层抽象** — `internal/service.Core`
+  - Transport-agnostic 业务逻辑（HTTP/gRPC/MCP 共享）
+  - 内置授权检查 + 审计记录 + Sealed 拦截
+- **配置扩展** — `GRPCServerConfig` + `MCPServerConfig`
+  - gRPC: enabled/bind_addr/bind_port/tls
+  - MCP: enabled/stdio/http_bind_addr/http_bind_port/token/allowed_keys
+- **三 server 装配** — bootstrap + main.go
+  - HTTP + gRPC + MCP 并行运行
+  - 优雅停机：rootCancel → HTTP Shutdown → gRPC GracefulStop → MCP HTTP Shutdown → Wipe
+
+### Tests Added
+- `internal/service/core_test.go` (3): Encrypt/Decrypt 往返、Sealed 拒绝、授权拒绝
+- `internal/grpc/server_test.go` (3): Health、Encrypt/Decrypt 端到端、Sealed 拒绝
+- `internal/mcp/server_test.go` (6): token 鉴权、白名单、通配符、HTTP handler
+
+### Dependencies
+- `google.golang.org/grpc` v1.81.1
+- `google.golang.org/protobuf` v1.36.11
+- `github.com/modelcontextprotocol/go-sdk` v1.6.1
 - Kubernetes KMS v2 plugin (planned, gRPC over Unix socket)
 - OpenAPI spec + SDK (Go/Java/Python)
 

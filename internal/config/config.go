@@ -23,7 +23,27 @@ type ServerConfig struct {
 	WriteTimeout Duration          `json:"write_timeout" yaml:"write_timeout"`
 	MaxConns     int               `json:"max_conns"     yaml:"max_conns"`
 	TLS          TLSConfig         `json:"tls"           yaml:"tls"` // 生产环境强制 Enabled=true
-	Admin        AdminServerConfig `json:"admin"     yaml:"admin"`
+	Admin        AdminServerConfig `json:"admin"         yaml:"admin"`
+	GRPC         GRPCServerConfig  `json:"grpc"          yaml:"grpc"`
+	MCP          MCPServerConfig   `json:"mcp"           yaml:"mcp"`
+}
+
+// GRPCServerConfig 是 gRPC server 配置。
+type GRPCServerConfig struct {
+	Enabled  bool      `json:"enabled"   yaml:"enabled"`
+	BindAddr string    `json:"bind_addr" yaml:"bind_addr"` // 默认 127.0.0.1
+	BindPort int       `json:"bind_port" yaml:"bind_port"` // 默认 8251
+	TLS      TLSConfig `json:"tls"       yaml:"tls"`
+}
+
+// MCPServerConfig 是 MCP server 配置。
+type MCPServerConfig struct {
+	Enabled      bool     `json:"enabled"       yaml:"enabled"`
+	Stdio        bool     `json:"stdio"         yaml:"stdio"`           // stdio 传输（子进程模式）
+	HTTPBindAddr string   `json:"http_bind_addr" yaml:"http_bind_addr"` // Streamable HTTP 传输
+	HTTPBindPort int      `json:"http_bind_port" yaml:"http_bind_port"`
+	Token        string   `json:"token"         yaml:"token"`        // MCP 专用 token（必填）
+	AllowedKeys  []string `json:"allowed_keys"  yaml:"allowed_keys"` // Decrypt 白名单
 }
 
 type TLSConfig struct {

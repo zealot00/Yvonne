@@ -16,6 +16,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -244,6 +245,48 @@ func startYvonne(cfg *config.YvonneConfig) {
 		}()
 	}
 
+	// gRPC server 启动。
+	if srv.GRPCServer != nil && cfg.Server.GRPC.Enabled {
+		grpcAddr := fmt.Sprintf("%s:%d", cfg.Server.GRPC.BindAddr, cfg.Server.GRPC.BindPort)
+		ln, err := net.Listen("tcp", grpcAddr)
+		if err != nil {
+			log.Fatalf("gRPC listen failed: %v", err)
+		}
+		errCh = make(chan error, cap(errCh)+1)
+		go func() {
+			log.Printf("yvonne gRPC listening on %s", grpcAddr)
+			if err := srv.GRPCServer.Serve(ln); err != nil {
+				errCh <- err
+			}
+		}()
+	}
+
+	// MCP stdio server 启动（独立 goroutine）。
+	if srv.MCPServer != nil && cfg.Server.MCP.Stdio {
+		go func() {
+			log.Printf("yvonne MCP server starting on stdio")
+			if err := srv.MCPServer.ServeStdio(rootCtx); err != nil {
+				log.Printf("MCP stdio error: %v", err)
+			}
+		}()
+	}
+
+	// MCP HTTP server 启动。
+	var mcpHTTPServer *http.Server
+	if srv.MCPServer != nil && cfg.Server.MCP.HTTPBindPort > 0 {
+		mcpAddr := fmt.Sprintf("%s:%d", cfg.Server.MCP.HTTPBindAddr, cfg.Server.MCP.HTTPBindPort)
+		mux := http.NewServeMux()
+		mux.Handle("/mcp", srv.MCPServer.HTTPHandler())
+		mcpHTTPServer = &http.Server{Addr: mcpAddr, Handler: mux}
+		go func() {
+			log.Printf("yvonne MCP HTTP listening on %s", mcpAddr)
+			if err := mcpHTTPServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				errCh <- err
+			}
+		}()
+	}
+	srv.MCPHTTPServer = mcpHTTPServer
+
 	// 监听信号。
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
@@ -266,12 +309,26 @@ func startYvonne(cfg *config.YvonneConfig) {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	// 1. HTTP API Shutdown。
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("WARNING: http shutdown timeout/error: %v (in-flight requests may be interrupted)", err)
 	}
 	if adminHTTPSrv != nil {
 		if err := adminHTTPSrv.Shutdown(shutdownCtx); err != nil {
 			log.Printf("WARNING: admin http shutdown error: %v", err)
+		}
+	}
+
+	// 2. gRPC GracefulStop。
+	if srv.GRPCServer != nil {
+		srv.GRPCServer.GracefulStop()
+		log.Printf("gRPC server stopped")
+	}
+
+	// 3. MCP HTTP Shutdown（stdio 随进程退出）。
+	if srv.MCPHTTPServer != nil {
+		if err := srv.MCPHTTPServer.Shutdown(shutdownCtx); err != nil {
+			log.Printf("WARNING: mcp http shutdown error: %v", err)
 		}
 	}
 

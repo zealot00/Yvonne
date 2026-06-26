@@ -1,0 +1,193 @@
+syntax = "proto3";
+
+package yvonne.v1;
+
+option go_package = "yvonne/gen/proto/yvonne/v1;yvonnev1";
+
+// YvonneService — KMS gRPC API（全量镜像 HTTP 端点）。
+service YvonneService {
+  // 系统管理
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc Unseal(UnsealRequest) returns (UnsealResponse);
+  rpc EmergencySeal(EmergencySealRequest) returns (EmergencySealResponse);
+
+  // 密钥生命周期
+  rpc CreateKey(CreateKeyRequest) returns (CreateKeyResponse);
+  rpc RotateKey(RotateKeyRequest) returns (RotateKeyResponse);
+  rpc ShredKey(ShredKeyRequest) returns (ShredKeyResponse);
+  rpc SoftDeleteKey(SoftDeleteKeyRequest) returns (SoftDeleteKeyResponse);
+  rpc RestoreKey(RestoreKeyRequest) returns (RestoreKeyResponse);
+
+  // 数据密钥
+  rpc GenerateDataKey(GenerateDataKeyRequest) returns (GenerateDataKeyResponse);
+
+  // BYOK
+  rpc TransitPub(TransitPubRequest) returns (TransitPubResponse);
+  rpc ImportKey(ImportKeyRequest) returns (ImportKeyResponse);
+
+  // 审计
+  rpc AuditQuery(AuditQueryRequest) returns (AuditQueryResponse);
+
+  // 加解密
+  rpc Encrypt(EncryptRequest) returns (EncryptResponse);
+  rpc Decrypt(DecryptRequest) returns (DecryptResponse);
+}
+
+// === 系统管理 ===
+
+message HealthRequest {}
+
+message HealthResponse {
+  string state = 1;              // "sealed" | "unsealed" | "emergency_sealed"
+  bool emergency_sealed = 2;
+  int64 uptime_seconds = 3;
+}
+
+message UnsealRequest {
+  repeated bytes shares = 1;     // Shamir 分片
+}
+
+message UnsealResponse {
+  bool unsealed = 1;
+  string state = 2;
+}
+
+message EmergencySealRequest {
+  string admin_token = 1;
+  bool confirm = 2;
+}
+
+message EmergencySealResponse {
+  bool emergency_sealed = 1;
+  string message = 2;
+}
+
+// === 密钥生命周期 ===
+
+message CreateKeyRequest {
+  string key_id = 1;
+  int32 rotation_period_days = 2;
+  bool return_dek = 3;           // false 时不返回明文 DEK
+}
+
+message CreateKeyResponse {
+  string key_id = 1;
+  int32 version = 2;
+  bytes plaintext_dek = 3;       // base64 编码的明文 DEK（return_dek=false 时为空）
+}
+
+message RotateKeyRequest {
+  string key_id = 1;
+  int32 version = 2;             // 当前版本
+}
+
+message RotateKeyResponse {
+  string key_id = 1;
+  int32 new_version = 2;
+  bytes plaintext_dek = 3;
+}
+
+message ShredKeyRequest {
+  string key_id = 1;
+  int32 version = 2;
+}
+
+message ShredKeyResponse {
+  bool destroyed = 1;
+}
+
+message SoftDeleteKeyRequest {
+  string key_id = 1;
+  int32 version = 2;
+}
+
+message SoftDeleteKeyResponse {
+  bool soft_deleted = 1;
+}
+
+message RestoreKeyRequest {
+  string key_id = 1;
+  int32 version = 2;
+}
+
+message RestoreKeyResponse {
+  bool restored = 1;
+}
+
+// === 数据密钥 ===
+
+message GenerateDataKeyRequest {
+  string key_id = 1;
+}
+
+message GenerateDataKeyResponse {
+  bytes plaintext_dek = 1;       // 明文 DEK（base64）
+  bytes ciphertext_dek = 2;      // 密文 DEK（base64，含版本前缀）
+}
+
+// === BYOK ===
+
+message TransitPubRequest {}
+
+message TransitPubResponse {
+  string key_id = 1;
+  string public_key_pem = 2;     // RSA-4096 公钥 PEM
+}
+
+message ImportKeyRequest {
+  string key_id = 1;
+  string transit_key_id = 2;
+  bytes wrapped_material = 3;    // RSA-OAEP 加密的 DEK
+}
+
+message ImportKeyResponse {
+  string key_id = 1;
+  int32 version = 2;
+}
+
+// === 审计 ===
+
+message AuditQueryRequest {
+  int32 limit = 1;
+  int64 start_time = 2;          // Unix 时间戳
+  int64 end_time = 3;
+  string key_id = 4;
+  string action = 5;
+  string actor = 6;
+}
+
+message AuditQueryResponse {
+  repeated AuditEntry entries = 1;
+}
+
+message AuditEntry {
+  int64 timestamp = 1;
+  string action = 2;
+  string actor = 3;
+  string key_id = 4;
+  int32 version = 5;
+  string status = 6;
+  string trace_id = 7;
+}
+
+// === 加解密 ===
+
+message EncryptRequest {
+  string key_id = 1;
+  bytes plaintext = 2;           // 原始明文（非 base64）
+}
+
+message EncryptResponse {
+  bytes ciphertext = 1;          // 版本化密文（含 4 字节版本前缀）
+  int32 version = 2;
+}
+
+message DecryptRequest {
+  string key_id = 1;
+  bytes ciphertext = 2;          // 版本化密文
+}
+
+message DecryptResponse {
+  bytes plaintext = 1;           // 原始明文
+  int32 version = 2;
+}
