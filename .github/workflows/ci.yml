@@ -5,9 +5,11 @@
 # Jobs:
 #   1. lint        — go vet + gofmt 检查
 #   2. test        — 单元测试（含 race detector）
-#   3. security    — 11 项安全自检脚本
+#   3. security    — 12 项安全自检脚本
 #   4. coverage    — 覆盖率报告 + Codecov 上传
 #   5. integration — PostgreSQL 集成测试（service container）
+#   6. benchmark   — 基准测试 + 可视化报告（push to main）
+#   7. build-matrix — 全编译模式验证（default/hsm/gmsm/hsm+gmsm）
 name: CI
 
 on:
@@ -17,7 +19,7 @@ on:
     branches: [main]
 
 env:
-  GO_VERSION: "1.21"
+  GO_VERSION: "1.25"
 
 jobs:
   # ─── 代码质量检查 ───
@@ -213,3 +215,48 @@ jobs:
         with:
           name: benchmark-raw
           path: bench_results.txt
+
+  # 7. 全编译模式验证
+  build-matrix:
+    name: Build Matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build default
+        run: go build ./...
+
+      - name: Build hsm (Mock)
+        run: go build -tags hsm ./...
+
+      - name: Build gmsm (国密)
+        run: go build -tags gmsm ./...
+
+      - name: Build hsm+pkcs11
+        run: go build -tags 'hsm,pkcs11' ./...
+
+      - name: Build hsm+gmsm
+        run: go build -tags 'hsm,gmsm' ./...
+
+      - name: Build gmsm+pkcs11
+        run: go build -tags 'gmsm,pkcs11' ./...
+
+      - name: Build hsm+pkcs11+gmsm
+        run: go build -tags 'hsm,pkcs11,gmsm' ./...
+
+      - name: Test default
+        run: go test -race -count=1 ./...
+
+      - name: Test gmsm
+        run: go test -tags gmsm -race -count=1 ./internal/crypto/ -run "TestGMSM|TestSM2"
+
+      - name: Test hsm (Mock)
+        run: go test -tags hsm -race -count=1 ./internal/seal/ -run "TestHSM|TestKEKIsolation"

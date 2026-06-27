@@ -1,0 +1,82 @@
+# GitHub Actions workflow: SoftHSM PKCS#11 集成测试
+#
+# 在 CI 中安装 SoftHSM2 + 初始化 slot + 运行 PKCS#11 测试。
+name: PKCS#11 HSM Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'internal/seal/hsm_pkcs11*.go'
+      - '.github/workflows/pkcs11.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'internal/seal/hsm_pkcs11*.go'
+      - '.github/workflows/pkcs11.yml'
+
+jobs:
+  pkcs11-test:
+    name: PKCS#11 (SoftHSM2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Install SoftHSM2
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y softhsm2 opensc
+          # 创建 token 目录
+          sudo mkdir -p /var/lib/softhsm/tokens
+          sudo chmod 777 /var/lib/softhsm/tokens
+          # 配置
+          echo "directories.tokendir = /var/lib/softhsm/tokens/" | sudo tee /etc/softhsm/softhsm2.conf
+          echo "objectstore.backend = file" | sudo tee -a /etc/softhsm/softhsm2.conf
+
+      - name: Initialize SoftHSM token
+        run: |
+          export SOFTHSM2_CONF=/etc/softhsm/softhsm2.conf
+          # 初始化 slot 0
+          softhsm2-util --init-token --slot 0 --label "yvonne-ci" --so-pin 1234 --pin 1234
+          # 验证
+          softhsm2-util --show-slots
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run PKCS#11 tests
+        env:
+          YVONNE_PKCS11_LIB: /usr/lib/softhsm/libsofthsm2.so
+          YVONNE_PKCS11_SLOT: "0"
+          YVONNE_PKCS11_PIN: "1234"
+          SOFTHSM2_CONF: /etc/softhsm/softhsm2.conf
+        run: |
+          go test -tags 'hsm,pkcs11' -race -v -timeout 120s ./internal/seal/ -run TestPKCS11
+
+      - name: Run PKCS#11 + gmsm tests
+        env:
+          YVONNE_PKCS11_LIB: /usr/lib/softhsm/libsofthsm2.so
+          YVONNE_PKCS11_SLOT: "0"
+          YVONNE_PKCS11_PIN: "1234"
+          SOFTHSM2_CONF: /etc/softhsm/softhsm2.conf
+        run: |
+          go test -tags 'hsm,pkcs11,gmsm' -race -v -timeout 120s ./internal/seal/ -run TestPKCS11
+
+      - name: Verify build matrix
+        run: |
+          echo "=== default ==="
+          go build ./...
+          echo "=== hsm ==="
+          go build -tags hsm ./...
+          echo "=== hsm,pkcs11 ==="
+          go build -tags 'hsm,pkcs11' ./...
+          echo "=== gmsm ==="
+          go build -tags gmsm ./...
+          echo "=== hsm,pkcs11,gmsm ==="
+          go build -tags 'hsm,pkcs11,gmsm' ./...
+          echo "ALL BUILD MODES OK"
