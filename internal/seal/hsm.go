@@ -35,6 +35,27 @@ type CryptoBackend interface {
 	Unwrap(ciphertext []byte) ([]byte, error)
 }
 
+// SignerBackend 是支持数字签名的可选 HSM 接口。
+//
+// 用于在 HSM 内生成非对称密钥对（RSA/ECDSA），私钥不出芯片。
+// 签名在 HSM 内执行，公钥可导出用于外部验签。
+type SignerBackend interface {
+	// GenerateSigningKey 在 HSM 内生成签名密钥对。
+	// keyID 为密钥标识（CKA_ID），algo 为算法（"rsa-2048"/"rsa-4096"/"ecdsa-p256"）。
+	// 返回公钥 PEM（用于外部验签）。
+	GenerateSigningKey(keyID, algo string) (pubPEM []byte, err error)
+
+	// Sign 用 HSM 内私钥签名数据。
+	Sign(keyID string, data []byte) (signature []byte, err error)
+
+	// GetPublicKey 导出指定 keyID 的公钥 PEM。
+	GetPublicKey(keyID string) (pubPEM []byte, err error)
+
+	// Verify 用指定 keyID 的公钥验签。
+	// 注意：验签可在 HSM 内或外部执行（公钥不敏感）。
+	Verify(keyID string, data, signature []byte) (bool, error)
+}
+
 // HSMMode 表示 HSM 是否已启用且可用。
 type HSMMode bool
 

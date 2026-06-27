@@ -11,7 +11,13 @@
 package seal
 
 import (
-	"crypto/cipher"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"sync"
@@ -164,5 +170,119 @@ func (p *pkcs11Backend) Close() error {
 	return nil
 }
 
-// 确保 cipher 包被引用（aead 接口依赖）。
-var _ = cipher.NewGCM
+// === SignerBackend 实现 ===
+
+// GenerateSigningKey 在 HSM 内生成签名密钥对（RSA/ECDSA），私钥不出芯片。
+func (p *pkcs11Backend) GenerateSigningKey(keyID, algo string) ([]byte, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	id := []byte(keyID)
+
+	switch algo {
+	case "rsa-2048":
+		signer, err := p.ctx.GenerateRSAKeyPair(id, 2048)
+		if err != nil {
+			return nil, fmt.Errorf("seal: pkcs11: generate RSA-2048: %w", err)
+		}
+		return marshalPublicKey(signer.Public())
+
+	case "rsa-4096":
+		signer, err := p.ctx.GenerateRSAKeyPair(id, 4096)
+		if err != nil {
+			return nil, fmt.Errorf("seal: pkcs11: generate RSA-4096: %w", err)
+		}
+		return marshalPublicKey(signer.Public())
+
+	case "ecdsa-p256":
+		signer, err := p.ctx.GenerateECDSAKeyPair(id, elliptic.P256())
+		if err != nil {
+			return nil, fmt.Errorf("seal: pkcs11: generate ECDSA-P256: %w", err)
+		}
+		return marshalPublicKey(signer.Public())
+
+	default:
+		return nil, fmt.Errorf("seal: pkcs11: unsupported signing algo %q", algo)
+	}
+}
+
+// Sign 用 HSM 内私钥签名数据（SHA-256 摘要 + PKCS#1 v1.5 / ECDSA）。
+func (p *pkcs11Backend) Sign(keyID string, data []byte) ([]byte, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	signer, err := p.ctx.FindKeyPair([]byte(keyID), nil)
+	if err != nil {
+		return nil, fmt.Errorf("seal: pkcs11: find signing key: %w", err)
+	}
+	if signer == nil {
+		return nil, fmt.Errorf("seal: pkcs11: signing key %q not found", keyID)
+	}
+
+	// 计算 SHA-256 摘要。
+	hash := sha256.Sum256(data)
+
+	// crypto.Signer 接口：Sign(rand, digest, hashAlg)。
+	// crypto11 的 Signer 实现在 HSM 内执行签名。
+	sig, err := signer.Sign(nil, hash[:], crypto.SHA256)
+	if err != nil {
+		return nil, fmt.Errorf("seal: pkcs11: HSM sign: %w", err)
+	}
+
+	return sig, nil
+}
+
+// GetPublicKey 导出指定 keyID 的公钥 PEM。
+func (p *pkcs11Backend) GetPublicKey(keyID string) ([]byte, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	signer, err := p.ctx.FindKeyPair([]byte(keyID), nil)
+	if err != nil {
+		return nil, fmt.Errorf("seal: pkcs11: find signing key: %w", err)
+	}
+	if signer == nil {
+		return nil, fmt.Errorf("seal: pkcs11: signing key %q not found", keyID)
+	}
+
+	return marshalPublicKey(signer.Public())
+}
+
+// Verify 用指定 keyID 的公钥验签。
+// 验签在 Go 进程内执行（公钥不敏感，不需要 HSM）。
+func (p *pkcs11Backend) Verify(keyID string, data, signature []byte) (bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	signer, err := p.ctx.FindKeyPair([]byte(keyID), nil)
+	if err != nil {
+		return false, fmt.Errorf("seal: pkcs11: find signing key: %w", err)
+	}
+	if signer == nil {
+		return false, fmt.Errorf("seal: pkcs11: signing key %q not found", keyID)
+	}
+
+	pub := signer.Public()
+	hash := sha256.Sum256(data)
+
+	switch key := pub.(type) {
+	case *rsa.PublicKey:
+		return rsa.VerifyPKCS1v15(key, crypto.SHA256, hash[:], signature) == nil, nil
+	case *ecdsa.PublicKey:
+		return ecdsa.VerifyASN1(key, hash[:], signature), nil
+	default:
+		return false, fmt.Errorf("seal: pkcs11: unsupported public key type %T", pub)
+	}
+}
+
+// marshalPublicKey 将公钥序列化为 PEM。
+func marshalPublicKey(pub crypto.PublicKey) ([]byte, error) {
+	der, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		return nil, fmt.Errorf("seal: pkcs11: marshal public key: %w", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: der,
+	}), nil
+}
