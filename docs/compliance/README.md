@@ -25,5 +25,5 @@
 | Yvonne 版本 | 合规级别 | 说明 |
 |---|---|---|
 | v1.0 (GA) | 等保二级基础 | SM4/SM3/SM2 已实现，审计链 HMAC-SHA256 |
-| v1.1 | 等保二级完整 | HMAC-SM3 + JWT SM2 + 密文算法标识 |
-| v1.2 | 等保三级 | PKCS#11 HSM + 国密认证 RNG |
+| v1.1 ✅ | 等保二级完整 | HMAC-SM3 + JWT SM2 + SM2 公钥密码 + 严格国密模式 + PKCS#11 HSM |
+| v1.2 (planned) | 等保三级 | 国密认证 RNG + 国产数据库适配 |

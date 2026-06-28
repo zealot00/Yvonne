@@ -19,8 +19,8 @@ Yvonne is built for teams who need centralized key management without surrenderi
 - **Absolute Memory Discipline**: `clear()` + `runtime.KeepAlive()` defeats DCE. Memory dumps yield nothing but ghosts.
 - **Versioned Self-Routing Ciphertext**: `[uint32 version BE][nonce][ciphertext+tag]` — decrypt auto-routes to correct DEK version.
 - **Shamir's Secret Sharing**: Master Key shattered into N shards across GF(2^8). K shards to resurrect.
-- **Dual-Write Audit Chain**: HMAC-SHA256 hash chain + daily file rotation + async syslog dual-write. Tamper = chain breaks.
-- **JWT RBAC Engine**: RS256/384/512, ES256/384/512, HS256/384/512. Algorithm confusion prevention. Configurable role claim paths.
+- **Dual-Write Audit Chain**: HMAC-SHA256 or HMAC-SM3 hash chain + daily file rotation + async syslog dual-write. Tamper = chain breaks.
+- **JWT RBAC Engine**: RS256/384/512, ES256/384/512, HS256/384/512, SM2 (国密). Algorithm confusion prevention. Configurable role claim paths.
 - **Resource-Level Authorization**: Body `KeyID` checked against `Policy.AllowedKeys` (wildcard + prefix match). Default deny.
 - **Auto Key Rotation**: PostgreSQL Advisory Lock elects cluster leader. Hourly scan for expired keys. Actor=`SYSTEM_DAEMON`.
 - **Soft Delete + Recycle Bin**: 90-day TTL with auto-shred reaper. Restorable. Crypto-shredding for permanent destruction.
@@ -29,8 +29,9 @@ Yvonne is built for teams who need centralized key management without surrenderi
 - **Cold Storage Backup**: Shamir-split Wrapped CMK to N USB drives. HMAC integrity per shard.
 - **Emergency Seal**: One API call wipes everything. Deep freeze until manual restart + Shamir unseal.
 - **Multi-Protocol API**: HTTP REST + gRPC (full mirror) + MCP (AI agent integration, encrypt + restricted decrypt).
-- **Pluggable Crypto Suite**: AES-256-GCM + SHA-256 (default) or SM4-GCM + SM3 (国密, `-tags gmsm`).
-- **HSM Support**: Pluggable KEK abstraction (`softwareKEK` / `hsmKEK`), CMK never leaves chip.
+- **Pluggable Crypto Suite**: AES-256-GCM + SHA-256 (default) or SM4-GCM + SM3 (国密, `-tags gmsm`). SM2 public key crypto + JWT SM2 signing.
+- **HSM Support**: Pluggable KEK abstraction (`softwareKEK` / `hsmKEK`), CMK never leaves chip. PKCS#11 backend via crypto11 + SoftHSM CI.
+- **Strict GM Mode**: `crypto.strict: true` enforces SM2/SM3/SM4 only, disables AES/RSA/ECDSA.
 
 ### Quick Start
 
@@ -49,6 +50,11 @@ Yvonne is built for teams who need centralized key management without surrenderi
 - [HTTP API Guide](docs/api.md)
 - [gRPC API Guide](docs/grpc-api.md)
 - [MCP (AI Agent) Guide](docs/mcp-api.md)
+- [PKCS#11 HSM Guide](docs/pkcs11-hsm.md)
+- [国密合规路线图](docs/gmsm-roadmap.md)
+- [AES→SM4 迁移指南](docs/aes-to-sm4-migration.md)
+- [合规证据包](docs/compliance/README.md)
+- [升级指南](docs/upgrade-guide.md)
 - [Benchmark Report](docs/benchmark-report.html)
 - [Deployment Guide](docs/deployment.md)
 - [Test Coverage Report](docs/coverage.md)

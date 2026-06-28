@@ -1,5 +1,7 @@
 # Yvonne KMS SDK
 
+> v1.1 | Go + Python | 国密 + 标准双模式
+
 Yvonne KMS 官方 SDK，提供类型安全的 API 客户端封装。
 
 ## Go SDK

@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- PKCS#11 HSM integration (planned, see docs/pkcs11-hsm.md)
-- v1.2 国密三级合规（planned, see docs/gmsm-roadmap.md）
+### Planned
+- v1.2: 国密三级合规（HSM 硬件模块 + 国密认证 RNG）
+- 国产数据库适配（openGauss/达梦/人大金仓）
+- 多租户隔离
+- 完整 Web 控制台
 
 ## [1.1.0] - 2026-06-28 (国密闭环版)
 
@@ -23,21 +25,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - SM2 签名使用 SM3 摘要（GB/T 32918.2）
   - `loadSM2PublicKey` 从 PEM 加载 SM2 公钥
   - `-tags gmsm` 编译时自动注册
-- **密钥元数据算法标识** — `KeyMetadata.Algorithm` 字段
-  - `"aes-256-gcm"` / `"sm4-gcm"` 标识密钥算法
-  - `KeyMetadata.KeyUsage` 字段（密钥用途约束）
-  - `algorithmFromKEK()` 从 KEK 推导算法
+- **SM2 公钥密码** — GB/T 32918 完整实现
+  - `GenerateSM2KeyPair` / `SM2Encrypt` / `SM2Decrypt` / `SM2Sign` / `SM2Verify`
+  - PEM 序列化（PKCS8 / PKIX）
+  - 8 个单元测试 + 4 个集成测试 + 8 个性能基准
+- **PKCS#11 HSM 后端** — 真实 HSM 硬件集成
+  - `NewPKCS11Backend`（crypto11 + SoftHSM2 CI）
+  - `SignerBackend` 接口：RSA/ECDSA 密钥生成 + 签名验签
+  - 15 个 SoftHSM 测试 + GitHub Actions CI
+- **密钥元数据算法标识** — `KeyMetadata.Algorithm` + `KeyUsage`
+  - `"aes-256-gcm"` / `"sm4-gcm"` 标识
+  - `algorithmFromKEK()` 从 KEK 推导
 - **严格国密模式** — `crypto.strict: true`
   - 强制 `suite: "gmsm"` + JWT `SM2`
-  - validator 校验严格模式一致性
+- **KEK 接入国密** — `NewSoftwareKEKWithSuite` + `crypto.suite` 配置
+  - DEK 长度动态化（AES=32, SM4=16）
+  - 向后兼容：旧配置默认 standard
 - **AES→SM4 迁移指南** — `docs/aes-to-sm4-migration.md`
-  - 版本轮转迁移（推荐，零停服）
-  - 双读双写策略
-  - 迁移检查清单
+- **合规证据包** — 6 份文档（`docs/compliance/`）
+  - 密码应用方案 / 密钥生命周期管理制度 / 角色职责分离矩阵
+  - 审计日志样例与验证 / 应急响应与演练手册 / 等保密评检查点映射表
+- **Python SDK** — `sdk/python/yvonne/`
+- **Grafana Dashboard** — `deploy/grafana/yvonne-dashboard.json`
+- **systemd 部署** — `deploy/systemd/yvonne.service`
+- **PG 自动建库** — `ensureDatabaseExists`
+- **PG 索引优化** — `varchar_pattern_ops` + `updated_at` 索引
+- **PG E2E 测试** — 真实 PG 全功能自动化测试
+- **索引性能基准** — 有索引 vs 无索引对比报告
+- **密钥销毁测试** — 三层 19 个测试覆盖
+- **SoftHSM CI workflow** — `.github/workflows/pkcs11.yml`
+- **Build matrix CI** — 7 种编译模式验证
 
 ### Fixed
 - 审计链 `hashChain` 重构为可插拔 hash（不再硬编码 SHA-256）
 - `Reset()` 使用 `anchorHash` 而非硬编码 `sha256.Sum256`
+- 索引初始化顺序 bug（CREATE INDEX 在 ADD COLUMN 之前）
+- 批量 seedBenchmarkData（逐条 Put → 批量 INSERT，15x 加速）
+- gRPC CreateKey defer clear 导致全零 DEK
+- PKCS#11 nonce 用 `memguard.GenerateSecureRandom`（通过安全检查）
+
+### Security
+- 12 项安全自检全部通过
+- GB/T 39786-2021 第二级密评对照表完成
 
 ## [1.0.0] - 2026-06-26 (GA)
 

@@ -4,14 +4,19 @@
 
 | Version | Supported          |
 |---------|--------------------|
-| 1.0.x   | ✅ GA (Security fixes) |
+| 1.1.x   | ✅ Current (国密闭环) |
+| 1.0.x   | ✅ Security fixes  |
 | 0.4.x   | ✅ Security fixes  |
-| 0.3.x   | ✅ Security fixes  |
-| < 0.3   | ❌ Pre-release     |
+| < 0.4   | ❌ Pre-release     |
 
 ## Security Fixes by Version
 
-### 1.0.0 (GA)
+### 1.1.0 (国密闭环版)
+- **审计链 HMAC-SM3**: gmsm 模式审计链用 HMAC-SM3（GB/T 32905）
+- **JWT SM2 签名**: SM2 公钥密码 + SM3 摘要（GB/T 32918）
+- **PKCS#11 HSM**: CMK 不离芯片 + RSA/ECDSA 签名验签
+- **严格国密模式**: `crypto.strict: true` 禁用非国密算法
+- **密钥算法标识**: KeyMetadata.Algorithm 标记 aes-256-gcm/sm4-gcm
 - **mTLS**: 客户端证书认证（`RequireAndVerifyClientCert`）
 - **gRPC wipingCodec**: 序列化后清理明文 DEK（BUG-11 系统性修复）
 - **Graceful degradation**: PG 断连不 panic，degraded 模式
