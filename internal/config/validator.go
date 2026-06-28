@@ -152,6 +152,15 @@ func Validate(cfg *Config) error {
 	default:
 		errs = append(errs, "crypto.suite must be standard or gmsm")
 	}
+	// 严格国密模式：suite 必须为 gmsm + 禁用 RSA/ECDSA。
+	if cfg.Crypto.Strict {
+		if cfg.Crypto.Suite != "gmsm" {
+			errs = append(errs, "crypto.strict=true requires crypto.suite=gmsm")
+		}
+		if cfg.Auth.JWT.SigningMethod != "" && cfg.Auth.JWT.SigningMethod[:2] != "SM" {
+			errs = append(errs, "crypto.strict=true requires auth.jwt.signing_method=SM2")
+		}
+	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("config validation failed:\n  - %s", strings.Join(errs, "\n  - "))

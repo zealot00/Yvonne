@@ -2,10 +2,13 @@
 //
 // 哈希链算法：
 //
-//	CurrentSignature = HMAC-SHA256(AuditKey, lastSignature + CurrentLogPayload)
+//	CurrentSignature = HMAC(AuditKey, lastSignature + CurrentLogPayload)
 //
-// 初始 lastSignature = SHA256(AuditKey)（链头锚定）。
+// HMAC 算法可插拔：
+//   - 标准模式：HMAC-SHA256
+//   - 国密模式：HMAC-SM3（需 -tags gmsm）
 //
+// 初始 lastSignature = Hash(chainKey)（链头锚定）。
 // 每条日志记录后更新 lastSignature，形成不可篡改的链条。
 // 任何中间日志被篡改或删除，后续所有签名验证都会失败。
 //
@@ -16,6 +19,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"hash"
 	"sync"
 )
 
@@ -23,14 +27,26 @@ import (
 type hashChain struct {
 	mu            sync.Mutex
 	lastSignature []byte
+	newHash       func() hash.Hash    // HMAC 内层 hash 函数（SHA-256 或 SM3）
+	anchorHash    func([]byte) []byte // 链头锚定 hash（SHA-256 或 SM3）
 }
 
-// newHashChain 创建哈希链，初始签名为 SHA256(chainKey)。
-// chainKey 是从 AuditKey 提取的 []byte（通过 WithKey 闭包），非直接密钥参数。
+// newHashChain 创建哈希链（标准模式，HMAC-SHA256）。
+// chainKey 是从 AuditKey 提取的 []byte。
 func newHashChain(chainKey []byte) *hashChain {
-	h := sha256.Sum256(chainKey)
 	return &hashChain{
-		lastSignature: h[:],
+		lastSignature: sha256Sum(chainKey),
+		newHash:       sha256.New,
+		anchorHash:    sha256Sum,
+	}
+}
+
+// newHashChainWithHash 创建哈希链（自定义 hash 函数，用于国密 HMAC-SM3）。
+func newHashChainWithHash(chainKey []byte, newHash func() hash.Hash, anchorHash func([]byte) []byte) *hashChain {
+	return &hashChain{
+		lastSignature: anchorHash(chainKey),
+		newHash:       newHash,
+		anchorHash:    anchorHash,
 	}
 }
 
@@ -49,7 +65,7 @@ func (c *hashChain) computeAndAdvance(chainKey, payload []byte) (currentSig, pre
 
 	prevSig = hex.EncodeToString(c.lastSignature)
 
-	mac := hmac.New(sha256.New, chainKey)
+	mac := hmac.New(c.newHash, chainKey)
 	mac.Write(c.lastSignature)
 	mac.Write(payload)
 	sig := mac.Sum(nil)
@@ -73,10 +89,15 @@ func (c *hashChain) SetLastSignature(sig []byte) {
 	c.lastSignature = sig
 }
 
+// sha256Sum 计算 SHA-256 摘要。
+func sha256Sum(data []byte) []byte {
+	h := sha256.Sum256(data)
+	return h[:]
+}
+
 // Reset 重置哈希链（用于测试）。
 func (c *hashChain) Reset(chainKey []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	h := sha256.Sum256(chainKey)
-	c.lastSignature = h[:]
+	c.lastSignature = c.anchorHash(chainKey)
 }

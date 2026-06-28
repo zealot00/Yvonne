@@ -131,6 +131,15 @@ func NewJWTAuthenticator(cfg JWTConfig, policyStore PolicyStore) (*JWTAuthentica
 			return nil, fmt.Errorf("auth: jwt: load ECDSA public key: %w", err)
 		}
 		verifyKey = pub
+	case "SM":
+		if cfg.VerifyingKeyPath == "" {
+			return nil, errors.New("auth: jwt: verifying_key_path required for SM2")
+		}
+		pub, err := loadSM2PublicKey(cfg.VerifyingKeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("auth: jwt: load SM2 public key: %w", err)
+		}
+		verifyKey = pub
 	case "HS":
 		if cfg.Secret == "" {
 			return nil, errors.New("auth: jwt: secret required for HMAC")
@@ -268,6 +277,14 @@ func parseSigningMethod(method string) (jwt.SigningMethod, error) {
 		return jwt.SigningMethodHS384, nil
 	case "HS512":
 		return jwt.SigningMethodHS512, nil
+	case "SM2":
+		// SM2 签名方法在 -tags gmsm 时通过 init() 注册。
+		// 若未编译 gmsm tag，jwt.GetSigningMethod("SM2") 返回 nil。
+		sm := jwt.GetSigningMethod("SM2")
+		if sm == nil {
+			return nil, fmt.Errorf("SM2 signing method not available (rebuild with -tags gmsm)")
+		}
+		return sm, nil
 	default:
 		return nil, fmt.Errorf("unsupported signing method: %s", method)
 	}

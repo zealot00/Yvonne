@@ -43,12 +43,14 @@ type KeyMetadata struct {
 	Version            int       `json:"version"`
 	State              KeyState  `json:"state"`
 	KeyType            string    `json:"key_type"`
+	Algorithm          string    `json:"algorithm,omitempty"` // "aes-256-gcm"|"sm4-gcm"（v1.1 新增，空值=旧数据兼容）
+	KeyUsage           []string  `json:"key_usage,omitempty"` // ["encrypt","decrypt"]（v1.1 新增，密钥用途约束）
 	EncryptedMaterial  []byte    `json:"encrypted_material"`
 	KEKType            string    `json:"kek_type,omitempty"` // "software"|"hsm"，空值=software（旧数据兼容）
 	PublicKey          []byte    `json:"public_key,omitempty"`
 	CreatedAt          time.Time `json:"created_at"`
 	DeletedAt          time.Time `json:"deleted_at,omitempty"`
-	RotationPeriodDays int       `json:"rotation_period_days,omitempty"`
+	RotationPeriodDays int       `json:"rotation_rotation_days,omitempty"`
 	NextRotationAt     time.Time `json:"next_rotation_at,omitempty"`
 }
 
@@ -221,6 +223,8 @@ func (m *Manager) CreateKey(ctx context.Context, keyID string, kek seal.KEK, rot
 		State:              StateActive,
 		EncryptedMaterial:  encryptedDEK,
 		KEKType:            string(kek.Type()),
+		Algorithm:          algorithmFromKEK(kek),
+		KeyUsage:           []string{"encrypt", "decrypt"},
 		CreatedAt:          now,
 		RotationPeriodDays: rotationPeriodDays,
 	}
@@ -923,6 +927,18 @@ func (m *Manager) ListKeyIDs(ctx context.Context) ([]string, error) {
 
 // ErrKeyNotActive 表示密钥非 Active 状态，拒绝加密操作。
 var ErrKeyNotActive = errors.New("lifecycle: key is not active, encrypt refused")
+
+// algorithmFromKEK 从 KEK 推导算法标识（v1.1 新增）。
+// 用于 KeyMetadata.Algorithm 字段。
+func algorithmFromKEK(kek seal.KEK) string {
+	if ks, ok := kek.(seal.KEKWithKeySize); ok {
+		size := ks.KeySize()
+		if size == 16 {
+			return "sm4-gcm"
+		}
+	}
+	return "aes-256-gcm"
+}
 
 // dekSizeFromKEK 从 KEK 获取 DEK 密钥长度（v1.1：支持 SM4 16 字节）。
 // KEK 不实现 KEKWithKeySize 时默认 32（AES-256，向后兼容）。

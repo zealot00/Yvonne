@@ -29,6 +29,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"path/filepath"
@@ -113,6 +114,30 @@ func NewAuditLogger(writer io.Writer) (*AuditLogger, error) {
 	return &AuditLogger{
 		auditKey:       key,
 		chain:          newHashChain(chainKey),
+		fallbackWriter: writer,
+	}, nil
+}
+
+// NewAuditLoggerWithHash 创建 AuditLogger（自定义 hash 函数，用于国密 HMAC-SM3）。
+func NewAuditLoggerWithHash(writer io.Writer, newHash func() hash.Hash, anchorHash func([]byte) []byte) (*AuditLogger, error) {
+	key, err := memguard.NewSecureBufferFromRandom(32)
+	if err != nil {
+		return nil, fmt.Errorf("audit: generate audit key: %w", err)
+	}
+	if writer == nil {
+		writer = io.Discard
+	}
+
+	var chainKey []byte
+	_ = key.WithKey(func(k []byte) error {
+		chainKey = make([]byte, len(k))
+		copy(chainKey, k)
+		return nil
+	})
+
+	return &AuditLogger{
+		auditKey:       key,
+		chain:          newHashChainWithHash(chainKey, newHash, anchorHash),
 		fallbackWriter: writer,
 	}, nil
 }

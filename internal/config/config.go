@@ -83,6 +83,7 @@ type SealConfig struct {
 // 算法白名单在此固化，运行时不允许越界。
 type CryptoConfig struct {
 	Suite             string   `json:"suite"              yaml:"suite"`                // "standard"(默认) | "gmsm"（v1.1 新增）
+	Strict            bool     `json:"strict"             yaml:"strict"`               // v1.1: true=仅允许国密算法
 	DEKSize           int      `json:"dek_size"           yaml:"dek_size"`             // standard=32, gmsm=16
 	RSAKeyBits        int      `json:"rsa_key_bits"       yaml:"rsa_key_bits"`         // 固定 4096
 	ECDSACurve        string   `json:"ecdsa_curve"        yaml:"ecdsa_curve"`          // "P-256" | "P-384"

@@ -8,8 +8,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- PKCS#11 HSM integration (planned, interface defined in `internal/seal/hsm.go`)
-- v1.1 国密合规版（planned, see docs/gmsm-roadmap.md）
+- PKCS#11 HSM integration (planned, see docs/pkcs11-hsm.md)
+- v1.2 国密三级合规（planned, see docs/gmsm-roadmap.md）
+
+## [1.1.0] - 2026-06-28 (国密闭环版)
+
+### Added
+- **审计链 HMAC-SM3** — gmsm 模式审计链用 HMAC-SM3 替代 HMAC-SHA256
+  - `NewAuditLoggerWithHash(writer, newHash, anchorHash)` 可插拔 hash
+  - `NewAuditLoggerWithSM3(writer)` 国密便捷构造（`-tags gmsm`）
+  - 向后兼容：旧 SHA-256 链仍可验证
+- **JWT SM2 签名** — `signing_method: "SM2"` 支持
+  - `SigningMethodSM2` 实现 `jwt.SigningMethod` 接口
+  - SM2 签名使用 SM3 摘要（GB/T 32918.2）
+  - `loadSM2PublicKey` 从 PEM 加载 SM2 公钥
+  - `-tags gmsm` 编译时自动注册
+- **密钥元数据算法标识** — `KeyMetadata.Algorithm` 字段
+  - `"aes-256-gcm"` / `"sm4-gcm"` 标识密钥算法
+  - `KeyMetadata.KeyUsage` 字段（密钥用途约束）
+  - `algorithmFromKEK()` 从 KEK 推导算法
+- **严格国密模式** — `crypto.strict: true`
+  - 强制 `suite: "gmsm"` + JWT `SM2`
+  - validator 校验严格模式一致性
+- **AES→SM4 迁移指南** — `docs/aes-to-sm4-migration.md`
+  - 版本轮转迁移（推荐，零停服）
+  - 双读双写策略
+  - 迁移检查清单
+
+### Fixed
+- 审计链 `hashChain` 重构为可插拔 hash（不再硬编码 SHA-256）
+- `Reset()` 使用 `anchorHash` 而非硬编码 `sha256.Sum256`
 
 ## [1.0.0] - 2026-06-26 (GA)
 
