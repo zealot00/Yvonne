@@ -84,6 +84,15 @@ func (r *V1Router) register() {
 	r.mux.HandleFunc("/api/v1/encrypt", r.auditMiddleware("Encrypt", r.authAndSeal("Encrypt", r.handleV1Encrypt)))
 	r.mux.HandleFunc("/api/v1/decrypt", r.auditMiddleware("Decrypt", r.authAndSeal("Decrypt", r.handleV1Decrypt)))
 
+	// v1.2 新增路由。
+	r.mux.HandleFunc("/api/v1/sign", r.auditMiddleware("Sign", r.authAndSeal("Sign", r.handleV1Sign)))
+	r.mux.HandleFunc("/api/v1/verify", r.auditMiddleware("Verify", r.authAndSeal("Verify", r.handleV1Verify)))
+	r.mux.HandleFunc("/api/v1/mac/generate", r.auditMiddleware("GenerateMac", r.authAndSeal("GenerateMac", r.handleV1GenerateMac)))
+	r.mux.HandleFunc("/api/v1/mac/verify", r.auditMiddleware("VerifyMac", r.authAndSeal("VerifyMac", r.handleV1VerifyMac)))
+	r.mux.HandleFunc("/api/v1/re-encrypt", r.auditMiddleware("ReEncrypt", r.authAndSeal("ReEncrypt", r.handleV1ReEncrypt)))
+	r.mux.HandleFunc("/api/v1/keys/gdk-no-plaintext", r.auditMiddleware("GenerateDataKeyWithoutPlaintext", r.authAndSeal("KeyOp", r.handleV1GDKWithoutPlaintext)))
+	r.mux.HandleFunc("/api/v1/keys/public-key", r.auditMiddleware("GetPublicKey", r.authAndSeal("KeyOp", r.handleV1GetPublicKey)))
+
 	// 可观测性。
 	// metrics 含内部状态（请求量/延迟/失败率），生产应认证保护。
 	// Cluster 模式有 authenticator → 包裹 RequireAuth("Metrics")。

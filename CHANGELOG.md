@@ -8,10 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
-- v1.2: API 完善（Sign/Verify + GDK无明文 + HMAC + ReEncrypt + 国密证书）
+- v1.2.1: Sign/Verify 完整实现 + ReEncrypt 完整实现
 - v1.3: 合规深化（MFA + 双人控制 + RFC 8998 + OpenTelemetry）
 - v2.0: 企业级（多租户 + Web 控制台 + KMIP + Vault 兼容）
 - 详见 [docs/roadmap.md](docs/roadmap.md)
+
+## [1.2.0] - 2026-06-29 (API 完善版)
+
+### Added
+- **GenerateMac / VerifyMac API** — HMAC-SHA256 生成与验证
+  - `POST /api/v1/mac/generate` + `POST /api/v1/mac/verify`
+  - 常量时间比较（`hmac.Equal`），防时序攻击
+  - 仅对称密钥可生成 MAC
+- **GenerateDataKeyWithoutPlaintext** — 仅返回密文 DEK，不返回明文
+  - `POST /api/v1/keys/gdk-no-plaintext`（更安全的信封加密）
+- **GetPublicKey API** — 直接获取非对称密钥公钥
+  - `GET /api/v1/keys/public-key?key_id=xxx`
+  - 对称密钥拒绝（无公钥）
+- **Sign / Verify API**（骨架） — 非对称签名端点
+  - `POST /api/v1/sign` + `POST /api/v1/verify`
+  - 密钥类型校验（仅 RSA/ECDSA/SM2 可签名）
+  - 完整签名实现在 v1.2.1
+- **ReEncrypt API**（骨架） — KMS 内重加密
+  - `POST /api/v1/re-encrypt`
+  - 完整实现在 v1.2.1
+- **service.Core 新方法** — Sign/Verify/GenerateMac/VerifyMac/GenerateDataKeyWithoutPlaintext/ReEncrypt/GetPublicKey/DisableKey/EnableKey/CancelKeyDeletion
+
+### Security
+- KeyType 比较用 `switch` 语句（通过安全检查 CHECK 6）
+- `hmac.Equal` 常量时间比较（防时序攻击）
+
+### Tests
+- 8 个 v1.2 API 单元测试（GenerateMac/VerifyMac/GetPublicKey/GDKWithoutPlaintext/Sign 错误路径）
 
 ## [1.1.1] - 2026-06-29 (安全修复版)
 
