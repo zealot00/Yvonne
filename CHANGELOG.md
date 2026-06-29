@@ -15,6 +15,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.1] - 2026-06-29 (安全加固版)
 
+### Fixed
+- **CORS 实际请求无头** — POST/GET 实际请求（非预检）未返回 `Access-Control-Allow-Origin`，浏览器 JS 无法读取响应
+  - 原因：CORS 头只在 OPTIONS 短路时设置，实际请求路由到 mux 未加 CORS
+  - 修复：`ServeHTTP` 中所有请求统一加 CORS 头，OPTIONS 额外短路返回 204
+- **CORS OPTIONS 405** — OPTIONS 预检直接到 mux handler 返回 `405 Method Not Allowed`
+  - 原因：V1Router 主路由未处理 OPTIONS 预检
+  - 修复：`ServeHTTP` 中 OPTIONS 短路返回 204 + CORS headers
+
+### Added
+- `SetCORSConfig()` 方法 — Cluster 模式可覆盖默认 CORS 配置
+- 12 个 CORS 集成测试（`cors_integration_test.go`）
+  - 预检：AllowAllOrigin / SpecificOrigin / DisallowedOrigin / NoOrigin
+  - 实际请求：POST / GET / DisallowedOrigin / NoOrigin
+  - Credentials 模式 / 浏览器完整流程 / 全 HTTP 方法 / Wildcard Origin
+- `.gosec.json` — gosec 配置（排除 scripts/sdk/examples/gen 目录）
+
 ### Security
 
 #### Go 1.25.8 → 1.25.11（修复 10 个标准库 CVE）
@@ -33,16 +49,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **G204 (MEDIUM) Subprocess** — `openBrowser` 内部生成 URL，`#nosec` 标注
 - **G203 (MEDIUM) XSS** — scripts/ 目录排除（辅助工具，非生产代码）
 - **G103 (LOW) unsafe** — `wiping_codec.go` 防 DCE 必需，`#nosec` 标注
-- **G104 (LOW) 未处理错误** — 所有 `WithKey` 闘包返回 error，`os.Stdout.Write`/`syslog.Write` 加 `#nosec`
+- **G104 (LOW) 未处理错误** — 所有 `WithKey` 闭包返回 error，`os.Stdout.Write`/`syslog.Write` 加 `#nosec`
 
 #### govulncheck 修复
 - **pgx v5.5.3 → v5.9.2** — 修复 GO-2026-5004
 - **golang.org/x/net v0.51.0 → v0.53.0** — 修复 GO-2026-4918
 - **Go 1.25.8 → 1.25.11** — 修复 10 个标准库 CVE
-
-#### 配置
-- 新增 `.gosec.json` — gosec 配置（排除 scripts/sdk/examples/gen 目录）
-- gosec 扫描命令: `gosec -exclude-dir=scripts -exclude-dir=sdk/examples -exclude-dir=gen ./...`
 
 ### Scan Results
 ```
