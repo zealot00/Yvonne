@@ -55,11 +55,13 @@ func (c *Core) Sign(ctx context.Context, keyID string, data []byte, policy *auth
 		}
 		defer privSB.Wipe()
 		var privKey []byte
-		privSB.WithKey(func(k []byte) error {
+		if err := privSB.WithKey(func(k []byte) error {
 			privKey = make([]byte, len(k))
 			copy(privKey, k)
 			return nil
-		})
+		}); err != nil {
+			return err
+		}
 
 		// 根据密钥类型签名。
 		switch meta.KeyType {
@@ -155,11 +157,13 @@ func (c *Core) GenerateMac(ctx context.Context, keyID string, data []byte, polic
 		}
 		defer keySB.Wipe()
 		var key []byte
-		keySB.WithKey(func(k []byte) error {
+		if err := keySB.WithKey(func(k []byte) error {
 			key = make([]byte, len(k))
 			copy(key, k)
 			return nil
-		})
+		}); err != nil {
+			return err
+		}
 
 		h := hmac.New(sha256.New, key)
 		h.Write(data)
@@ -252,11 +256,14 @@ func (c *Core) ReEncrypt(ctx context.Context, sourceKeyID string, ciphertext []b
 
 	// 2. 用新密钥加密。
 	var plainBytes []byte
-	decResult.Plaintext.WithKey(func(k []byte) error {
+	if err := decResult.Plaintext.WithKey(func(k []byte) error {
 		plainBytes = make([]byte, len(k))
 		copy(plainBytes, k)
 		return nil
-	})
+	}); err != nil {
+		c.recordAudit(ctx, "ReEncrypt", destKeyID, 0, "error", "extract plaintext: "+err.Error())
+		return nil, fmt.Errorf("service: re-encrypt: extract plaintext: %w", err)
+	}
 	decResult.Plaintext.Wipe()
 
 	encResult, err := c.Encrypt(ctx, destKeyID, plainBytes, policy)

@@ -304,7 +304,7 @@ func parseSigningMethod(method string) (jwt.SigningMethod, error) {
 // loadRSAPublicKey 从 PEM 文件加载 RSA 公钥。
 // 支持 PKIX DER 和 PKCS#1 DER。
 func loadRSAPublicKey(path string) (*rsa.PublicKey, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path 由管理员配置
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
@@ -333,7 +333,7 @@ func loadRSAPublicKey(path string) (*rsa.PublicKey, error) {
 
 // loadECDSAPublicKey 从 PEM 文件加载 ECDSA 公钥。
 func loadECDSAPublicKey(path string) (*ecdsa.PublicKey, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path 由管理员配置
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
 	}

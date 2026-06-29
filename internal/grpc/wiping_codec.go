@@ -99,7 +99,7 @@ func clearBytes(b []byte) {
 		b[i] = 0
 	}
 	// 额外防止 DCE：通过 unsafe 保持写入副作用。
-	_ = unsafe.Pointer(&b[0])
+	_ = unsafe.Pointer(&b[0]) // #nosec G103 -- 防 DCE 优化，安全擦除必需
 }
 
 // 确保 reflect 包被引用（wipeSensitiveBytes 扩展时可能用到）。

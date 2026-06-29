@@ -137,7 +137,7 @@ func (r *Registry) ServeHTTP(w io.Writer, req interface{}) {
 	// 4. Go 运行时内存指标。
 	r.writeRuntimeMetrics(&sb)
 
-	w.Write([]byte(sb.String()))
+	_, _ = w.Write([]byte(sb.String())) // #nosec G104 -- metrics 写入失败无需处理
 }
 
 // writeRuntimeMetrics 输出 go_* 系列运行时指标。

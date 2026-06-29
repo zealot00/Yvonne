@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"runtime"
@@ -143,11 +144,13 @@ func (r *V1Router) handleV1GenerateMac(w http.ResponseWriter, req *http.Request)
 		defer keySB.Wipe()
 
 		var key []byte
-		keySB.WithKey(func(k []byte) error {
+		if err := keySB.WithKey(func(k []byte) error {
 			key = make([]byte, len(k))
 			copy(key, k)
 			return nil
-		})
+		}); err != nil {
+			return fmt.Errorf("extract key: %w", err)
+		}
 
 		h := hmac.New(sha256.New, key)
 		h.Write(body.Data)
@@ -213,11 +216,13 @@ func (r *V1Router) handleV1VerifyMac(w http.ResponseWriter, req *http.Request) {
 		defer keySB.Wipe()
 
 		var key []byte
-		keySB.WithKey(func(k []byte) error {
+		if err := keySB.WithKey(func(k []byte) error {
 			key = make([]byte, len(k))
 			copy(key, k)
 			return nil
-		})
+		}); err != nil {
+			return fmt.Errorf("extract key: %w", err)
+		}
 
 		h := hmac.New(sha256.New, key)
 		h.Write(body.Data)

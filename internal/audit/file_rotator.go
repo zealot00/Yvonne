@@ -67,7 +67,7 @@ func NewFileRotator(dir, filename string) (*FileRotator, error) {
 // openCurrent 打开当前日志文件（0600）。
 func (r *FileRotator) openCurrent() error {
 	path := filepath.Join(r.dir, r.filename)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) // #nosec G304 -- path 由管理员配置
 	if err != nil {
 		return fmt.Errorf("audit: open log file: %w", err)
 	}

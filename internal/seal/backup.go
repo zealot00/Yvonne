@@ -133,7 +133,7 @@ func CombineWrappedCMKFromFiles(paths []string) ([]byte, error) {
 
 	var shares [][]byte
 	for _, path := range paths {
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G304 -- path 由 validatePath 校验
 		if err != nil {
 			return nil, fmt.Errorf("seal: read %s: %w", path, err)
 		}

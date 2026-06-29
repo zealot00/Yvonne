@@ -404,7 +404,7 @@ func runUnsealKeygenCmd(args []string) {
 
 	// 输出公钥到 stdout（供初始化加密 Master Key 用）。
 	fmt.Println("# Public key (use this to encrypt the Master Key for initial setup):")
-	os.Stdout.Write(pubPEM) //nolint:errcheck // stdout 写入失败无需处理
+	_, _ = os.Stdout.Write(pubPEM) // #nosec G104 -- stdout 写入失败无需处理
 
 	// 安全清理内存中的 PEM 数据（虽然 GC 会回收，但保持纪律性）。
 	for i := range privPEM {
@@ -713,7 +713,7 @@ func atomicWriteFileSecure(path string, data []byte) error {
 
 	// 原子 rename 到目标路径。
 	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) // #nosec G104 -- 清理临时文件失败无需处理
 		return fmt.Errorf("rename temp to final: %w", err)
 	}
 

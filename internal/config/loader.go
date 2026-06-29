@@ -83,7 +83,7 @@ func Load(configPath string) (*Config, error) {
 	cfg := Default()
 
 	if configPath != "" {
-		raw, err := os.ReadFile(configPath)
+		raw, err := os.ReadFile(configPath) // #nosec G304 -- configPath 由 CLI flag 指定
 		if err != nil {
 			return nil, fmt.Errorf("read config file: %w", err)
 		}

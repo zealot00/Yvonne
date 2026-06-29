@@ -105,7 +105,7 @@ func collectAuditFiles(dir string) ([]string, error) {
 
 // parseAuditFile 解析单个审计日志文件，应用过滤条件。
 func parseAuditFile(path string, filter QueryFilter) ([]QueryResult, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path 由审计目录遍历生成
 	if err != nil {
 		return nil, err
 	}

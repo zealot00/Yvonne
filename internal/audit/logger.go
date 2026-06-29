@@ -276,7 +276,7 @@ func (l *AuditLogger) Record(entry LogEntry) error {
 
 	// 5. 异步写入 Syslog（channel，零阻塞）。
 	if l.syslogWriter != nil {
-		l.syslogWriter.Write(append(out, '\n'))
+		_, _ = l.syslogWriter.Write(append(out, '\n')) // #nosec G104 -- syslog 失败不影响审计链
 	}
 
 	return nil
@@ -369,7 +369,7 @@ func (l *AuditLogger) LastSignatureHex() string {
 // 文件格式：单行 hex 编码的 lastSignature。
 // 权限 0600，仅 owner 可读写。
 func loadAnchor(path string, chain *hashChain) error {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- anchorPath 由 NewAuditLogger 内部构造
 	if err != nil {
 		return err
 	}

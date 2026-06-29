@@ -278,7 +278,10 @@ func FetchK8sJWKSFromAPI(ctx context.Context) (json.RawMessage, error) {
 		return nil, fmt.Errorf("auth: k8s: invalid KUBERNETES_SERVICE_PORT %q: %w", apiPort, err)
 	}
 
-	url := fmt.Sprintf("https://%s:%s/openid/v1/jwks", apiServer, apiPort)
+	// SSRF 防御：validateHost 已校验 apiServer 为合法 IP/hostname（不含 path/query/scheme）。
+	// apiPort 已校验为纯数字。url 拼接后的格式为 https://<host>:<port>/openid/v1/jwks，
+	// 不存在 SSRF 风险。gosec G704 污点分析不识别 validateHost 净化，用 #nosec 标注。
+	url := fmt.Sprintf("https://%s:%s/openid/v1/jwks", apiServer, apiPort) // #nosec G704 -- validateHost + strconv.Atoi 已净化
 
 	// 读取 ServiceAccount Token。
 	saToken, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/token")
@@ -304,7 +307,9 @@ func FetchK8sJWKSFromAPI(ctx context.Context) (json.RawMessage, error) {
 		InsecureSkipVerify: false, // 强制校验服务端证书。
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	// G704: url 由 validateHost 净化后的 apiServer + strconv.Atoi 校验后的 apiPort 拼接，
+	// 无 SSRF 风险。gosec 污点分析不识别净化函数，用 #nosec 标注。
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil) // #nosec G704 -- validateHost 已净化
 	if err != nil {
 		return nil, err
 	}
@@ -314,7 +319,7 @@ func FetchK8sJWKSFromAPI(ctx context.Context) (json.RawMessage, error) {
 		Timeout:   10 * time.Second,
 		Transport: &http.Transport{TLSClientConfig: tlsConfig},
 	}
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) // #nosec G704 -- 同上，url 已净化
 	if err != nil {
 		return nil, fmt.Errorf("auth: k8s: fetch JWKS: %w", err)
 	}

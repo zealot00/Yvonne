@@ -162,7 +162,7 @@ func LoadYvonneConfig(path string) (*YvonneConfig, error) {
 	}
 
 	if path != "" {
-		raw, err := os.ReadFile(path)
+		raw, err := os.ReadFile(path) // #nosec G304 -- path 由管理员配置
 		if err != nil {
 			return nil, fmt.Errorf("read config file: %w", err)
 		}

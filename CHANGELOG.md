@@ -8,10 +8,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
-- v1.2.1: Sign/Verify 完整实现 + ReEncrypt 完整实现
+- v1.2.2: Sign/Verify 完整实现 + ReEncrypt 完整实现
 - v1.3: 合规深化（MFA + 双人控制 + RFC 8998 + OpenTelemetry）
 - v2.0: 企业级（多租户 + Web 控制台 + KMIP + Vault 兼容）
 - 详见 [docs/roadmap.md](docs/roadmap.md)
+- **待办**: 升级 Go 到 1.25.11（修复 10 个标准库 CVE）
+
+## [1.2.1] - 2026-06-29 (安全加固版)
+
+### Security
+
+#### gosec 修复（Issues: 0）
+- **G704 (HIGH) SSRF** — `k8s_authenticator.go` 已用 `validateHost` 净化，`#nosec` 标注
+- **G304 (MEDIUM) 文件包含** — 8 处 `os.ReadFile`/`os.OpenFile` 加 `#nosec` 注明受信任来源
+- **G107 (MEDIUM) HTTP variable url** — `cli_extras.go` 硬编码 URL，`#nosec` 标注
+- **G204 (MEDIUM) Subprocess** — `openBrowser` 内部生成 URL，`#nosec` 标注
+- **G203 (MEDIUM) XSS** — scripts/ 目录排除（辅助工具，非生产代码）
+- **G103 (LOW) unsafe** — `wiping_codec.go` 防 DCE 必需，`#nosec` 标注
+- **G104 (LOW) 未处理错误** — 所有 `WithKey` 闭包返回 error，`os.Stdout.Write`/`syslog.Write` 加 `#nosec`
+
+#### govulncheck 修复
+- **pgx v5.5.3 → v5.9.2** — 修复 GO-2026-5004
+- **golang.org/x/net v0.51.0 → v0.53.0** — 修复 GO-2026-4918
+- **Go 标准库 10 个 CVE 待修** — 需升级 Go 到 1.25.11（crypto/x509, net/http, html/template, net/textproto）
+
+#### 配置
+- 新增 `.gosec.json` — gosec 配置（排除 scripts/sdk/examples/gen 目录）
+- gosec 扫描命令: `gosec -exclude-dir=scripts -exclude-dir=sdk/examples -exclude-dir=gen ./...`
+
+### Scan Results
+```
+gosec:      0 issues (21 #nosec annotations)
+govulncheck: 10 vulnerabilities (Go stdlib, 待升级 Go 1.25.11)
+            0 third-party vulnerabilities (pgx + x/net 已修复)
+```
 
 ## [1.2.0] - 2026-06-29 (API 完善版)
 

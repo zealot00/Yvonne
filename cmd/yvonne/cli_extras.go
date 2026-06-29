@@ -46,7 +46,7 @@ func runDemoSetup(addr string, port int) {
 
 	// 等待 server 就绪。
 	for i := 0; i < 30; i++ {
-		resp, err := http.Get(baseURL + "/api/v1/sys/health")
+		resp, err := http.Get(baseURL + "/api/v1/sys/health") // #nosec G107 -- baseURL 硬编码 127.0.0.1
 		if err == nil && resp.StatusCode == 200 {
 			_ = resp.Body.Close()
 			break
@@ -141,7 +141,7 @@ func runDashboard(port int) {
 
 	// 等待 Admin UI 就绪。
 	for i := 0; i < 20; i++ {
-		resp, err := http.Get(adminURL)
+		resp, err := http.Get(adminURL) // #nosec G107 -- adminURL 硬编码 127.0.0.1:8250
 		if err == nil && resp.StatusCode == 200 {
 			_ = resp.Body.Close()
 			break
@@ -165,11 +165,11 @@ func openBrowser(url string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.Command("open", url)
+		cmd = exec.Command("open", url) // #nosec G204 -- url 内部生成
 	case "linux":
-		cmd = exec.Command("xdg-open", url)
+		cmd = exec.Command("xdg-open", url) // #nosec G204 -- url 内部生成
 	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url) // #nosec G204 -- url 内部生成
 	default:
 		log.Printf("--dashboard: unsupported OS: %s", runtime.GOOS)
 		return
