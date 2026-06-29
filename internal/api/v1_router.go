@@ -168,6 +168,16 @@ func (r *V1Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		req.Body = http.MaxBytesReader(w, req.Body, maxRequestBodyBytes)
 	}
 
+	// CORS 预检处理（OPTIONS 请求在路由前短路）。
+	if req.Method == http.MethodOptions {
+		cors := DefaultCORSConfig()
+		corsHandler := CORSMiddleware(cors)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		corsHandler.ServeHTTP(w, req)
+		return
+	}
+
 	r.mux.ServeHTTP(w, req)
 }
 
