@@ -15,6 +15,7 @@ package api
 import (
 	"net"
 	"net/http"
+	"strings"
 
 	"yvonne/internal/audit"
 	"yvonne/internal/auth"
@@ -148,6 +149,14 @@ func metricsHandler(reg *metrics.Registry) http.Handler {
 // 加密/解密请求的密文 + plaintext base64 不会超过 1MB（业务大 payload 应用 GDK）。
 const maxRequestBodyBytes = 1 << 20 // 1MB
 
+// corsConfig 是全局 CORS 配置（ServeHTTP 用）。
+var corsConfig = DefaultCORSConfig()
+
+// SetCORSConfig 设置全局 CORS 配置（Cluster 模式应覆盖默认 "*" 配置）。
+func (r *V1Router) SetCORSConfig(cfg CORSConfig) {
+	corsConfig = cfg
+}
+
 func (r *V1Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// 最外层：IP 级速率限制（防暴力枚举）。
 	if r.rateLimiter != nil {
@@ -168,13 +177,21 @@ func (r *V1Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		req.Body = http.MaxBytesReader(w, req.Body, maxRequestBodyBytes)
 	}
 
-	// CORS 预检处理（OPTIONS 请求在路由前短路）。
+	// CORS 处理：所有请求（含预检 + 实际请求）都加 CORS 头。
+	origin := req.Header.Get("Origin")
+	if origin != "" && isOriginAllowed(origin, corsConfig.AllowedOrigins) {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Methods", strings.Join(corsConfig.AllowedMethods, ", "))
+		w.Header().Set("Access-Control-Allow-Headers", strings.Join(corsConfig.AllowedHeaders, ", "))
+		if corsConfig.AllowCredentials {
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
+		w.Header().Set("Access-Control-Max-Age", "600")
+	}
+
+	// CORS 预检短路：OPTIONS 请求不路由到 mux。
 	if req.Method == http.MethodOptions {
-		cors := DefaultCORSConfig()
-		corsHandler := CORSMiddleware(cors)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusNoContent)
-		}))
-		corsHandler.ServeHTTP(w, req)
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
