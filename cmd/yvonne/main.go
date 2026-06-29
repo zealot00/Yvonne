@@ -33,6 +33,7 @@ import (
 	"yvonne/internal/memguard"
 	"yvonne/internal/seal"
 	"yvonne/internal/storage"
+	"yvonne/internal/version"
 )
 
 func main() {
@@ -260,7 +261,7 @@ func startYvonne(cfg *config.YvonneConfig) {
 	// 启动监听。预分配足够容量（HTTP + Admin + gRPC + MCP = 4）。
 	errCh := make(chan error, 4)
 	go func() {
-		log.Printf("yvonne API listening on %s", httpSrv.Addr)
+		log.Printf("yvonne v%s API listening on %s", version.Version, httpSrv.Addr)
 		if cfg.Server.TLS.Enabled {
 			log.Printf("TLS enabled: cert=%s", cfg.Server.TLS.CertFile)
 			if err := httpSrv.ListenAndServeTLS(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
