@@ -179,7 +179,18 @@ func NewJWTAuthenticator(cfg JWTConfig, policyStore PolicyStore) (*JWTAuthentica
 //   - 强制算法匹配，拒绝 alg:none 和算法混淆。
 func (a *JWTAuthenticator) Authenticate(ctx context.Context, tokenString string) (*Policy, error) {
 	// 1. 解析 Token（不验签，先获取 header）。
-	parser := jwt.NewParser(jwt.WithValidMethods([]string{a.signingMethod.Alg()}))
+	// BUG-1 修复：强制 exp/iss/aud 校验，拒绝过期/错误签发者/错误受众的令牌。
+	parserOpts := []jwt.ParserOption{
+		jwt.WithValidMethods([]string{a.signingMethod.Alg()}),
+		jwt.WithExpirationRequired(),
+	}
+	if a.issuer != "" {
+		parserOpts = append(parserOpts, jwt.WithIssuer(a.issuer))
+	}
+	if len(a.audience) > 0 {
+		parserOpts = append(parserOpts, jwt.WithAudience(a.audience[0]))
+	}
+	parser := jwt.NewParser(parserOpts...)
 
 	token, err := parser.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		// 2. 强制算法匹配：parser.WithValidMethods 已拦截 alg:none 和算法混淆。

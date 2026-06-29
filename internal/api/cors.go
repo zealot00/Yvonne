@@ -16,12 +16,13 @@ type CORSConfig struct {
 }
 
 // DefaultCORSConfig 返回 Dev 模式默认配置（允许所有 Origin）。
+// BUG-3 修复：明确标注仅 Dev 模式安全；Cluster 模式必须显式配置 AllowedOrigins。
 func DefaultCORSConfig() CORSConfig {
 	return CORSConfig{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   []string{"*"}, // Dev 模式安全；Cluster 模式必须覆盖
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Request-ID"},
-		AllowCredentials: false,
+		AllowCredentials: false, // "*" + AllowCredentials=true 是浏览器非法组合
 		MaxAge:           600,
 	}
 }

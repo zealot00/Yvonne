@@ -54,10 +54,21 @@ func (r *V1Router) handleAuditQuery(w http.ResponseWriter, req *http.Request) {
 	bodyBytes = nil
 
 	// 构造过滤条件。
+	// BUG-6 修复：Limit=-1 不允许返回全量，强制上限 10000。
+	limit := body.Limit
+	if limit < 0 {
+		limit = 10000 // 最大上限
+	}
+	if limit == 0 {
+		limit = 100 // 默认
+	}
+	if limit > 10000 {
+		limit = 10000 // 强制上限
+	}
 	filter := audit.QueryFilter{
 		Actor:  body.Actor,
 		Action: body.Action,
-		Limit:  body.Limit,
+		Limit:  limit,
 	}
 
 	if body.StartTime != "" {

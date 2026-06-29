@@ -480,9 +480,16 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 	core.SetAdminToken(cfg.Server.Admin.AdminToken)
 
 	// gRPC server（含 mTLS，复用 HTTP 的 TLSConfig）。
+	// BUG-18 修复：Cluster 模式下 gRPC 必须启用 TLS，明文暴露视为配置错误。
 	var grpcSrv *grpc.Server
 	if cfg.Server.GRPC.Enabled {
-		grpcTLS, _ := config.BuildTLSConfig(cfg.Server.GRPC.TLS)
+		grpcTLS, tlsErr := config.BuildTLSConfig(cfg.Server.GRPC.TLS)
+		if tlsErr != nil {
+			log.Fatalf("bootstrap: gRPC TLS config error: %v", tlsErr)
+		}
+		if cfg.Mode == "cluster" && grpcTLS == nil {
+			log.Fatalf("bootstrap: gRPC TLS must be enabled in cluster mode (refusing to start plaintext gRPC)")
+		}
 		grpcSrv = buildGRPCServer(core, authenticator, unsealer, grpcTLS)
 		log.Printf("gRPC server enabled at %s:%d (TLS=%v)", cfg.Server.GRPC.BindAddr, cfg.Server.GRPC.BindPort, grpcTLS != nil)
 	}

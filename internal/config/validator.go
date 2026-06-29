@@ -112,7 +112,15 @@ func Validate(cfg *Config) error {
 		if cfg.Auth.JWT.Issuer == "" {
 			errs = append(errs, "auth.jwt.issuer is required when jwt is enabled")
 		}
-		switch cfg.Auth.JWT.SigningMethod[:2] {
+		// BUG-018 修复：防止 SigningMethod 长度 < 2 时切片越界 panic。
+		method := cfg.Auth.JWT.SigningMethod
+		var prefix string
+		if len(method) >= 2 {
+			prefix = method[:2]
+		} else {
+			prefix = method
+		}
+		switch prefix {
 		case "RS", "ES":
 			if cfg.Auth.JWT.VerifyingKeyPath == "" {
 				errs = append(errs, "auth.jwt.verifying_key_path is required for RSA/ECDSA")
@@ -157,8 +165,15 @@ func Validate(cfg *Config) error {
 		if cfg.Crypto.Suite != "gmsm" {
 			errs = append(errs, "crypto.strict=true requires crypto.suite=gmsm")
 		}
-		if cfg.Auth.JWT.SigningMethod != "" && cfg.Auth.JWT.SigningMethod[:2] != "SM" {
-			errs = append(errs, "crypto.strict=true requires auth.jwt.signing_method=SM2")
+		// BUG-018 修复：防止 SigningMethod 长度 < 2 时切片越界 panic。
+		if cfg.Auth.JWT.SigningMethod != "" {
+			smPrefix := ""
+			if len(cfg.Auth.JWT.SigningMethod) >= 2 {
+				smPrefix = cfg.Auth.JWT.SigningMethod[:2]
+			}
+			if smPrefix != "SM" {
+				errs = append(errs, "crypto.strict=true requires auth.jwt.signing_method=SM2")
+			}
 		}
 	}
 

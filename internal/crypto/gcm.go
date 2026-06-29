@@ -119,6 +119,11 @@ func DecryptGCM(key *memguard.SecureBuffer, ciphertext []byte) (*memguard.Secure
 		return nil, fmt.Errorf("crypto: decrypt failed: %w", err)
 	}
 
+	// 防御深度：gcm.Open 成功时 plaintext 不应为 nil（Crypto-3）。
+	if plaintext == nil {
+		return nil, fmt.Errorf("crypto: decrypt succeeded but plaintext is nil (internal error)")
+	}
+
 	// 成功路径：把明文封装进 SecureBuffer。
 	// NewSecureBuffer 会拷贝 plaintext 并立即清零入参，保证只有一份明文副本。
 	sb := memguard.NewSecureBuffer(plaintext)

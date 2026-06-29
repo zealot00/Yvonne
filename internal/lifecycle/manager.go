@@ -170,7 +170,7 @@ func (m *Manager) GenerateDataKey(ctx context.Context, keyID string, kek seal.KE
 	var ciphertext []byte
 	err = plainDEK.WithKey(func(dek []byte) error {
 		var e error
-		ciphertext, e = crypto.EncryptVersioned(storedDEK, uint32(meta.Version), dek)
+		ciphertext, e = crypto.EncryptVersioned(storedDEK, crypto.SafeUint32(meta.Version), dek)
 		return e
 	})
 	if err != nil {

@@ -286,7 +286,7 @@ func (c *Core) Encrypt(ctx context.Context, keyID string, plaintext []byte, poli
 			return e
 		}
 		defer plaintextDEK.Wipe()
-		ciphertext, e = crypto.EncryptVersioned(plaintextDEK, uint32(meta.Version), plaintext)
+		ciphertext, e = crypto.EncryptVersioned(plaintextDEK, crypto.SafeUint32(meta.Version), plaintext)
 		return e
 	})
 	if err != nil {

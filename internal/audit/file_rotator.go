@@ -78,7 +78,10 @@ func (r *FileRotator) openCurrent() error {
 
 // Write 写入日志数据。自动检测跨天轮转。
 // 高危操作调用 file.Sync()。
+// BUG-9 修复：清洗 CRLF 注入（防日志注入攻击）。
 func (r *FileRotator) Write(data []byte, action string) error {
+	// 防御性清洗：移除 CR/LF，防日志注入。
+	data = sanitizeCRLF(data)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -195,4 +198,18 @@ func (r *FileRotator) Close() error {
 		return r.file.Close()
 	}
 	return nil
+}
+
+// sanitizeCRLF 清洗 CR/LF 字符，防日志注入（BUG-9）。
+// JSON 序列化已转义控制字符，但防御性清洗确保万无一失。
+func sanitizeCRLF(data []byte) []byte {
+	cleaned := make([]byte, len(data))
+	for i, b := range data {
+		if b == '\r' || b == '\n' {
+			cleaned[i] = ' ' // 替换为空格
+		} else {
+			cleaned[i] = b
+		}
+	}
+	return cleaned
 }

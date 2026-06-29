@@ -48,11 +48,11 @@ func runDemoSetup(addr string, port int) {
 	for i := 0; i < 30; i++ {
 		resp, err := http.Get(baseURL + "/api/v1/sys/health")
 		if err == nil && resp.StatusCode == 200 {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			break
 		}
 		if resp != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 		time.Sleep(500 * time.Millisecond)
 		if i == 29 {
@@ -143,11 +143,11 @@ func runDashboard(port int) {
 	for i := 0; i < 20; i++ {
 		resp, err := http.Get(adminURL)
 		if err == nil && resp.StatusCode == 200 {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			break
 		}
 		if resp != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 		time.Sleep(500 * time.Millisecond)
 		if i == 19 {

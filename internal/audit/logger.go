@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -174,8 +175,15 @@ func NewDualWriteLogger(dir, filename string, retentionDays int, sw *SyslogWrite
 	anchorPath := filepath.Join(dir, "audit.chain")
 	chain := newHashChain(chainKey)
 	if err := loadAnchor(anchorPath, chain); err != nil {
-		// 锚定文件不存在或损坏时用初始值（首次启动）。
-		// 已有审计日志的链条会断裂，需人工介入。
+		// BUG-10 修复：anchor 文件损坏/丢失时不再静默重置。
+		// 区分首次启动（文件不存在）和损坏（存在但格式错误）。
+		if os.IsNotExist(err) {
+			// 首次启动：正常，用初始值。
+			log.Printf("audit: anchor file not found, starting fresh chain")
+		} else {
+			// 文件存在但损坏：返回 error，拒绝启动（防哈希链断裂）。
+			return nil, fmt.Errorf("audit: anchor file corrupted: %w (manual intervention required)", err)
+		}
 	}
 
 	// 启动 180 天清理 goroutine。

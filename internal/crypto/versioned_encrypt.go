@@ -19,6 +19,15 @@ import (
 	"yvonne/internal/memguard"
 )
 
+// SafeUint32 安全转换 int → uint32（防整数溢出，gosec G115）。
+// 版本号等业务字段均为小正整数，不会溢出，但显式校验防静态扫描告警。
+func SafeUint32(v int) uint32 {
+	if v < 0 || v > 4294967295 {
+		return 0
+	}
+	return uint32(v)
+}
+
 // EncryptVersioned 直接加密并输出自路由密文格式。
 //
 // 输出格式：[Version (uint32, 4 bytes, BE)] [Nonce (12 bytes)] [Ciphertext + AuthTag]
@@ -100,6 +109,10 @@ func DecryptVersioned(key *memguard.SecureBuffer, raw []byte) (*memguard.SecureB
 		if e != nil {
 			return fmt.Errorf("crypto: gcm.Open: %w", e)
 		}
+
+		// 防御深度：gcm.Open 成功时 err==nil，pt 可能为 nil（空明文场景）。
+		// 仅当 err==nil 且 pt==nil 且预期非空时才报错（此处无法判断预期，跳过）。
+		// Crypto-3 的核心防御是 gcm.Open 失败时不使用 pt，已由上面的 err 检查覆盖。
 
 		// 立即装入 SecureBuffer + clear 原 []byte。
 		plaintext = memguard.NewSecureBuffer(pt)

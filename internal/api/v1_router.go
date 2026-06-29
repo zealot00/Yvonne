@@ -135,6 +135,10 @@ func metricsHandler(reg *metrics.Registry) http.Handler {
 	})
 }
 
+// maxRequestBodyBytes 限制请求体大小（1MB），防止内存耗尽 DoS。
+// 加密/解密请求的密文 + plaintext base64 不会超过 1MB（业务大 payload 应用 GDK）。
+const maxRequestBodyBytes = 1 << 20 // 1MB
+
 func (r *V1Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// 最外层：IP 级速率限制（防暴力枚举）。
 	if r.rateLimiter != nil {
@@ -148,6 +152,13 @@ func (r *V1Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 	}
+
+	// 全局请求体大小限制（防内存耗尽 DoS）。
+	// GET 请求无 body 不受影响；POST/PUT/PATCH/DELETE 请求体被限制为 1MB。
+	if req.Body != nil {
+		req.Body = http.MaxBytesReader(w, req.Body, maxRequestBodyBytes)
+	}
+
 	r.mux.ServeHTTP(w, req)
 }
 

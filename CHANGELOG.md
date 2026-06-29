@@ -8,8 +8,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
-- v1.2: 国密三级合规（HSM 硬件模块 + 国密认证 RNG）
-- 国产数据库适配（openGauss/达梦/人大金仓）
+- v1.2: API 完善（Sign/Verify + GDK无明文 + HMAC + ReEncrypt + 国密证书）
+- v1.3: 合规深化（MFA + 双人控制 + RFC 8998 + OpenTelemetry）
+- v2.0: 企业级（多租户 + Web 控制台 + KMIP + Vault 兼容）
+- 详见 [docs/roadmap.md](docs/roadmap.md)
+
+## [1.1.1] - 2026-06-29 (安全修复版)
+
+### Security
+
+#### CRITICAL 修复
+- **C-1/C-2: PEM 解析静默吞错** — `pem.Decode` 错误不再被 `_` 丢弃，显式校验 block.Type + rest
+  - `internal/crypto/sm2_pem.go` + `internal/crypto/asymmetric_helpers.go` + `internal/seal/local_pki.go`
+- **C-3: SM2 PEM 缺类型断言** — 解析后校验 SM2P256V1 曲线，防算法混淆攻击
+- **C-4: HTTP 无请求体大小限制** — 全局 `MaxBytesReader(w, r.Body, 1MB)` 防 DoS
+  - `internal/api/v1_router.go` ServeHTTP 中间件
+- **C-5: PEM 私钥磁盘残留** — 删除失败 abort unseal（named return + defer 覆盖）
+  - `os.WriteFile + chmod` race 改用 `atomicWriteFileSecure`（temp+rename+chmod 原子操作）
+
+#### HIGH 修复
+- **Auth-1: JWT 缺过期/签发者校验** — 添加 `WithExpirationRequired` + `WithIssuer` + `WithAudience`
+- **Auth-18: gRPC TLS 明文暴露** — Cluster 模式强制 TLS，明文 gRPC 拒绝启动
+- **Audit-10: anchor 损坏静默重置** — 区分首次启动（不存在）和损坏（拒绝启动）
+- **Config-1: TLS 密码套件不可配置** — 显式配置强密码套件，禁用 3DES/RC4
+- **Config-5: metrics 标签基数爆炸** — action 白名单 + 长度限制
+- **BUG-018: SigningMethod 切片 panic** — 长度 < 2 时安全降级
+- **BUG-6: Limit=-1 DoS** — 审计查询强制上限 10000
+- **BUG-9: CRLF 注入** — 审计日志 CRLF 字符清洗
+- **BUG-17: gfInv(0) 静默返回 0** — 改为返回 error，防错误份额产生错密钥
+- **BUG-013: Shamir 路径 traversal** — `validatePath` 校验 ".." 目录遍历
+
+#### MEDIUM 修复
+- **Crypto-3: gcm.Open 防御深度** — 成功时显式检查 plaintext 状态
+- **Crypto-6: SM2 UID 硬编码** — `SetSM2UID()` 可配置（与第三方互操作）
+- **G115: 整数溢出** — `SafeUint32` + `safeInt32` 显式校验
+- **G704: SSRF** — K8s API server host 校验（`validateHost`）
+- **G112: Slowloris** — MCP HTTP server 添加 `ReadHeaderTimeout`
+- **G104: 未处理错误** — `resp.Body.Close()` 显式 `//nolint:errcheck`
+- **BUG-3: CORS** — 注释明确 DefaultCORSConfig 仅 Dev 模式
+
+### Added
+- `docs/roadmap.md` — 完整产品演进路线图（v1.2/v1.3/v2.0）
+- `atomicWriteFileSecure` — 原子文件写入（temp+rename+chmod）
+- `validatePath` — 路径遍历校验
+- `validateHost` — SSRF 防御（K8s API server host 校验）
+- `SafeUint32` / `safeInt32` — 整数溢出防护
+- `sanitizeCRLF` — 审计日志 CRLF 清洗
+- `allowedActions` — metrics action 白名单
 - 多租户隔离
 - 完整 Web 控制台
 

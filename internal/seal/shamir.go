@@ -88,14 +88,17 @@ func gfMul(a, b byte) byte {
 
 // gfInv 有限域求逆：a^(254) = a^(-1) in GF(2^8)。
 // 通过对数表实现：inv(a) = exp(255 - log(a))。
-func gfInv(a byte) byte {
+// BUG-17 修复：gfInv(0) 返回 error 而非静默返回 0。
+func gfInv(a byte) (byte, error) {
 	if a == 0 {
-		// 数学上 0 无逆元；调用方必须保证 a != 0。
-		// 这里返回 0 触发后续插值出错，而非 panic，避免 DoS。
-		return 0
+		// 数学上 0 无逆元；返回 error 防错误份额静默产生错密钥。
+		return 0, errZeroInverse
 	}
-	return gfExp[255-int(gfLog[a])]
+	return gfExp[255-int(gfLog[a])], nil
 }
+
+// errZeroInverse 表示尝试对 0 求逆元（数学上未定义）。
+var errZeroInverse = errors.New("seal: gfInv(0) is undefined (invalid share data)")
 
 // Split 把 secret 分割成 parts 份，需 threshold 份才能还原。
 //
@@ -261,7 +264,11 @@ func Combine(shares [][]byte) (*memguard.SecureBuffer, error) {
 				den = gfMul(den, xi^xj) // 分母：(x_i - x_j) = xi ⊕ xj
 			}
 			// term = yi * num * inv(den)
-			term := gfMul(yi, gfMul(num, gfInv(den)))
+			denInv, invErr := gfInv(den)
+			if invErr != nil {
+				return nil, fmt.Errorf("seal: combine: %w (denominator=0, duplicate x-coordinates in shares)", invErr)
+			}
+			term := gfMul(yi, gfMul(num, denInv))
 			acc ^= term
 		}
 		plain[idx] = acc

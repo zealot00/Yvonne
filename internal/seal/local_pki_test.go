@@ -118,10 +118,11 @@ func TestVaultState_ProvideShare_EmptyShare(t *testing.T) {
 	}
 }
 
-// TestGfInv_Zero 验证 gfInv(0) 返回 0（无逆元）。
+// TestGfInv_Zero 验证 gfInv(0) 返回 error（无逆元）。
 func TestGfInv_Zero(t *testing.T) {
-	if gfInv(0) != 0 {
-		t.Fatal("gfInv(0) should return 0")
+	_, err := gfInv(0)
+	if err == nil {
+		t.Fatal("gfInv(0) should return error")
 	}
 }
 

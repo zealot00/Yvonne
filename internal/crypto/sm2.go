@@ -71,12 +71,24 @@ func SM2Decrypt(priv *SM2PrivateKey, ciphertext []byte) ([]byte, error) {
 	return plaintext, nil
 }
 
-// SM2Sign 用 SM2 私钥签名（使用 SM3 摘要，uid 默认为 1234567812345678）。
+// sm2UID 是 SM2 签名/验签的用户 ID（GB/T 32918.2 默认值）。
+// 可通过 SetSM2UID 在启动时覆盖（与第三方系统互操作）。
+var sm2UID = []byte("1234567812345678")
+
+// SetSM2UID 设置全局 SM2 UID（用于与第三方系统互操作）。
+// 必须在首次 SM2 签名/验签前调用。
+func SetSM2UID(uid []byte) {
+	if len(uid) > 0 {
+		sm2UID = uid
+	}
+}
+
+// SM2Sign 用 SM2 私钥签名（使用 SM3 摘要，uid 可通过 SetSM2UID 配置）。
 func SM2Sign(priv *SM2PrivateKey, msg []byte) ([]byte, error) {
 	if priv == nil || priv.Key == nil {
 		return nil, errors.New("crypto: sm2 sign: nil private key")
 	}
-	uid := []byte("1234567812345678") // GB/T 32918.2 默认 UID
+	uid := sm2UID
 	r, s, err := sm2.Sm2Sign(priv.Key, msg, uid, rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("crypto: sm2 sign: %w", err)
@@ -94,7 +106,7 @@ func SM2Verify(pub *SM2PublicKey, msg, sig []byte) (bool, error) {
 	if pub == nil || pub.Key == nil {
 		return false, errors.New("crypto: sm2 verify: nil public key")
 	}
-	uid := []byte("1234567812345678")
+	uid := sm2UID
 	r, s, err := sm2.SignDataToSignDigit(sig)
 	if err != nil {
 		return false, fmt.Errorf("crypto: sm2 verify decode: %w", err)

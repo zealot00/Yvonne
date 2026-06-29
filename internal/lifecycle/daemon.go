@@ -84,6 +84,7 @@ func (d *RotationDaemon) loop(ctx context.Context) {
 }
 
 // scanOnce 执行一次扫描+轮转。
+// 锁覆盖 scan + rotate 全过程，防止 scan+rotate 之间竞态（BUG-14 已确认安全）。
 func (d *RotationDaemon) scanOnce(ctx context.Context) {
 	// 1. 尝试获取分布式锁。
 	acquired, release, err := d.locker.TryAcquire(ctx)
@@ -96,7 +97,7 @@ func (d *RotationDaemon) scanOnce(ctx context.Context) {
 	}
 	defer release()
 
-	// 2. 扫描过期密钥。
+	// 2. 扫描过期密钥（在锁内）。
 	expired, err := d.scanExpiredKeys(ctx)
 	if err != nil {
 		log.Printf("rotation daemon: scan failed: %v", err)
@@ -109,7 +110,7 @@ func (d *RotationDaemon) scanOnce(ctx context.Context) {
 
 	log.Printf("rotation daemon: found %d keys due for rotation", len(expired))
 
-	// 3. 逐个轮转。
+	// 3. 逐个轮转（在锁内，防止 scan+rotate 之间竞态）。
 	for _, meta := range expired {
 		if ctx.Err() != nil {
 			return

@@ -21,14 +21,49 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/MicahParks/keyfunc/v2"
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// validateHost 校验 host 是合法 IP 或 hostname（防 SSRF）。
+// 拒绝包含 scheme、path、query、port 的输入。
+func validateHost(host string) error {
+	if host == "" {
+		return errors.New("empty host")
+	}
+	// 拒绝包含 scheme 分隔符。
+	if strings.Contains(host, "://") {
+		return fmt.Errorf("host %q contains scheme", host)
+	}
+	// 拒绝包含 path 分隔符。
+	if strings.Contains(host, "/") {
+		return fmt.Errorf("host %q contains path", host)
+	}
+	// 校验为合法 IP 或 hostname。
+	if ip := net.ParseIP(host); ip != nil {
+		return nil // 合法 IP
+	}
+	// hostname 校验：仅允许字母数字、点、连字符。
+	for _, c := range host {
+		if !(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') &&
+			!(c >= '0' && c <= '9') && c != '.' && c != '-' {
+			return fmt.Errorf("host %q contains invalid character %q", host, c)
+		}
+	}
+	return nil
+}
+
+// ensure url import is used (validateHost 不直接用 url，但保留以防未来扩展)。
+var _ = url.Parse
 
 // K8sAuthConfig 是 K8s SA JWT 认证器配置。
 type K8sAuthConfig struct {
@@ -221,15 +256,26 @@ func (a *K8sAuthenticator) Close() {
 
 // FetchK8sJWKSFromAPI 从 K8s API server 获取 JWKS（需 Pod 内 RBAC 权限）。
 // 使用 ServiceAccount CA 证书校验 K8s API server 证书（防 MITM）。
+//
+// 安全：apiServer 来自 KUBERNETES_SERVICE_HOST 环境变量（由 kubelet 注入），
+// 但仍校验为合法的 IP/hostname，防 SSRF。
 func FetchK8sJWKSFromAPI(ctx context.Context) (json.RawMessage, error) {
 	// K8s API server 地址（Pod 内默认）。
 	apiServer := os.Getenv("KUBERNETES_SERVICE_HOST")
 	if apiServer == "" {
 		return nil, errors.New("auth: k8s: not running in cluster (KUBERNETES_SERVICE_HOST not set)")
 	}
+	// SSRF 防御：校验 apiServer 是合法 IP 或 hostname（不含 path/query/scheme）。
+	if err := validateHost(apiServer); err != nil {
+		return nil, fmt.Errorf("auth: k8s: invalid KUBERNETES_SERVICE_HOST: %w", err)
+	}
 	apiPort := os.Getenv("KUBERNETES_SERVICE_PORT")
 	if apiPort == "" {
 		apiPort = "443"
+	}
+	// 校验端口为数字。
+	if _, err := strconv.Atoi(apiPort); err != nil {
+		return nil, fmt.Errorf("auth: k8s: invalid KUBERNETES_SERVICE_PORT %q: %w", apiPort, err)
 	}
 
 	url := fmt.Sprintf("https://%s:%s/openid/v1/jwks", apiServer, apiPort)

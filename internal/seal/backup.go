@@ -84,6 +84,14 @@ func SplitWrappedCMKToFiles(wrappedCMK []byte, total, threshold int, outDir stri
 		return nil, fmt.Errorf("seal: shamir split: %w", err)
 	}
 
+	// 校验 Shamir 参数在 byte 范围内（防 G115 整数溢出）。
+	if total < 1 || total > 255 {
+		return nil, fmt.Errorf("seal: total must be 1-255, got %d", total)
+	}
+	if threshold < 1 || threshold > 255 {
+		return nil, fmt.Errorf("seal: threshold must be 1-255, got %d", threshold)
+	}
+
 	// 3. 创建输出目录（0700）。
 	if err := os.MkdirAll(outDir, 0o700); err != nil {
 		return nil, fmt.Errorf("seal: mkdir: %w", err)

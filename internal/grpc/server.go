@@ -39,6 +39,15 @@ func (s *Server) Health(ctx context.Context, req *pb.HealthRequest) (*pb.HealthR
 	}, nil
 }
 
+// safeInt32 安全转换 int → int32（防整数溢出）。
+// 版本号、轮转周期等业务字段均为小正整数，不会溢出，但显式校验防 gosec G115。
+func safeInt32(v int) int32 {
+	if v > 2147483647 || v < -2147483648 {
+		return 0 // 溢出时返回 0（业务上版本号不会到 2^31）
+	}
+	return int32(v)
+}
+
 func (s *Server) EmergencySeal(ctx context.Context, req *pb.EmergencySealRequest) (*pb.EmergencySealResponse, error) {
 	// EmergencySeal 不走 Core.authorize（需要 admin_token 而非 Policy）。
 	// 拦截器已校验 admin token。
@@ -85,7 +94,7 @@ func (s *Server) CreateKey(ctx context.Context, req *pb.CreateKeyRequest) (*pb.C
 
 	return &pb.CreateKeyResponse{
 		KeyId:        result.KeyID,
-		Version:      int32(result.Version),
+		Version:      safeInt32(result.Version),
 		PlaintextDek: dekBytes,
 	}, nil
 }
@@ -110,7 +119,7 @@ func (s *Server) RotateKey(ctx context.Context, req *pb.RotateKeyRequest) (*pb.R
 
 	return &pb.RotateKeyResponse{
 		KeyId:        result.KeyID,
-		NewVersion:   int32(result.NewVersion),
+		NewVersion:   safeInt32(result.NewVersion),
 		PlaintextDek: dekBytes,
 	}, nil
 }
@@ -174,7 +183,7 @@ func (s *Server) Encrypt(ctx context.Context, req *pb.EncryptRequest) (*pb.Encry
 	}
 	return &pb.EncryptResponse{
 		Ciphertext: result.Ciphertext,
-		Version:    int32(result.Version),
+		Version:    safeInt32(result.Version),
 	}, nil
 }
 
@@ -199,7 +208,7 @@ func (s *Server) Decrypt(ctx context.Context, req *pb.DecryptRequest) (*pb.Decry
 
 	return &pb.DecryptResponse{
 		Plaintext: plainBytes,
-		Version:   int32(result.Version),
+		Version:   safeInt32(result.Version),
 	}, nil
 }
 

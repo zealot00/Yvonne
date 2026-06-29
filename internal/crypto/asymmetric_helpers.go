@@ -52,14 +52,34 @@ func ParsePrivateKeyFromDER(der []byte) (interface{}, error) {
 }
 
 // ParsePublicKeyFromPEM 从 PEM 反序列化公钥。
+//
+// 安全检查：
+//   - 校验 PEM block.Type 为 "PUBLIC KEY"
+//   - 拒绝含附加数据的 PEM（rest 非空）
+//   - 校验解析后的密钥类型为已知类型（防算法混淆）
 func ParsePublicKeyFromPEM(pemBytes []byte) (interface{}, error) {
-	block, _ := pem.Decode(pemBytes)
+	if len(pemBytes) == 0 {
+		return nil, fmt.Errorf("crypto: empty public key PEM data")
+	}
+	block, rest := pem.Decode(pemBytes)
 	if block == nil {
-		return nil, fmt.Errorf("crypto: failed to decode public key PEM")
+		return nil, fmt.Errorf("crypto: no PEM block found in public key data")
+	}
+	if len(rest) > 0 {
+		return nil, fmt.Errorf("crypto: trailing data after public key PEM block (%d bytes)", len(rest))
+	}
+	if block.Type != "PUBLIC KEY" {
+		return nil, fmt.Errorf("crypto: unexpected PEM type %q, want %q", block.Type, "PUBLIC KEY")
 	}
 	key, err := x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
 		return nil, fmt.Errorf("crypto: parse PKIX public key: %w", err)
 	}
-	return key, nil
+	// 类型校验：仅允许 RSA/ECDSA 公钥（防算法混淆攻击）。
+	switch key.(type) {
+	case *rsa.PublicKey, *ecdsa.PublicKey:
+		return key, nil
+	default:
+		return nil, fmt.Errorf("crypto: unsupported public key type %T (possible algorithm confusion)", key)
+	}
 }

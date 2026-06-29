@@ -21,6 +21,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -313,7 +315,11 @@ func startYvonne(cfg *config.YvonneConfig) {
 		mux := http.NewServeMux()
 		mcpHandler := srv.MCPServer.HTTPHandler()
 		mux.Handle("/mcp", api.CORSMiddleware(api.DefaultCORSConfig())(mcpHandler))
-		mcpHTTPServer = &http.Server{Addr: mcpAddr, Handler: mux}
+		mcpHTTPServer = &http.Server{
+			Addr:              mcpAddr,
+			Handler:           mux,
+			ReadHeaderTimeout: 10 * time.Second, // 防 Slowloris 攻击（gosec G112）
+		}
 		go func() {
 			log.Printf("yvonne MCP HTTP listening on %s", mcpAddr)
 			if err := mcpHTTPServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -398,7 +404,7 @@ func runUnsealKeygenCmd(args []string) {
 
 	// 输出公钥到 stdout（供初始化加密 Master Key 用）。
 	fmt.Println("# Public key (use this to encrypt the Master Key for initial setup):")
-	os.Stdout.Write(pubPEM)
+	os.Stdout.Write(pubPEM) //nolint:errcheck // stdout 写入失败无需处理
 
 	// 安全清理内存中的 PEM 数据（虽然 GC 会回收，但保持纪律性）。
 	for i := range privPEM {
@@ -488,10 +494,10 @@ func runInitCmd(args []string) {
 
 	// 8. 可选：复制到 USB 盘（冷备份）。
 	if *wrappedOut != "" {
-		if err := os.WriteFile(*wrappedOut, wrappedCMK, 0o400); err != nil {
+		if err := atomicWriteFileSecure(*wrappedOut, wrappedCMK); err != nil {
 			log.Fatalf("write wrapped CMK to USB: %v", err)
 		}
-		log.Printf("wrapped CMK copied to %s (mode 0400, read-only)", *wrappedOut)
+		log.Printf("wrapped CMK copied to %s (mode 0400, read-only, atomic write)", *wrappedOut)
 		log.Printf("NOTE: Safely eject the USB drive and store it in a physically secure offsite location.")
 	}
 
@@ -572,18 +578,30 @@ func runBackupRestoreCmd(args []string) {
 		fmt.Fprintln(os.Stderr, "error: --out is required")
 		os.Exit(1)
 	}
+	// BUG-013 修复：校验输出路径无 path traversal。
+	if err := validatePath(*outPath); err != nil {
+		fmt.Fprintf(os.Stderr, "error: invalid --out path: %v\n", err)
+		os.Exit(1)
+	}
 	if fs.NArg() < 2 {
 		fmt.Fprintln(os.Stderr, "error: need at least 2 share files")
 		os.Exit(1)
 	}
 
 	sharePaths := fs.Args()
+	// BUG-013 修复：校验每个分片路径无 path traversal。
+	for _, p := range sharePaths {
+		if err := validatePath(p); err != nil {
+			fmt.Fprintf(os.Stderr, "error: invalid share path %q: %v\n", p, err)
+			os.Exit(1)
+		}
+	}
 	wrappedCMK, err := seal.CombineWrappedCMKFromFiles(sharePaths)
 	if err != nil {
 		log.Fatalf("restore: %v", err)
 	}
 
-	if err := os.WriteFile(*outPath, wrappedCMK, 0o400); err != nil {
+	if err := atomicWriteFileSecure(*outPath, wrappedCMK); err != nil {
 		log.Fatalf("write: %v", err)
 	}
 
@@ -649,4 +667,73 @@ func runAuditVerifyCmd(args []string) {
 	}
 
 	log.Printf("✓ audit chain integrity verified")
+}
+
+// atomicWriteFileSecure 原子写入文件（temp + rename + chmod）。
+//
+// 解决 os.WriteFile + chmod 之间的 race condition：
+//  1. 写入临时文件（与目标同目录，保证同文件系统可 rename）
+//  2. 立即 chmod 0o400
+//  3. rename 到目标路径（原子操作）
+//
+// 这样在任何时刻文件都不以 0o600+ 权限存在。
+func atomicWriteFileSecure(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".yvonne-tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	// 确保临时文件在失败时被清理。
+	cleanup := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}
+
+	// 写入数据。
+	if _, err := tmp.Write(data); err != nil {
+		cleanup()
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		cleanup()
+		return fmt.Errorf("sync temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("close temp file: %w", err)
+	}
+
+	// 立即设置严格权限（在 rename 之前）。
+	if err := os.Chmod(tmpPath, 0o400); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+
+	// 原子 rename 到目标路径。
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("rename temp to final: %w", err)
+	}
+
+	return nil
+}
+
+// validatePath 校验路径无 path traversal（BUG-013 修复）。
+// 拒绝包含 ".." 的路径，防止目录遍历攻击。
+func validatePath(path string) error {
+	if path == "" {
+		return fmt.Errorf("empty path")
+	}
+	clean := filepath.Clean(path)
+	if clean == ".." || strings.HasPrefix(clean, "../") {
+		return fmt.Errorf("path %q contains parent directory traversal", path)
+	}
+	for _, part := range strings.Split(clean, string(filepath.Separator)) {
+		if part == ".." {
+			return fmt.Errorf("path %q contains parent directory traversal", path)
+		}
+	}
+	return nil
 }

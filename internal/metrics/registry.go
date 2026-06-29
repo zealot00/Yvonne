@@ -63,10 +63,38 @@ func NewRegistry() *Registry {
 	}
 }
 
+// allowedActions 是允许的 action 白名单（防标签基数爆炸，BUG-005 修复）。
+var allowedActions = map[string]bool{
+	"Encrypt":         true,
+	"Decrypt":         true,
+	"CreateKey":       true,
+	"RotateKey":       true,
+	"ShredKey":        true,
+	"SoftDeleteKey":   true,
+	"RestoreKey":      true,
+	"GenerateDataKey": true,
+	"ImportKey":       true,
+	"Unseal":          true,
+	"EmergencySeal":   true,
+	"AuditQuery":      true,
+	"TransitKey":      true,
+	"Health":          true,
+	"DegradedMode":    true,
+}
+
+// maxActionLen 是 action 字符串最大长度（防超长字符串注入）。
+const maxActionLen = 64
+
 // RecordAPIRequest 记录一次 API 请求。
 // action: Encrypt/Decrypt/Unseal 等；duration: 耗时；success: 是否成功。
+// BUG-005 修复：action 必须在白名单内，防标签基数爆炸。
 func (r *Registry) RecordAPIRequest(action string, duration time.Duration, success bool) {
 	r.apiDuration.Observe(duration.Seconds())
+
+	// 白名单校验 + 长度限制。
+	if len(action) > maxActionLen || !allowedActions[action] {
+		action = "Unknown" // 未知 action 归桶到 Unknown
+	}
 
 	r.apiRequestsMu.Lock()
 	r.apiRequests[action]++

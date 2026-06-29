@@ -56,11 +56,11 @@ func NewLocalPKIUnsealer(pemPath string, vault *VaultState, store storage.KVStor
 //  3. RSA-OAEP SHA-256 解密
 //  4. SecureBuffer 封装 + DirectUnseal
 //  5. 阅后即焚：清零 PEM 内存 + os.Remove(pemPath)
-func (u *LocalPKIUnsealer) AutoUnseal(ctx context.Context) error {
+func (u *LocalPKIUnsealer) AutoUnseal(ctx context.Context) (err error) {
 	// 1. 读取 PEM 文件。
-	pemBytes, err := os.ReadFile(u.pemPath)
-	if err != nil {
-		return fmt.Errorf("local_pki: read pem file: %w", err)
+	pemBytes, readErr := os.ReadFile(u.pemPath)
+	if readErr != nil {
+		return fmt.Errorf("local_pki: read pem file: %w", readErr)
 	}
 	// 保证 pemBytes 在所有路径下被清理 + 文件被删除。
 	unsealDone := false
@@ -71,22 +71,26 @@ func (u *LocalPKIUnsealer) AutoUnseal(ctx context.Context) error {
 			runtime.KeepAlive(pemBytes)
 		}
 		// 阅后即焚：物理删除 PEM 文件（仅解封成功后删除）。
-		// os.Remove 失败不静默吞掉：若删除失败，明文 RSA 私钥滞留磁盘，
-		// 违反"阅后即焚"契约。返回 error 让上层决定是否继续。
+		// 安全红线：删除失败 = 明文 RSA 私钥滞留磁盘，必须 abort unseal。
 		if unsealDone {
 			if rmErr := os.Remove(u.pemPath); rmErr != nil && !os.IsNotExist(rmErr) {
-				// 删除失败是安全风险，但不能覆盖已成功的解封结果。
-				// 用 log.Printf 告警（不阻断已完成的解封）。
-				// 生产环境应配合监控告警处理此情况。
-				fmt.Fprintf(os.Stderr, "local_pki: WARNING failed to delete PEM file %s after unseal: %v\n", u.pemPath, rmErr)
+				// 删除失败是致命安全风险：覆盖返回值，让上层知道 unseal 不完整。
+				// 即使 vault 已解封，仍返回 error 让 bootstrap 拒绝继续启动。
+				err = fmt.Errorf("local_pki: CRITICAL failed to delete PEM file %s after unseal: %w (private key may persist on disk)", u.pemPath, rmErr)
 			}
 		}
 	}()
 
 	// 2. 解析 PEM 块。
-	block, _ := pem.Decode(pemBytes)
+	if len(pemBytes) == 0 {
+		return errors.New("local_pki: empty PEM data")
+	}
+	block, rest := pem.Decode(pemBytes)
 	if block == nil {
-		return errors.New("local_pki: failed to decode PEM block")
+		return errors.New("local_pki: no PEM block found in private key data")
+	}
+	if len(rest) > 0 {
+		return fmt.Errorf("local_pki: trailing data after private key PEM block (%d bytes)", len(rest))
 	}
 
 	// 3. 解析 RSA 私钥（支持 PKCS#1 和 PKCS#8）。
@@ -184,9 +188,15 @@ func GenerateUnsealKeyPair() (privateKeyPEM, publicKeyPEM []byte, err error) {
 // EncryptMasterKeyWithPublicKey 用公钥加密 Master Key，生成 Wrapped Master Key。
 // 用于初始化阶段：生成 Master Key → 用公钥加密 → 存入 DB。
 func EncryptMasterKeyWithPublicKey(publicKeyPEM []byte, masterKey *memguard.SecureBuffer) ([]byte, error) {
-	block, _ := pem.Decode(publicKeyPEM)
+	if len(publicKeyPEM) == 0 {
+		return nil, errors.New("local_pki: empty public key PEM data")
+	}
+	block, rest := pem.Decode(publicKeyPEM)
 	if block == nil {
-		return nil, errors.New("local_pki: failed to decode public key PEM")
+		return nil, errors.New("local_pki: no PEM block found in public key data")
+	}
+	if len(rest) > 0 {
+		return nil, fmt.Errorf("local_pki: trailing data after public key PEM block (%d bytes)", len(rest))
 	}
 
 	var pub *rsa.PublicKey

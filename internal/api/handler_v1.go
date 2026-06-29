@@ -114,7 +114,7 @@ func (r *V1Router) handleV1Encrypt(w http.ResponseWriter, req *http.Request) {
 		// 用 DEK 加密业务明文（EncryptVersioned 直接输出自路由格式，零中间拷贝）。
 		var encErr error
 		_ = plaintextSB.WithKey(func(plain []byte) error {
-			ciphertext, encErr = crypto.EncryptVersioned(plaintextDEK, uint32(meta.Version), plain)
+			ciphertext, encErr = crypto.EncryptVersioned(plaintextDEK, crypto.SafeUint32(meta.Version), plain)
 			return nil
 		})
 		return encErr

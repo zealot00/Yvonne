@@ -37,6 +37,20 @@ func BuildTLSConfig(cfg TLSConfig) (*tls.Config, error) {
 		return nil, fmt.Errorf("config: unsupported tls.min_version %q", cfg.MinVersion)
 	}
 
+	// BUG-001 修复：显式设置安全的密码套件，禁用 3DES/RC4 等弱算法。
+	// TLS 1.3 密码套件由 Go 自动选择（仅支持 AEAD），无需配置。
+	// TLS 1.2 显式配置强密码套件。
+	tlsCfg.CipherSuites = []uint16{
+		tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+		tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+		tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+		tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+		tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+		tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+	}
+	// 禁用弱算法：PreferServerCipherSuites = true 让服务端选择。
+	tlsCfg.PreferServerCipherSuites = true
+
 	// ClientAuth + ClientCA。
 	switch cfg.ClientAuth {
 	case "require":
