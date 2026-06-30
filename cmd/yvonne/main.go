@@ -31,6 +31,7 @@ import (
 	"yvonne/internal/bootstrap"
 	"yvonne/internal/config"
 	"yvonne/internal/memguard"
+	"yvonne/internal/observability"
 	"yvonne/internal/seal"
 	"yvonne/internal/storage"
 	"yvonne/internal/version"
@@ -350,6 +351,18 @@ func startYvonne(cfg *config.YvonneConfig) {
 		}()
 	}
 	srv.MCPHTTPServer = mcpHTTPServer
+
+	// v1.3: OpenTelemetry tracing 初始化。
+	tracerCfg := observability.TracerConfig{
+		Enabled:     cfg.Observability.Tracing.Enabled,
+		Endpoint:    cfg.Observability.Tracing.Endpoint,
+		ServiceName: cfg.Observability.Tracing.ServiceName,
+	}
+	_, tracerShutdown, err := observability.InitTracer(tracerCfg)
+	if err != nil {
+		log.Fatalf("OTel tracer init: %v", err)
+	}
+	defer tracerShutdown()
 
 	// 监听信号。
 	stop := make(chan os.Signal, 1)

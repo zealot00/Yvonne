@@ -491,6 +491,12 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 	v1Router.SetApprovalStore(approvalStore)
 	log.Printf("Quorum Approval store initialized")
 
+	// v1.3: OpenTelemetry tracing 装配。
+	if cfg.Observability.Tracing.Enabled {
+		v1Router.SetTracingEnabled(true)
+		log.Printf("OTel tracing enabled on V1Router")
+	}
+
 	// gRPC server（含 mTLS，复用 HTTP 的 TLSConfig）。
 	// BUG-18 修复：Cluster 模式下 gRPC 必须启用 TLS，明文暴露视为配置错误。
 	var grpcSrv *grpc.Server

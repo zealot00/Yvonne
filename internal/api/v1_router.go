@@ -17,6 +17,8 @@ import (
 	"net/http"
 	"strings"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
 	"yvonne/internal/audit"
 	"yvonne/internal/auth"
 	"yvonne/internal/lifecycle"
@@ -27,19 +29,20 @@ import (
 
 // V1Router 是 v1 API 路由器。
 type V1Router struct {
-	seal          seal.Unsealer
-	auditLog      audit.Auditor
-	manager       *lifecycle.Manager
-	core          *service.Core // v1.2.2: Sign/Verify/ReEncrypt 用
-	metrics       *metrics.Registry
-	authenticator auth.Authenticator
-	adminToken    string
-	transitMgr    *lifecycle.TransitKeyManager
-	auditDir      string // 审计日志目录（查询用），可为空
-	rateLimiter   *RateLimiter
-	mux           *http.ServeMux
-	mfaStore      auth.MFAStore      // v1.3: MFA TOTP 存储
-	approvalStore auth.ApprovalStore // v1.3: Quorum 审批存储
+	seal           seal.Unsealer
+	auditLog       audit.Auditor
+	manager        *lifecycle.Manager
+	core           *service.Core // v1.2.2: Sign/Verify/ReEncrypt 用
+	metrics        *metrics.Registry
+	authenticator  auth.Authenticator
+	adminToken     string
+	transitMgr     *lifecycle.TransitKeyManager
+	auditDir       string // 审计日志目录（查询用），可为空
+	rateLimiter    *RateLimiter
+	mux            *http.ServeMux
+	mfaStore       auth.MFAStore      // v1.3: MFA TOTP 存储
+	approvalStore  auth.ApprovalStore // v1.3: Quorum 审批存储
+	tracingEnabled bool               // v1.3: OTel tracing 开关
 }
 
 // NewV1Router 创建 v1 路由。
@@ -79,6 +82,11 @@ func (r *V1Router) SetMFAStore(store auth.MFAStore) {
 // SetApprovalStore 设置审批存储（v1.3）。
 func (r *V1Router) SetApprovalStore(store auth.ApprovalStore) {
 	r.approvalStore = store
+}
+
+// SetTracingEnabled 启用/禁用 OTel tracing（v1.3）。
+func (r *V1Router) SetTracingEnabled(enabled bool) {
+	r.tracingEnabled = enabled
 }
 
 func (r *V1Router) register() {
@@ -220,6 +228,12 @@ func (r *V1Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// CORS 预检短路：OPTIONS 请求不路由到 mux。
 	if req.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// v1.3: OpenTelemetry tracing 中间件（如果启用）。
+	if r.tracingEnabled {
+		otelhttp.NewHandler(http.HandlerFunc(r.mux.ServeHTTP), "yvonne-api").ServeHTTP(w, req)
 		return
 	}
 

@@ -16,6 +16,7 @@ package api
 
 import (
 	"bufio"
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -25,6 +26,8 @@ import (
 	"runtime/debug"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/otel/trace"
 
 	"yvonne/internal/audit"
 	"yvonne/internal/auth"
@@ -173,12 +176,16 @@ func (r *V1Router) auditMiddleware(action string, next http.HandlerFunc) http.Ha
 
 		startTime := time.Now()
 
-		traceIDBytes, err := memguard.GenerateSecureRandom(16)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "trace id generation failed")
-			return
+		// v1.3: TraceID 优先用 OTel span context，无 OTel 时用随机生成。
+		traceID := traceIDFromContext(req.Context())
+		if traceID == "" {
+			traceIDBytes, err := memguard.GenerateSecureRandom(16)
+			if err != nil {
+				writeJSONError(w, http.StatusInternalServerError, "trace id generation failed")
+				return
+			}
+			traceID = hex.EncodeToString(traceIDBytes)
 		}
-		traceID := hex.EncodeToString(traceIDBytes)
 
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 
@@ -227,4 +234,14 @@ func (r *V1Router) auditMiddleware(action string, next http.HandlerFunc) http.Ha
 		}
 		_ = r.auditLog.Record(entry)
 	}
+}
+
+// traceIDFromContext 从 OTel span context 提取 TraceID。
+// 无 OTel span 时返回空字符串（调用方需 fallback 到随机生成）。
+func traceIDFromContext(ctx context.Context) string {
+	spanCtx := trace.SpanContextFromContext(ctx)
+	if spanCtx.HasTraceID() {
+		return spanCtx.TraceID().String()
+	}
+	return ""
 }
