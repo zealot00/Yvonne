@@ -38,7 +38,8 @@ type V1Router struct {
 	auditDir      string // 审计日志目录（查询用），可为空
 	rateLimiter   *RateLimiter
 	mux           *http.ServeMux
-	mfaStore      auth.MFAStore // v1.3: MFA TOTP 存储
+	mfaStore      auth.MFAStore      // v1.3: MFA TOTP 存储
+	approvalStore auth.ApprovalStore // v1.3: Quorum 审批存储
 }
 
 // NewV1Router 创建 v1 路由。
@@ -73,6 +74,11 @@ func (r *V1Router) SetAdminToken(token string) {
 // SetMFAStore 设置 MFA 存储（v1.3）。
 func (r *V1Router) SetMFAStore(store auth.MFAStore) {
 	r.mfaStore = store
+}
+
+// SetApprovalStore 设置审批存储（v1.3）。
+func (r *V1Router) SetApprovalStore(store auth.ApprovalStore) {
+	r.approvalStore = store
 }
 
 func (r *V1Router) register() {
@@ -110,6 +116,11 @@ func (r *V1Router) register() {
 	r.mux.HandleFunc("/api/v1/auth/mfa/setup", r.auditMiddleware("MFASetup", r.RequireAuth(r.authenticator, "MFASetup", r.handleMFASetup)))
 	r.mux.HandleFunc("/api/v1/auth/mfa/verify", r.auditMiddleware("MFAVerify", r.RequireAuth(r.authenticator, "MFAVerify", r.handleMFAVerify)))
 	r.mux.HandleFunc("/api/v1/auth/mfa/disable", r.auditMiddleware("MFADisable", r.RequireAuth(r.authenticator, "MFADisable", r.handleMFADisable)))
+
+	// v1.3 新增：Quorum Approval。
+	r.mux.HandleFunc("/api/v1/approvals", r.auditMiddleware("Approval", r.RequireAuth(r.authenticator, "Approval", r.handleApprovals)))
+	r.mux.HandleFunc("/api/v1/approvals/approve", r.auditMiddleware("ApprovalApprove", r.RequireAuth(r.authenticator, "ApprovalApprove", r.handleApprove)))
+	r.mux.HandleFunc("/api/v1/approvals/reject", r.auditMiddleware("ApprovalReject", r.RequireAuth(r.authenticator, "ApprovalReject", r.handleReject)))
 
 	// 可观测性。
 	// metrics 含内部状态（请求量/延迟/失败率），生产应认证保护。

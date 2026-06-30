@@ -486,6 +486,11 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 		log.Printf("MFA TOTP enabled (issuer=%s)", cfg.MFA.Issuer)
 	}
 
+	// v1.3: Quorum Approval 装配（内存存储，生产可换 PG 实现）。
+	approvalStore := auth.NewMemoryApprovalStore()
+	v1Router.SetApprovalStore(approvalStore)
+	log.Printf("Quorum Approval store initialized")
+
 	// gRPC server（含 mTLS，复用 HTTP 的 TLSConfig）。
 	// BUG-18 修复：Cluster 模式下 gRPC 必须启用 TLS，明文暴露视为配置错误。
 	var grpcSrv *grpc.Server
