@@ -453,3 +453,68 @@ func (r *V1Router) handleGenerateDataKey(w http.ResponseWriter, req *http.Reques
 	// 6. rawDEK 由 defer clear 擦除（函数返回时执行）。
 	// plainDEK 由 defer Wipe 擦除。
 }
+
+// createAsymmetricKeyRequest 是 /api/v1/keys/asymmetric 的请求体。
+type createAsymmetricKeyRequest struct {
+	KeyID   string `json:"key_id"`
+	KeyType string `json:"key_type"` // rsa | ecdsa | sm2
+}
+
+// handleCreateAsymmetricKey 处理 POST /api/v1/keys/asymmetric。
+// 创建非对称密钥（RSA-4096 / ECDSA P-256 / SM2），公钥返回给客户端。
+func (r *V1Router) handleCreateAsymmetricKey(w http.ResponseWriter, req *http.Request) {
+	if !requireMethod(w, req, http.MethodPost) {
+		return
+	}
+
+	bodyBytes, err := io.ReadAll(req.Body)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "read request body failed")
+		return
+	}
+	defer func() {
+		clear(bodyBytes)
+		runtime.KeepAlive(bodyBytes)
+	}()
+
+	var body createAsymmetricKeyRequest
+	if err := json.Unmarshal(bodyBytes, &body); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if body.KeyID == "" {
+		writeJSONError(w, http.StatusBadRequest, "key_id is required")
+		return
+	}
+
+	// 校验 key_type。
+	switch body.KeyType {
+	case "rsa", "ecdsa", "sm2":
+		// 合法值。
+	default:
+		writeJSONError(w, http.StatusBadRequest, "key_type must be rsa, ecdsa, or sm2")
+		return
+	}
+
+	// 通过 KEKRef 获取 KEK，调用 lifecycle.CreateAsymmetricKey。
+	var meta *lifecycle.KeyMetadata
+	err = r.seal.KEKRef(func(kek seal.KEK) error {
+		m, e := r.manager.CreateAsymmetricKey(req.Context(), body.KeyID, body.KeyType, kek)
+		if e != nil {
+			return e
+		}
+		meta = m
+		return nil
+	})
+	if err != nil {
+		writeAPIError(w, err)
+		return
+	}
+
+	writeJSONOK(w, map[string]interface{}{
+		"key_id":     meta.KeyID,
+		"version":    meta.Version,
+		"key_type":   meta.KeyType,
+		"public_key": meta.PublicKey,
+	})
+}

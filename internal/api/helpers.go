@@ -4,6 +4,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 type envelope struct {
@@ -36,4 +37,20 @@ func requireMethod(w http.ResponseWriter, req *http.Request, method string) bool
 		return false
 	}
 	return true
+}
+
+// writeAPIError 将 service 层 error 映射为 HTTP 状态码。
+func writeAPIError(w http.ResponseWriter, err error) {
+	msg := err.Error()
+	code := http.StatusInternalServerError
+	if strings.Contains(msg, "not found") {
+		code = http.StatusNotFound
+	} else if strings.Contains(msg, "unauthorized") || strings.Contains(msg, "denied") || strings.Contains(msg, "cannot access") {
+		code = http.StatusForbidden
+	} else if strings.Contains(msg, "sealed") {
+		code = http.StatusServiceUnavailable
+	} else if strings.Contains(msg, "requires asymmetric") || strings.Contains(msg, "requires symmetric") || strings.Contains(msg, "no public key") {
+		code = http.StatusBadRequest
+	}
+	writeJSONError(w, code, msg)
 }

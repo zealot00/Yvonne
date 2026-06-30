@@ -239,10 +239,10 @@ func TestV12_SignKeyNotFound(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.handleV1Sign(w, req)
 
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500 for nonexistent key, got %d", w.Code)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for nonexistent key, got %d", w.Code)
 	}
-	t.Log("✅ Sign with nonexistent key correctly failed")
+	t.Log("✅ Sign with nonexistent key correctly failed (404)")
 }
 
 // TestV12_SignSymmetricKey 对称密钥拒绝签名。

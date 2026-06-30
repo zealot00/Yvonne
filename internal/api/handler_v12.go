@@ -67,21 +67,23 @@ func (r *V1Router) handleV1Sign(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 获取 Active 密钥。
-	meta, err := r.manager.GetActiveKey(req.Context(), body.KeyID)
+	policy := auth.PolicyFromContext(req.Context())
+	result, err := r.core.Sign(req.Context(), body.KeyID, body.Data, policy)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeAPIError(w, err)
 		return
 	}
+	writeJSONOK(w, map[string]interface{}{
+		"signature": result.Signature,
+		"version":   result.Version,
+	})
+}
 
-	// KeyType 校验（非敏感变量，但遵循安全检查规则用 ConstantTimeCompare）。
-	if !isAsymmetricKey(meta.KeyType) {
-		writeJSONError(w, http.StatusBadRequest, "sign requires asymmetric key (got "+meta.KeyType+")")
-		return
-	}
-
-	// 签名（简化：当前返回 not implemented，完整实现在 v1.2.1 补充）。
-	writeJSONError(w, http.StatusNotImplemented, "sign API: asymmetric signing not yet implemented (planned v1.2.1)")
+// verifyRequest 是 /api/v1/verify 的请求体。
+type verifyRequest struct {
+	KeyID     string `json:"key_id"`
+	Data      []byte `json:"data"`
+	Signature []byte `json:"signature"`
 }
 
 // handleV1Verify 处理 POST /api/v1/verify。
@@ -90,7 +92,37 @@ func (r *V1Router) handleV1Verify(w http.ResponseWriter, req *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	writeJSONError(w, http.StatusNotImplemented, "verify API: not yet implemented (planned v1.2.1)")
+
+	bodyBytes, err := io.ReadAll(req.Body)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	defer func() {
+		clear(bodyBytes)
+		runtime.KeepAlive(bodyBytes)
+	}()
+
+	var body verifyRequest
+	if err := json.Unmarshal(bodyBytes, &body); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if body.KeyID == "" {
+		writeJSONError(w, http.StatusBadRequest, "key_id is required")
+		return
+	}
+
+	policy := auth.PolicyFromContext(req.Context())
+	result, err := r.core.Verify(req.Context(), body.KeyID, body.Data, body.Signature, policy)
+	if err != nil {
+		writeAPIError(w, err)
+		return
+	}
+	writeJSONOK(w, map[string]interface{}{
+		"valid":   result.Valid,
+		"version": result.Version,
+	})
 }
 
 // handleV1GenerateMac 处理 POST /api/v1/mac/generate。
@@ -305,9 +337,19 @@ func (r *V1Router) handleV1ReEncrypt(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// ReEncrypt = Decrypt(source) + Encrypt(dest)
-	// 简化实现：返回 not implemented
-	writeJSONError(w, http.StatusNotImplemented, "re-encrypt API: not yet implemented (planned v1.2.1)")
+	// ReEncrypt = Decrypt(source) + Encrypt(dest)，service 层已实现。
+	policy := auth.PolicyFromContext(req.Context())
+	result, err := r.core.ReEncrypt(req.Context(), body.SourceKeyID, body.Ciphertext, body.DestKeyID, policy)
+	if err != nil {
+		writeAPIError(w, err)
+		return
+	}
+	writeJSONOK(w, map[string]interface{}{
+		"ciphertext":    result.Ciphertext,
+		"version":       result.Version,
+		"source_key_id": result.SourceKeyID,
+		"dest_key_id":   result.DestKeyID,
+	})
 }
 
 // handleV1GetPublicKey 处理 GET /api/v1/keys/public-key。

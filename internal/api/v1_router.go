@@ -22,6 +22,7 @@ import (
 	"yvonne/internal/lifecycle"
 	"yvonne/internal/metrics"
 	"yvonne/internal/seal"
+	"yvonne/internal/service"
 )
 
 // V1Router 是 v1 API 路由器。
@@ -29,6 +30,7 @@ type V1Router struct {
 	seal          seal.Unsealer
 	auditLog      audit.Auditor
 	manager       *lifecycle.Manager
+	core          *service.Core // v1.2.2: Sign/Verify/ReEncrypt 用
 	metrics       *metrics.Registry
 	authenticator auth.Authenticator
 	adminToken    string
@@ -46,6 +48,7 @@ func NewV1Router(s seal.Unsealer, auditLog audit.Auditor, mgr *lifecycle.Manager
 		seal:          s,
 		auditLog:      auditLog,
 		manager:       mgr,
+		core:          service.NewCore(mgr, s, auditLog), // v1.2.2: 注入 Core
 		metrics:       reg,
 		authenticator: authenticator,
 		transitMgr:    lifecycle.NewTransitKeyManager(),
@@ -93,6 +96,9 @@ func (r *V1Router) register() {
 	r.mux.HandleFunc("/api/v1/re-encrypt", r.auditMiddleware("ReEncrypt", r.authAndSeal("ReEncrypt", r.handleV1ReEncrypt)))
 	r.mux.HandleFunc("/api/v1/keys/gdk-no-plaintext", r.auditMiddleware("GenerateDataKeyWithoutPlaintext", r.authAndSeal("KeyOp", r.handleV1GDKWithoutPlaintext)))
 	r.mux.HandleFunc("/api/v1/keys/public-key", r.auditMiddleware("GetPublicKey", r.authAndSeal("KeyOp", r.handleV1GetPublicKey)))
+
+	// v1.2.2 新增：非对称密钥创建。
+	r.mux.HandleFunc("/api/v1/keys/asymmetric", r.auditMiddleware("CreateAsymmetricKey", r.authAndSeal("KeyOp", r.handleCreateAsymmetricKey)))
 
 	// 可观测性。
 	// metrics 含内部状态（请求量/延迟/失败率），生产应认证保护。
