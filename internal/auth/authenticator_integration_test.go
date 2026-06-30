@@ -75,7 +75,7 @@ func TestContext_RoleIDAndPolicyCoexist(t *testing.T) {
 		t.Fatalf("RoleID = %q", roleID)
 	}
 	if gotPolicy == nil || gotPolicy.RoleID != "order-service" {
-		t.Fatalf("Policy RoleID = %q", gotPolicy)
+		t.Fatalf("Policy RoleID mismatch: gotPolicy=%v", gotPolicy)
 	}
 }
 

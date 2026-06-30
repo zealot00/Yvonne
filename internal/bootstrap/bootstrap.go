@@ -479,6 +479,13 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 	core := service.NewManager(lifecycleMgr, unsealer, auditLog)
 	core.SetAdminToken(cfg.Server.Admin.AdminToken)
 
+	// v1.3: MFA TOTP 装配（内存存储，生产可换 PG 实现）。
+	if cfg.MFA.Enabled {
+		mfaStore := auth.NewMemoryMFAStore()
+		v1Router.SetMFAStore(mfaStore)
+		log.Printf("MFA TOTP enabled (issuer=%s)", cfg.MFA.Issuer)
+	}
+
 	// gRPC server（含 mTLS，复用 HTTP 的 TLSConfig）。
 	// BUG-18 修复：Cluster 模式下 gRPC 必须启用 TLS，明文暴露视为配置错误。
 	var grpcSrv *grpc.Server

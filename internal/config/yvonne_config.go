@@ -32,14 +32,45 @@ const (
 
 // YvonneConfig 是顶层配置，决定 Yvonne 的运行模式与依赖装配。
 type YvonneConfig struct {
-	Mode    Mode            `json:"mode"    yaml:"mode"`    // "dev" | "cluster"
-	Server  ServerConfig    `json:"server"  yaml:"server"`  // 复用既有 ServerConfig
-	Storage StorageModeConf `json:"storage" yaml:"storage"` // 模式相关存储配置
-	Unseal  UnsealModeConf  `json:"unseal"  yaml:"unseal"`  // 模式相关解封配置
-	Auth    AuthModeConf    `json:"auth"    yaml:"auth"`    // 认证配置（Cluster 必填）
-	Audit   AuditModeConf   `json:"audit"   yaml:"audit"`   // 审计配置（Cluster 必填）
-	Logging LoggingConfig   `json:"logging" yaml:"logging"` // 复用既有 LoggingConfig
-	Crypto  CryptoConfig    `json:"crypto"  yaml:"crypto"`  // 密码套件配置（v1.1 新增 Suite 字段）
+	Mode          Mode                `json:"mode"           yaml:"mode"`         // "dev" | "cluster"
+	Server        ServerConfig        `json:"server"         yaml:"server"`       // 复用既有 ServerConfig
+	Storage       StorageModeConf     `json:"storage"        yaml:"storage"`      // 模式相关存储配置
+	Unseal        UnsealModeConf      `json:"unseal"         yaml:"unseal"`       // 模式相关解封配置
+	Auth          AuthModeConf        `json:"auth"           yaml:"auth"`         // 认证配置（Cluster 必填）
+	Audit         AuditModeConf       `json:"audit"          yaml:"audit"`        // 审计配置（Cluster 必填）
+	Logging       LoggingConfig       `json:"logging"        yaml:"logging"`      // 复用既有 LoggingConfig
+	Crypto        CryptoConfig        `json:"crypto"         yaml:"crypto"`       // 密码套件配置（v1.1 新增 Suite 字段）
+	MFA           MFAConfig           `json:"mfa"            yaml:"mfa"`          // v1.3: MFA TOTP 配置
+	Observability ObservabilityConfig `json:"observability" yaml:"observability"` // v1.3: OTel + Alerting
+}
+
+// MFAConfig 是 MFA TOTP 配置（v1.3）。
+type MFAConfig struct {
+	Enabled       bool   `json:"enabled"        yaml:"enabled"`        // 是否启用 MFA
+	Issuer        string `json:"issuer"         yaml:"issuer"`         // TOTP 发行方（默认 "Yvonne KMS"）
+	WindowSeconds int    `json:"window_seconds" yaml:"window_seconds"` // TOTP 窗口秒数（默认 30）
+	// SensitiveOperations 需 MFA 的敏感操作列表。
+	SensitiveOperations []string `json:"sensitive_operations" yaml:"sensitive_operations"`
+}
+
+// ObservabilityConfig 是可观测性配置（v1.3）。
+type ObservabilityConfig struct {
+	Tracing  TracingConfig  `json:"tracing"   yaml:"tracing"`  // OTel tracing
+	Alerting AlertingConfig `json:"alerting"  yaml:"alerting"` // Webhook 告警
+}
+
+// TracingConfig 是 OpenTelemetry tracing 配置。
+type TracingConfig struct {
+	Enabled     bool   `json:"enabled"     yaml:"enabled"`       // 是否启用 tracing
+	Endpoint    string `json:"endpoint"    yaml:"endpoint"`      // OTLP endpoint（如 localhost:4317）
+	ServiceName string `json:"service_name" yaml:"service_name"` // 服务名（默认 yvonne-kms）
+}
+
+// AlertingConfig 是 Webhook 告警配置。
+type AlertingConfig struct {
+	Enabled            bool     `json:"enabled"               yaml:"enabled"`
+	WebhookURL         string   `json:"webhook_url"           yaml:"webhook_url"`          // Slack/钉钉/PagerDuty webhook
+	HighRiskOperations []string `json:"high_risk_operations"  yaml:"high_risk_operations"` // 触发告警的操作
 }
 
 // AuditModeConf 是审计配置（Cluster 模式必填）。

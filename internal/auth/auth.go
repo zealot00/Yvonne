@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Policy 定义一个角色的访问控制策略。
@@ -24,7 +25,37 @@ type Policy struct {
 	RoleID         string   `json:"role_id"`
 	AllowedKeys    []string `json:"allowed_keys"`    // 支持通配符，如 "order-*", "*"
 	AllowedActions []string `json:"allowed_actions"` // 如 ["encrypt", "decrypt", "sign"]
+
+	// v1.3: MFA + Quorum
+	RequireMFA    bool     `json:"require_mfa,omitempty"`    // 敏感操作需 TOTP 二次确认
+	RequireQuorum int      `json:"require_quorum,omitempty"` // 0=不需要，N=需 N 人审批
+	ApproverRoles []string `json:"approver_roles,omitempty"` // 有权审批的角色
 }
+
+// MFAState 存储角色的 MFA 绑定状态。
+type MFAState struct {
+	RoleID     string    `json:"role_id"`
+	Secret     string    `json:"secret"`  // TOTP secret（base32，KEK 加密存储）
+	Enabled    bool      `json:"enabled"` // 是否已启用
+	CreatedAt  time.Time `json:"created_at"`
+	VerifiedAt time.Time `json:"verified_at"` // 首次验证时间
+}
+
+// MFAStore 是 MFA 状态存储接口。
+type MFAStore interface {
+	// GetMFAState 获取角色的 MFA 状态。
+	GetMFAState(roleID string) (*MFAState, error)
+	// SaveMFAState 保存角色的 MFA 状态。
+	SaveMFAState(state *MFAState) error
+	// DeleteMFAState 删除角色的 MFA 绑定。
+	DeleteMFAState(roleID string) error
+}
+
+// ErrMFANotEnabled 表示角色未启用 MFA。
+var ErrMFANotEnabled = errors.New("auth: mfa not enabled for role")
+
+// ErrMFANotRequired 表示操作不需要 MFA。
+var ErrMFANotRequired = errors.New("auth: mfa not required for this operation")
 
 // Authenticator 是身份认证接口。
 type Authenticator interface {

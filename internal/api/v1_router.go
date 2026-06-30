@@ -38,6 +38,7 @@ type V1Router struct {
 	auditDir      string // 审计日志目录（查询用），可为空
 	rateLimiter   *RateLimiter
 	mux           *http.ServeMux
+	mfaStore      auth.MFAStore // v1.3: MFA TOTP 存储
 }
 
 // NewV1Router 创建 v1 路由。
@@ -67,6 +68,11 @@ func (r *V1Router) SetRateLimit(rate float64, burst int) {
 // SetAdminToken 设置紧急封印 Admin Token。
 func (r *V1Router) SetAdminToken(token string) {
 	r.adminToken = token
+}
+
+// SetMFAStore 设置 MFA 存储（v1.3）。
+func (r *V1Router) SetMFAStore(store auth.MFAStore) {
+	r.mfaStore = store
 }
 
 func (r *V1Router) register() {
@@ -99,6 +105,11 @@ func (r *V1Router) register() {
 
 	// v1.2.2 新增：非对称密钥创建。
 	r.mux.HandleFunc("/api/v1/keys/asymmetric", r.auditMiddleware("CreateAsymmetricKey", r.authAndSeal("KeyOp", r.handleCreateAsymmetricKey)))
+
+	// v1.3 新增：MFA TOTP。
+	r.mux.HandleFunc("/api/v1/auth/mfa/setup", r.auditMiddleware("MFASetup", r.RequireAuth(r.authenticator, "MFASetup", r.handleMFASetup)))
+	r.mux.HandleFunc("/api/v1/auth/mfa/verify", r.auditMiddleware("MFAVerify", r.RequireAuth(r.authenticator, "MFAVerify", r.handleMFAVerify)))
+	r.mux.HandleFunc("/api/v1/auth/mfa/disable", r.auditMiddleware("MFADisable", r.RequireAuth(r.authenticator, "MFADisable", r.handleMFADisable)))
 
 	// 可观测性。
 	// metrics 含内部状态（请求量/延迟/失败率），生产应认证保护。
