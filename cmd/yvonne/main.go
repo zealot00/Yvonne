@@ -133,7 +133,7 @@ func runServerCmd(args []string) {
 		log.Fatalf("config load failed: %v", err)
 	}
 
-	startYvonne(cfg)
+	startYvonne(cfg, *configPath)
 }
 
 // runDevCmd 处理 `yvonne dev`（快捷开发模式）。
@@ -187,11 +187,11 @@ func runDevCmd(args []string) {
 		go runDashboard(*port)
 	}
 
-	startYvonne(cfg)
+	startYvonne(cfg, "") // Dev 模式无 configPath
 }
 
 // startYvonne 装配并启动 Yvonne 实例。
-func startYvonne(cfg *config.YvonneConfig) {
+func startYvonne(cfg *config.YvonneConfig, configPath string) {
 	// 装配。
 	srv, err := bootstrap.BuildYvonne(cfg)
 	if err != nil {
@@ -367,6 +367,43 @@ func startYvonne(cfg *config.YvonneConfig) {
 	// 监听信号。
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	// v1.3: SIGHUP 热配置重载（仅 Cluster 模式有 configPath）。
+	sighupCh := make(chan os.Signal, 1)
+	signal.Notify(sighupCh, syscall.SIGHUP)
+	var reloadableCfg *config.ReloadableConfig
+	if configPath != "" {
+		rc, reloadErr := config.NewReloadableConfig(configPath)
+		if reloadErr != nil {
+			log.Printf("warning: reloadable config init failed (SIGHUP reload disabled): %v", reloadErr)
+		} else {
+			reloadableCfg = rc
+		}
+	}
+	go func() {
+		for range sighupCh {
+			if reloadableCfg == nil {
+				log.Printf("SIGHUP received but reloadable config not initialized")
+				continue
+			}
+			log.Printf("SIGHUP received, reloading config...")
+			if err := reloadableCfg.Reload(); err != nil {
+				log.Printf("config reload failed: %v", err)
+			} else {
+				newCfg := reloadableCfg.Get()
+				log.Printf("config reloaded: logging=%v, audit_retention=%d, alerting=%v",
+					newCfg.Logging, newCfg.Audit.RetentionDays, newCfg.Observability.Alerting.Enabled)
+			}
+		}
+	}()
+
+	// v1.3: Alerting Webhook 装配。
+	alerter := observability.NewAlerter(observability.AlertConfig{
+		Enabled:            cfg.Observability.Alerting.Enabled,
+		WebhookURL:         cfg.Observability.Alerting.WebhookURL,
+		HighRiskOperations: cfg.Observability.Alerting.HighRiskOperations,
+	})
+	_ = alerter // 后续集成到 audit logger
 
 	select {
 	case sig := <-stop:
