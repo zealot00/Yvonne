@@ -8,9 +8,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
-- v1.3: 合规深化（MFA + 双人控制 + RFC 8998 + OpenTelemetry）
 - v2.0: 企业级（多租户 + Web 控制台 + KMIP + Vault 兼容）
 - 详见 [docs/roadmap.md](docs/roadmap.md)
+
+## [1.3.0] - 2026-06-30 (合规深化版)
+
+### Added
+- **MFA TOTP（RFC 6238）** — 敏感操作二次确认
+  - `POST /api/v1/auth/mfa/setup` — 生成 TOTP secret + QR code URI
+  - `POST /api/v1/auth/mfa/verify` — 验证 code + 启用 MFA
+  - `POST /api/v1/auth/mfa/disable` — 禁用 MFA（需验证 code）
+  - 敏感操作（ShredKey/EmergencySeal/ExportKey/SoftDeleteKey）强制 MFA
+  - X-MFA-Code header 校验，±30s 时钟漂移容忍，防重放
+- **Quorum Approval（K-of-N 审批工作流）**
+  - `POST /api/v1/approvals` — 创建审批 ticket
+  - `GET /api/v1/approvals` — 列出 pending / 查询单个
+  - `POST /api/v1/approvals/approve` — 审批通过
+  - `POST /api/v1/approvals/reject` — 审批拒绝
+  - 防自批准 + 审批幂等 + 过期清理 + 状态机（pending/approved/rejected/expired）
+- **RFC 8998 国密 TLS（GB/T 38636）**
+  - SM2 双证书（签名 + 加密）
+  - GMTLS_SM2_WITH_SM4_SM3 / GMTLS_ECDHE_SM2_WITH_SM4_SM3 密码套件
+  - gmsm 构建标签隔离，非 gmsm 自动降级标准 TLS
+- **OpenTelemetry tracing**
+  - OTLP gRPC exporter + TracerProvider
+  - otelhttp 自动 instrumentation
+  - TraceID 传播到 audit log（链路追踪）
+  - W3C TraceContext + Baggage 传播
+- **Config Reload（SIGHUP）**
+  - 无重启热配置（logging/audit/crypto/mfa/observability）
+  - 冷更新字段保留旧值（server/storage/unseal/auth）
+- **Alerting Webhook**
+  - 钉钉/Slack/PagerDuty 自动检测格式
+  - 高危操作触发告警（ShredKey/EmergencySeal/QuorumReject）
+
+### Changed
+- Policy 扩展：RequireMFA / RequireQuorum / ApproverRoles 字段
+- MFAStore / ApprovalStore 接口（内存实现，生产可换 PG）
+- TLSConfig 扩展：GMEnabled / GMSignCertFile / GMEncCertFile 字段
+- YvonneConfig 扩展：MFA / Observability 配置段
+
+### Security
+- gosec 0 issues
+- govulncheck 0 vulnerabilities
+
+### Tests
+- TOTP 核心：8 个（生成/验证/篡改/时钟漂移/防重放/URI）
+- MFA API：6 个（setup/verify/disable + 错误路径）
+- MFA 中间件：2 个（敏感操作拦截/非敏感放行）
+- Quorum API：8 个（创建/2of3审批/自批准/幂等/拒绝/查询/列表/过期/已完成）
+- Quorum 中间件：3 个（无ticket/pending/approved）
+- 国密 TLS：5 个（双模式）
+- OTel tracing：4 个
+- Config Reload：5 个
+- Alerting：6 个
+- **总计：47 个新测试**
+
+### CI
+- 17 packages PASS（标准 + gmsm 构建）
 
 ## [1.2.2] - 2026-06-30 (Sign/Verify + ReEncrypt 完整实现)
 

@@ -195,7 +195,7 @@ func (r *V1Router) handleApprove(w http.ResponseWriter, req *http.Request) {
 	if ticket.IsExpired() {
 		ticket.Status = auth.ApprovalExpired
 		ticket.ResolvedAt = time.Now().UTC()
-		r.approvalStore.UpdateTicket(ticket)
+		_ = r.approvalStore.UpdateTicket(ticket) // #nosec G104 -- 过期标记失败不阻塞响应
 		writeJSONError(w, http.StatusConflict, "ticket expired")
 		return
 	}
@@ -319,7 +319,7 @@ func (r *V1Router) handleListApprovals(w http.ResponseWriter, req *http.Request)
 func generateUUID() string {
 	b := make([]byte, 16)
 	for i := range b {
-		b[i] = byte(time.Now().UnixNano() >> uint(i*8))
+		b[i] = byte(time.Now().UnixNano() >> uint(i*8)) // #nosec G115 -- 截断到 byte 不会溢出
 	}
 	// 设置 version 4 + variant 位。
 	b[6] = (b[6] & 0x0f) | 0x40

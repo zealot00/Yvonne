@@ -10,7 +10,7 @@ package auth
 
 import (
 	"crypto/hmac"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- SHA-1 是 RFC 6238 TOTP 标准算法，非密码存储用途
 	"crypto/subtle"
 	"encoding/base32"
 	"encoding/binary"
@@ -58,7 +58,8 @@ func GenerateTOTP(secret string, t time.Time) (string, error) {
 	}
 
 	// T = floor((unix_time - T0) / period)，T0 = 0。
-	counter := uint64(t.Unix()) / totpPeriod
+	// #nosec G115 -- Unix 时间戳转 uint64 不会溢出（2^63 秒 = 2920 亿年）。
+	counter := uint64(t.Unix()) / uint64(totpPeriod)
 	return hotp(hmacKey, counter), nil
 }
 
@@ -77,7 +78,8 @@ func ValidateTOTP(secret, code string, usedCodeCheck func(time.Time, string) boo
 
 	// 检查 current + skew 窗口。
 	for skew := -totpSkew; skew <= totpSkew; skew++ {
-		counter := uint64(now.Unix())/totpPeriod + uint64(skew)
+		// #nosec G115 -- Unix 时间戳转 uint64 不会溢出。
+		counter := uint64(now.Unix())/uint64(totpPeriod) + uint64(skew)
 		expected := hotp(hmacKey, counter)
 
 		if subtleEqualString(expected, code) {
