@@ -53,6 +53,12 @@ type TLSConfig struct {
 	MinVersion   string `json:"min_version"   yaml:"min_version"`     // "TLS1.2" | "TLS1.3"
 	ClientCAFile string `json:"client_ca_file" yaml:"client_ca_file"` // 客户端 CA 证书池（mTLS）
 	ClientAuth   string `json:"client_auth"   yaml:"client_auth"`     // "require" | "optional" | "none"(默认)
+	// v1.3: 国密 TLS（RFC 8998）双证书。
+	GMEnabled      bool   `json:"gm_enabled"      yaml:"gm_enabled"`          // 启用国密 TLS
+	GMSignCertFile string `json:"gm_sign_cert_file" yaml:"gm_sign_cert_file"` // SM2 签名证书
+	GMSignKeyFile  string `json:"gm_sign_key_file"  yaml:"gm_sign_key_file"`  // SM2 签名私钥
+	GMEncCertFile  string `json:"gm_enc_cert_file"  yaml:"gm_enc_cert_file"`  // SM2 加密证书
+	GMEncKeyFile   string `json:"gm_enc_key_file"   yaml:"gm_enc_key_file"`   // SM2 加密私钥
 }
 
 // AdminServerConfig 管理页面相关配置。

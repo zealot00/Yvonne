@@ -225,12 +225,23 @@ func startYvonne(cfg *config.YvonneConfig) {
 
 	// mTLS：构造 TLSConfig 注入 HTTP server。
 	var tlsCfg *tls.Config
+	var gmTLSCfg *config.GMTLSConfig
 	if cfg.Server.TLS.Enabled {
-		tlsCfg, err = config.BuildTLSConfig(cfg.Server.TLS)
-		if err != nil {
-			log.Fatalf("TLS config: %v", err)
+		if cfg.Server.TLS.GMEnabled {
+			// v1.3: 国密 TLS（RFC 8998 / GB/T 38636）。
+			gmTLSCfg, err = config.BuildGMTLSConfig(cfg.Server.TLS)
+			if err != nil {
+				log.Fatalf("GM TLS config: %v", err)
+			}
+			log.Printf("GM TLS enabled (RFC 8998): sign_cert=%s, enc_cert=%s",
+				cfg.Server.TLS.GMSignCertFile, cfg.Server.TLS.GMEncCertFile)
+		} else {
+			tlsCfg, err = config.BuildTLSConfig(cfg.Server.TLS)
+			if err != nil {
+				log.Fatalf("TLS config: %v", err)
+			}
+			httpSrv.TLSConfig = tlsCfg
 		}
-		httpSrv.TLSConfig = tlsCfg
 	}
 
 	// 创建 Admin HTTP Server（Web UI）。
@@ -262,7 +273,17 @@ func startYvonne(cfg *config.YvonneConfig) {
 	errCh := make(chan error, 4)
 	go func() {
 		log.Printf("yvonne v%s API listening on %s", version.Version, httpSrv.Addr)
-		if cfg.Server.TLS.Enabled {
+		if cfg.Server.TLS.Enabled && gmTLSCfg != nil {
+			// v1.3: 国密 TLS 模式。
+			ln, e := config.NewGMTLSListener(gmTLSCfg, httpSrv.Addr)
+			if e != nil {
+				errCh <- e
+				return
+			}
+			if err := httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
+				errCh <- err
+			}
+		} else if cfg.Server.TLS.Enabled {
 			log.Printf("TLS enabled: cert=%s", cfg.Server.TLS.CertFile)
 			if err := httpSrv.ListenAndServeTLS(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
 				errCh <- err
