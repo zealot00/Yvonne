@@ -158,8 +158,12 @@ func (p *Policy) IsKeyAllowed(keyID string) bool {
 }
 
 // IsActionAllowed 检查 action 是否在 Policy 允许范围内。
+// 支持 "*" 通配符（匹配所有 action）。
 func (p *Policy) IsActionAllowed(action string) bool {
 	for _, allowed := range p.AllowedActions {
+		if allowed == "*" {
+			return true
+		}
 		if strings.EqualFold(allowed, action) {
 			return true
 		}

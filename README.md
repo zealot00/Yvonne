@@ -57,6 +57,7 @@ Yvonne is built for teams who need centralized key management without surrenderi
 - [PKCS#11 HSM Guide](docs/pkcs11-hsm.md)
 - [国密合规路线图](docs/gmsm-roadmap.md)
 - [产品演进路线图](docs/roadmap.md)
+- [v1.3 合规功能指南](docs/v1.3-compliance.md)
 - [AES→SM4 迁移指南](docs/aes-to-sm4-migration.md)
 - [合规证据包](docs/compliance/README.md)
 - [升级指南](docs/upgrade-guide.md)
