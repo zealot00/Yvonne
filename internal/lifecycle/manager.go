@@ -260,11 +260,16 @@ func (m *Manager) CreateAsymmetricKey(ctx context.Context, keyID, algoType strin
 	if kek == nil {
 		return nil, errors.New("lifecycle: kek is nil")
 	}
-	if algoType != crypto.KeyTypeRSA && algoType != crypto.KeyTypeECDSA {
-		return nil, fmt.Errorf("lifecycle: unsupported key type %q, want %q or %q", algoType, crypto.KeyTypeRSA, crypto.KeyTypeECDSA)
+	if algoType != crypto.KeyTypeRSA && algoType != crypto.KeyTypeECDSA && algoType != crypto.KeyTypeSM2 {
+		return nil, fmt.Errorf("lifecycle: unsupported key type %q, want %q, %q or %q", algoType, crypto.KeyTypeRSA, crypto.KeyTypeECDSA, crypto.KeyTypeSM2)
 	}
 
-	// 1. 生成非对称密钥对。
+	// SM2 路径（gmsm 构建标签隔离）。
+	if algoType == crypto.KeyTypeSM2 {
+		return m.createSM2Key(ctx, keyID, kek)
+	}
+
+	// 1. 生成非对称密钥对（RSA/ECDSA）。
 	rsaPriv, ecdsaPriv, err := crypto.GenerateAsymmetricKey(algoType)
 	if err != nil {
 		return nil, fmt.Errorf("lifecycle: generate asymmetric key: %w", err)

@@ -26,8 +26,10 @@ import (
 // 支持的密钥类型。
 const (
 	KeyTypeAES   = "aes"
+	KeyTypeSM4   = "sm4"
 	KeyTypeRSA   = "rsa"
 	KeyTypeECDSA = "ecdsa"
+	KeyTypeSM2   = "sm2"
 )
 
 // rsaKeyBits 强制 RSA-4096。
