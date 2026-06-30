@@ -396,31 +396,45 @@ func subtleEqual(a, b []byte) bool {
 	return true
 }
 
-// signAsymmetric 签名（RSA/ECDSA）。
+// signAsymmetric 签名（RSA-PSS / ECDSA）。
+// privKeyDER: PKCS#8 DER 编码的私钥。
+// data: 原始数据（函数内部做 SHA-256 哈希）。
+// keyType: "rsa" 或 "ecdsa"。
 func signAsymmetric(privKeyDER []byte, data []byte, keyType string) ([]byte, error) {
-	_ = privKeyDER
-	_ = data
-	_ = keyType
-	// 完整实现需要解析私钥 + 签名，这里用 crypto 包。
-	// 暂时返回 NotImplement，实际由 gRPC/HTTP 层的 crypto 包处理。
-	return nil, fmt.Errorf("service: sign asymmetric not fully implemented for %s", keyType)
+	privKey, err := crypto.ParsePrivateKeyFromDER(privKeyDER)
+	if err != nil {
+		return nil, fmt.Errorf("service: parse private key: %w", err)
+	}
+
+	// 服务端哈希：SHA-256。
+	digest := sha256.Sum256(data)
+
+	return crypto.Sign(privKey, digest[:])
 }
 
-// signSM2 SM2 签名（需 -tags gmsm）。
-func signSM2(privKeyDER []byte, data []byte) ([]byte, error) {
-	_ = privKeyDER
-	_ = data
-	return nil, fmt.Errorf("service: SM2 sign requires -tags gmsm")
-}
-
-// verifyAsymmetric 验签。
+// verifyAsymmetric 验签（RSA-PSS / ECDSA / SM2 路由）。
+// pubKeyPEM: PEM 编码的公钥。
+// data: 原始数据（函数内部做哈希）。
+// keyType: "rsa" / "ecdsa" / "sm2"。
 func verifyAsymmetric(pubKeyPEM []byte, data, signature []byte, keyType string) (bool, error) {
-	_ = pubKeyPEM
-	_ = data
-	_ = signature
-	_ = keyType
-	// 解析公钥 + 验签。
-	return false, fmt.Errorf("service: verify asymmetric not fully implemented for %s", keyType)
+	switch keyType {
+	case crypto.KeyTypeSM2:
+		return verifySM2Key(pubKeyPEM, data, signature)
+	case crypto.KeyTypeRSA, crypto.KeyTypeECDSA:
+		// RSA/ECDSA 路径。
+		pubKey, err := crypto.ParsePublicKeyFromPEM(pubKeyPEM)
+		if err != nil {
+			return false, fmt.Errorf("service: parse public key: %w", err)
+		}
+		digest := sha256.Sum256(data)
+		if err := crypto.Verify(pubKey, digest[:], signature); err != nil {
+			// 验签失败不返回 error，返回 valid=false。
+			return false, nil
+		}
+		return true, nil
+	default:
+		return false, fmt.Errorf("service: unsupported key type %q", keyType)
+	}
 }
 
 // 确保 crypto 包被引用。
