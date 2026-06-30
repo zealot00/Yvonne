@@ -51,7 +51,12 @@ func newE2EPGEnvV13(t *testing.T) *e2ePGEnvV13 {
 		t.Fatalf("NewPostgresKVStore: %v", err)
 	}
 	store.Pool().Exec(ctx, "TRUNCATE yvonne_kv_str")
+	closed := false
 	t.Cleanup(func() {
+		if closed {
+			return
+		}
+		closed = true
 		store.Pool().Exec(ctx, "TRUNCATE yvonne_kv_str")
 		store.Close(ctx)
 	})
@@ -96,6 +101,8 @@ func adminCtx() context.Context {
 
 // TestE2E_PG_V13_SignVerify RSA 签名验签 PG 后端 E2E。
 func TestE2E_PG_V13_SignVerify(t *testing.T) {
+	pgTestMu.Lock()
+	defer pgTestMu.Unlock()
 	env := newE2EPGEnvV13(t)
 	ctx := context.Background()
 	kek := seal.NewSoftwareKEK(env.mk)
@@ -143,7 +150,6 @@ func TestE2E_PG_V13_SignVerify(t *testing.T) {
 	t.Log("✅ PG Verify RSA: valid=true")
 
 	// PG 持久化验证——重启后密钥仍在。
-	env.store.Close(ctx)
 	store2, _ := storage.NewPostgresKVStore(ctx, os.Getenv("YVONNE_TEST_PG_DSN"))
 	defer store2.Close(ctx)
 	mgr2 := lifecycle.NewManager(store2)
@@ -159,6 +165,8 @@ func TestE2E_PG_V13_SignVerify(t *testing.T) {
 
 // TestE2E_PG_V13_Mac HMAC 生成+验证 PG 后端 E2E。
 func TestE2E_PG_V13_Mac(t *testing.T) {
+	pgTestMu.Lock()
+	defer pgTestMu.Unlock()
 	env := newE2EPGEnvV13(t)
 	ctx := context.Background()
 	kek := seal.NewSoftwareKEK(env.mk)
@@ -204,6 +212,8 @@ func TestE2E_PG_V13_Mac(t *testing.T) {
 
 // TestE2E_PG_V13_ReEncrypt 跨密钥重加密 PG 后端 E2E。
 func TestE2E_PG_V13_ReEncrypt(t *testing.T) {
+	pgTestMu.Lock()
+	defer pgTestMu.Unlock()
 	env := newE2EPGEnvV13(t)
 	ctx := context.Background()
 	kek := seal.NewSoftwareKEK(env.mk)
@@ -255,6 +265,8 @@ func TestE2E_PG_V13_ReEncrypt(t *testing.T) {
 
 // TestE2E_PG_V13_MFA MFA 完整流程 PG 后端 E2E。
 func TestE2E_PG_V13_MFA(t *testing.T) {
+	pgTestMu.Lock()
+	defer pgTestMu.Unlock()
 	env := newE2EPGEnvV13(t)
 
 	// Setup MFA。
@@ -298,6 +310,8 @@ func TestE2E_PG_V13_MFA(t *testing.T) {
 
 // TestE2E_PG_V13_Quorum Quorum 审批 PG 后端 E2E。
 func TestE2E_PG_V13_Quorum(t *testing.T) {
+	pgTestMu.Lock()
+	defer pgTestMu.Unlock()
 	env := newE2EPGEnvV13(t)
 
 	// 创建 2-of-3 审批。
@@ -356,6 +370,8 @@ func TestE2E_PG_V13_Quorum(t *testing.T) {
 
 // TestE2E_PG_V13_Persistence PG 持久化验证——重启后密钥仍可用。
 func TestE2E_PG_V13_Persistence(t *testing.T) {
+	pgTestMu.Lock()
+	defer pgTestMu.Unlock()
 	env := newE2EPGEnvV13(t)
 	ctx := context.Background()
 	kek := seal.NewSoftwareKEK(env.mk)
@@ -367,7 +383,6 @@ func TestE2E_PG_V13_Persistence(t *testing.T) {
 	})
 
 	// 关闭 PG store + 重新打开（模拟重启）。
-	env.store.Close(ctx)
 	store2, _ := storage.NewPostgresKVStore(ctx, os.Getenv("YVONNE_TEST_PG_DSN"))
 	defer store2.Close(ctx)
 	mgr2 := lifecycle.NewManager(store2)
@@ -397,6 +412,8 @@ func TestE2E_PG_V13_Persistence(t *testing.T) {
 
 // TestE2E_PG_V13_GetPublicKey GetPublicKey PG 后端 E2E。
 func TestE2E_PG_V13_GetPublicKey(t *testing.T) {
+	pgTestMu.Lock()
+	defer pgTestMu.Unlock()
 	env := newE2EPGEnvV13(t)
 	kek := seal.NewSoftwareKEK(env.mk)
 	env.mgr.CreateAsymmetricKey(context.Background(), "pg-pubkey-v13", "ecdsa", kek)

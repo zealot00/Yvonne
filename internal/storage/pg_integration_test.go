@@ -129,7 +129,7 @@ func TestPG_PutOverwrite(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	key := "test:overwrite"
+	key := "test:overwrite:unique:001"
 	store.Put(ctx, key, []byte("v1"))
 	store.Put(ctx, key, []byte("v2"))
 

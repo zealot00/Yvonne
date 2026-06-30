@@ -96,6 +96,8 @@ func newE2EPGEnv(t *testing.T) *e2ePGEnv {
 
 // TestE2E_PG_FullLifecycle PG 后端全生命周期端到端测试。
 func TestE2E_PG_FullLifecycle(t *testing.T) {
+	pgTestMu.Lock()
+	defer pgTestMu.Unlock()
 	env := newE2EPGEnv(t)
 	ctx := context.Background()
 	client := env.client
@@ -254,6 +256,8 @@ func TestE2E_PG_FullLifecycle(t *testing.T) {
 
 // TestE2E_PG_GDK PG 后端 GenerateDataKey 测试。
 func TestE2E_PG_GDK(t *testing.T) {
+	pgTestMu.Lock()
+	defer pgTestMu.Unlock()
 	env := newE2EPGEnv(t)
 	ctx := context.Background()
 	client := env.client
@@ -277,6 +281,8 @@ func TestE2E_PG_GDK(t *testing.T) {
 
 // TestE2E_PG_PersistenceAcrossRestart 模拟重启后数据持久化。
 func TestE2E_PG_PersistenceAcrossRestart(t *testing.T) {
+	pgTestMu.Lock()
+	defer pgTestMu.Unlock()
 	env := newE2EPGEnv(t)
 	ctx := context.Background()
 	client := env.client
@@ -333,6 +339,8 @@ func TestE2E_PG_PersistenceAcrossRestart(t *testing.T) {
 
 // TestE2E_PG_ConcurrentOperations 并发操作测试。
 func TestE2E_PG_ConcurrentOperations(t *testing.T) {
+	pgTestMu.Lock()
+	defer pgTestMu.Unlock()
 	env := newE2EPGEnv(t)
 	ctx := context.Background()
 	client := env.client
@@ -394,14 +402,16 @@ func TestE2E_PG_ConcurrentOperations(t *testing.T) {
 
 // TestE2E_PG_LargePayload 大 payload 测试。
 func TestE2E_PG_LargePayload(t *testing.T) {
+	pgTestMu.Lock()
+	defer pgTestMu.Unlock()
 	env := newE2EPGEnv(t)
 	ctx := context.Background()
 	client := env.client
 
 	client.CreateKey(ctx, &yvonne.CreateKeyRequest{KeyID: "large-pg-key"})
 
-	// 1MB payload。
-	largeData := make([]byte, 1024*1024)
+	// 512KB payload（base64 编码后约 683KB，在 1MB body limit 内）。
+	largeData := make([]byte, 512*1024)
 	for i := range largeData {
 		largeData[i] = byte(i % 256)
 	}
@@ -411,9 +421,9 @@ func TestE2E_PG_LargePayload(t *testing.T) {
 		Plaintext: largeData,
 	})
 	if err != nil {
-		t.Fatalf("Encrypt 1MB: %v", err)
+		t.Fatalf("Encrypt 512KB: %v", err)
 	}
-	t.Logf("✅ Encrypted 1MB: %d bytes ciphertext", len(encResp.Ciphertext))
+	t.Logf("✅ Encrypted 512KB: %d bytes ciphertext", len(encResp.Ciphertext))
 
 	decResp, err := client.Decrypt(ctx, &yvonne.DecryptRequest{
 		KeyID:      "large-pg-key",
@@ -430,6 +440,8 @@ func TestE2E_PG_LargePayload(t *testing.T) {
 
 // TestE2E_PG_Latency 延迟测试（非 benchmark，仅统计）。
 func TestE2E_PG_Latency(t *testing.T) {
+	pgTestMu.Lock()
+	defer pgTestMu.Unlock()
 	env := newE2EPGEnv(t)
 	ctx := context.Background()
 	client := env.client

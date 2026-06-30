@@ -63,7 +63,12 @@ func newClusterEnv(t *testing.T, threshold, total int) *clusterEnv {
 		t.Fatalf("NewPostgresKVStore: %v", err)
 	}
 	store.Pool().Exec(ctx, "TRUNCATE yvonne_kv_str")
+	closed := false
 	t.Cleanup(func() {
+		if closed {
+			return
+		}
+		closed = true
 		store.Pool().Exec(ctx, "TRUNCATE yvonne_kv_str")
 		store.Close(ctx)
 	})
@@ -141,6 +146,8 @@ func (e *clusterEnv) unseal(t *testing.T) {
 
 // TestE2E_Cluster_ShamirUnseal Shamir 分片解封完整流程。
 func TestE2E_Cluster_ShamirUnseal(t *testing.T) {
+	pgTestMu.Lock()
+	defer pgTestMu.Unlock()
 	env := newClusterEnv(t, 2, 3)
 
 	// 1. 初始状态 sealed → API 拒绝。
@@ -203,6 +210,8 @@ func TestE2E_Cluster_ShamirUnseal(t *testing.T) {
 
 // TestE2E_Cluster_AppRoleAuth 真实 AppRole Bearer Token 认证。
 func TestE2E_Cluster_AppRoleAuth(t *testing.T) {
+	pgTestMu.Lock()
+	defer pgTestMu.Unlock()
 	env := newClusterEnv(t, 2, 3)
 	env.unseal(t)
 	env.vault.DirectUnseal(env.mk)
@@ -241,6 +250,8 @@ func TestE2E_Cluster_AppRoleAuth(t *testing.T) {
 
 // TestE2E_Cluster_RBAC RBAC 资源级授权。
 func TestE2E_Cluster_RBAC(t *testing.T) {
+	pgTestMu.Lock()
+	defer pgTestMu.Unlock()
 	env := newClusterEnv(t, 2, 3)
 	env.unseal(t)
 	env.vault.DirectUnseal(env.mk)
@@ -272,6 +283,8 @@ func TestE2E_Cluster_RBAC(t *testing.T) {
 
 // TestE2E_Cluster_ShamirThreshold3 3-of-5 Shamir 解封。
 func TestE2E_Cluster_ShamirThreshold3(t *testing.T) {
+	pgTestMu.Lock()
+	defer pgTestMu.Unlock()
 	env := newClusterEnv(t, 3, 5)
 
 	// 提交 2 个分片 → 仍 sealed（需 3 个）。
@@ -303,6 +316,8 @@ func TestE2E_Cluster_ShamirThreshold3(t *testing.T) {
 
 // TestE2E_Cluster_PersistenceWithShamir 重启后 Shamir 重新解封 + 数据持久化。
 func TestE2E_Cluster_PersistenceWithShamir(t *testing.T) {
+	pgTestMu.Lock()
+	defer pgTestMu.Unlock()
 	env := newClusterEnv(t, 2, 3)
 	env.unseal(t)
 	env.vault.DirectUnseal(env.mk)
@@ -315,7 +330,7 @@ func TestE2E_Cluster_PersistenceWithShamir(t *testing.T) {
 	})
 
 	// 模拟重启：新 vault（sealed）+ 新 manager（同一 PG）。
-	env.store.Close(ctx)
+	// 不关闭 env.store（让 t.Cleanup 处理），用新连接读同一 PG。
 	store2, _ := storage.NewPostgresKVStore(ctx, os.Getenv("YVONNE_TEST_PG_DSN"))
 	defer store2.Close(ctx)
 	mgr2 := lifecycle.NewManager(store2)
@@ -362,6 +377,8 @@ func TestE2E_Cluster_PersistenceWithShamir(t *testing.T) {
 
 // TestE2E_Cluster_FullAPI 全功能 API 测试（Cluster 模式 + 真实认证）。
 func TestE2E_Cluster_FullAPI(t *testing.T) {
+	pgTestMu.Lock()
+	defer pgTestMu.Unlock()
 	env := newClusterEnv(t, 2, 3)
 	env.unseal(t)
 	env.vault.DirectUnseal(env.mk)
