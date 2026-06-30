@@ -8,10 +8,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
-- v1.2.2: Sign/Verify 完整实现 + ReEncrypt 完整实现
 - v1.3: 合规深化（MFA + 双人控制 + RFC 8998 + OpenTelemetry）
 - v2.0: 企业级（多租户 + Web 控制台 + KMIP + Vault 兼容）
 - 详见 [docs/roadmap.md](docs/roadmap.md)
+
+## [1.2.2] - 2026-06-30 (Sign/Verify + ReEncrypt 完整实现)
+
+### Added
+- **Sign / Verify API 完整实现** — RSA-PSS / ECDSA / SM2 签名与验签
+  - `POST /api/v1/sign` — 服务端哈希（RSA/ECDSA 用 SHA-256，SM2 用 SM3）
+  - `POST /api/v1/verify` — 验签往返
+  - RSA-4096 PSS 填充（非 PKCS#1 v1.5）
+  - ECDSA P-256 曲线
+  - SM2 完整链路（gmsm 构建标签）
+- **ReEncrypt API 完整实现** — KMS 内重加密
+  - `POST /api/v1/re-encrypt` — 解密源密钥 + 用目标密钥重新加密
+- **非对称密钥创建 API** — 新端点
+  - `POST /api/v1/keys/asymmetric` — 创建 RSA/ECDSA/SM2 密钥，返回公钥
+- **SM2 全链路接入**
+  - `CreateAsymmetricKey` 支持 SM2（gmsm 标签隔离）
+  - `signSM2` / `verifySM2Key` 实现
+  - 非 gmsm 构建返回明确错误
+- **KeyType 常量补全** — `KeyTypeSM2` / `KeyTypeSM4`
+
+### Changed
+- `V1Router` 新增 `core *service.Core` 字段，注入 `service.NewCore`
+- `writeAPIError` 统一 service error → HTTP 状态码映射（404/403/503/400）
+
+### Security
+- gosec 0 issues（21 #nosec annotations）
+- govulncheck 0 vulnerabilities
+
+### Tests
+- **service 层**: 7 个 Sign/Verify 单元测试（RSA/ECDSA/SM2 + 错误路径）
+- **API 层**: 14 个集成测试（Sign/Verify 往返 + ReEncrypt + 非对称密钥创建 + SM2）
+- **E2E**: 24 项二进制全流程测试（回归 + v1.2.2 新功能）
+- **CI**: 17 packages PASS（标准 + gmsm 构建）
+
+### Files Changed
+- `internal/crypto/asymmetric.go` — KeyTypeSM2/SM4 常量
+- `internal/crypto/sm2_asymmetric.go` — GenerateSM2AsymmetricKey (gmsm)
+- `internal/crypto/sm2_asymmetric_stub.go` — 非 gmsm stub
+- `internal/lifecycle/manager.go` — CreateAsymmetricKey 接受 SM2
+- `internal/lifecycle/manager_sm2.go` — createSM2Key (gmsm)
+- `internal/lifecycle/manager_sm2_stub.go` — 非 gmsm stub
+- `internal/service/core_v12.go` — signAsymmetric/verifyAsymmetric 实现
+- `internal/service/core_v12_sm2.go` — signSM2/verifySM2Key (gmsm)
+- `internal/service/core_v12_sm2_stub.go` — 非 gmsm stub
+- `internal/api/handler_v12.go` — Sign/Verify/ReEncrypt handler 连线
+- `internal/api/handler_keys.go` — handleCreateAsymmetricKey
+- `internal/api/v1_router.go` — Core 注入 + 路由注册
+- `internal/api/helpers.go` — writeAPIError
 
 ## [1.2.1] - 2026-06-29 (安全加固版)
 

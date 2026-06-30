@@ -5,4 +5,4 @@
 package version
 
 // Version 是当前 Yvonne KMS 版本号。
-const Version = "1.2.1"
+const Version = "1.2.2"

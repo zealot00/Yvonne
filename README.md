@@ -119,7 +119,7 @@ bash scripts/security-check.sh  # 12 security checks
 - [x] SM2/SM3/SM4 国密闭环 + JWT SM2 + HMAC-SM3 审计链 (v1.1)
 - [x] HMAC API + GenerateDataKeyWithoutPlaintext + GetPublicKey (v1.2)
 - [x] CORS support + security hardening (gosec 0 issues, govulncheck 0 vulns) (v1.2.1)
-- [ ] Sign / Verify 完整实现 + ReEncrypt (v1.2.2)
+- [x] Sign / Verify 完整实现 + ReEncrypt + 非对称密钥创建 API (v1.2.2)
 - [ ] MFA + Dual Control + Quorum Approval (v1.3)
 - [ ] RFC 8998 国密 TLS + OpenTelemetry (v1.3)
 - [ ] TPM 2.0 support — hardware-bound CMK unseal
@@ -215,7 +215,7 @@ bash scripts/security-check.sh  # 12 项安全检查
 - [x] SM2/SM3/SM4 国密闭环 + JWT SM2 + HMAC-SM3 审计链 (v1.1)
 - [x] HMAC API + GenerateDataKeyWithoutPlaintext + GetPublicKey (v1.2)
 - [x] CORS 支持 + 安全加固 (gosec 0 issues, govulncheck 0 vulns) (v1.2.1)
-- [ ] Sign / Verify 完整实现 + ReEncrypt (v1.2.2)
+- [x] Sign / Verify 完整实现 + ReEncrypt + 非对称密钥创建 API (v1.2.2)
 - [ ] MFA + 双人控制 + Quorum 审批 (v1.3)
 - [ ] RFC 8998 国密 TLS + OpenTelemetry (v1.3)
 - [ ] TPM 2.0 支持 — 硬件绑定 CMK 解封
