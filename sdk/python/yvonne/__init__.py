@@ -143,3 +143,78 @@ class YvonneClient:
             "wrapped_material": wrapped_material_b64,
         }
         return self._request("POST", "/api/v1/keys/import", body)
+
+    # === v1.2: 签名 / 验签 / MAC ===
+
+    def sign(self, key_id: str, data: bytes) -> Dict:
+        """非对称签名。"""
+        body = {"key_id": key_id, "data": base64.b64encode(data).decode()}
+        return self._request("POST", "/api/v1/sign", body)
+
+    def verify(self, key_id: str, data: bytes, signature_b64: str) -> Dict:
+        """验签。"""
+        body = {"key_id": key_id, "data": base64.b64encode(data).decode(), "signature": signature_b64}
+        return self._request("POST", "/api/v1/verify", body)
+
+    def generate_mac(self, key_id: str, data: bytes) -> Dict:
+        """生成 HMAC。"""
+        body = {"key_id": key_id, "data": base64.b64encode(data).decode()}
+        return self._request("POST", "/api/v1/mac/generate", body)
+
+    def verify_mac(self, key_id: str, data: bytes, mac_b64: str) -> Dict:
+        """验证 HMAC。"""
+        body = {"key_id": key_id, "data": base64.b64encode(data).decode(), "mac": mac_b64}
+        return self._request("POST", "/api/v1/mac/verify", body)
+
+    def re_encrypt(self, source_key_id: str, dest_key_id: str, ciphertext_b64: str) -> Dict:
+        """KMS 内重加密。"""
+        body = {"source_key_id": source_key_id, "dest_key_id": dest_key_id, "ciphertext": ciphertext_b64}
+        return self._request("POST", "/api/v1/re-encrypt", body)
+
+    def create_asymmetric_key(self, key_id: str, key_type: str = "rsa") -> Dict:
+        """创建非对称密钥（rsa/ecdsa/sm2）。"""
+        body = {"key_id": key_id, "key_type": key_type}
+        return self._request("POST", "/api/v1/keys/asymmetric", body)
+
+    def get_public_key(self, key_id: str) -> Dict:
+        """获取非对称密钥公钥。"""
+        return self._request("GET", f"/api/v1/keys/public-key?key_id={key_id}")
+
+    def generate_data_key_without_plaintext(self, key_id: str) -> Dict:
+        """生成无明文 DEK（仅返回密文）。"""
+        return self._request("POST", f"/api/v1/keys/gdk-no-plaintext?key_id={key_id}")
+
+    # === v1.3: MFA / Quorum ===
+
+    def mfa_setup(self, role_id: str) -> Dict:
+        """MFA TOTP 注册（返回 secret + QR code URI）。"""
+        return self._request("POST", "/api/v1/auth/mfa/setup", {"role_id": role_id})
+
+    def mfa_verify(self, role_id: str, code: str) -> Dict:
+        """MFA TOTP 验证 + 启用。"""
+        return self._request("POST", "/api/v1/auth/mfa/verify", {"role_id": role_id, "code": code})
+
+    def mfa_disable(self, role_id: str, code: str) -> Dict:
+        """禁用 MFA（需验证当前 code）。"""
+        return self._request("POST", "/api/v1/auth/mfa/disable", {"role_id": role_id, "code": code})
+
+    def create_approval(self, operation: str, key_id: str = "", required: int = 2, ttl_hours: int = 24) -> Dict:
+        """创建 Quorum 审批 ticket。"""
+        body = {"operation": operation, "key_id": key_id, "required": required, "ttl_hours": ttl_hours}
+        return self._request("POST", "/api/v1/approvals", body)
+
+    def get_approval(self, ticket_id: str) -> Dict:
+        """查询审批 ticket。"""
+        return self._request("GET", f"/api/v1/approvals?id={ticket_id}")
+
+    def list_approvals(self) -> Dict:
+        """列出 pending 审批。"""
+        return self._request("GET", "/api/v1/approvals")
+
+    def approve_ticket(self, ticket_id: str) -> Dict:
+        """审批通过。"""
+        return self._request("POST", "/api/v1/approvals/approve", {"ticket_id": ticket_id})
+
+    def reject_ticket(self, ticket_id: str) -> Dict:
+        """审批拒绝。"""
+        return self._request("POST", "/api/v1/approvals/reject", {"ticket_id": ticket_id})

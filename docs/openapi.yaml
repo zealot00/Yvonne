@@ -457,6 +457,384 @@ paths:
                         items:
                           $ref: '#/components/schemas/AuditEntry'
 
+  # === v1.2 API ===
+
+  /api/v1/sign:
+    post:
+      tags: [Crypto]
+      summary: Sign data with asymmetric key
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key_id, data]
+              properties:
+                key_id: { type: string }
+                data: { type: string, format: byte, description: base64-encoded data }
+      responses:
+        '200':
+          description: Signature created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      signature: { type: string, format: byte }
+                      version: { type: integer }
+
+  /api/v1/verify:
+    post:
+      tags: [Crypto]
+      summary: Verify signature
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key_id, data, signature]
+              properties:
+                key_id: { type: string }
+                data: { type: string, format: byte }
+                signature: { type: string, format: byte }
+      responses:
+        '200':
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      valid: { type: boolean }
+                      version: { type: integer }
+
+  /api/v1/mac/generate:
+    post:
+      tags: [Crypto]
+      summary: Generate HMAC
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key_id, data]
+              properties:
+                key_id: { type: string }
+                data: { type: string, format: byte }
+      responses:
+        '200':
+          description: MAC generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      mac: { type: string, format: byte }
+                      version: { type: integer }
+
+  /api/v1/mac/verify:
+    post:
+      tags: [Crypto]
+      summary: Verify HMAC
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key_id, data, mac]
+              properties:
+                key_id: { type: string }
+                data: { type: string, format: byte }
+                mac: { type: string, format: byte }
+      responses:
+        '200':
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      valid: { type: boolean }
+                      version: { type: integer }
+
+  /api/v1/re-encrypt:
+    post:
+      tags: [Crypto]
+      summary: Re-encrypt data with a different key
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_key_id, dest_key_id, ciphertext]
+              properties:
+                source_key_id: { type: string }
+                dest_key_id: { type: string }
+                ciphertext: { type: string, format: byte }
+      responses:
+        '200':
+          description: Re-encrypted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      ciphertext: { type: string, format: byte }
+                      version: { type: integer }
+                      source_key_id: { type: string }
+                      dest_key_id: { type: string }
+
+  /api/v1/keys/asymmetric:
+    post:
+      tags: [Keys]
+      summary: Create asymmetric key (RSA/ECDSA/SM2)
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key_id, key_type]
+              properties:
+                key_id: { type: string }
+                key_type: { type: string, enum: [rsa, ecdsa, sm2] }
+      responses:
+        '200':
+          description: Key created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      key_id: { type: string }
+                      version: { type: integer }
+                      key_type: { type: string }
+                      public_key: { type: string, format: byte }
+
+  /api/v1/keys/gdk-no-plaintext:
+    post:
+      tags: [Keys]
+      summary: Generate data key without plaintext (ciphertext-only DEK)
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: key_id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Ciphertext DEK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      ciphertext: { type: string, format: byte }
+
+  /api/v1/keys/public-key:
+    get:
+      tags: [Keys]
+      summary: Get public key of asymmetric key
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: key_id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Public key
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      public_key: { type: string, format: byte }
+                      version: { type: integer }
+
+  # === v1.3 API ===
+
+  /api/v1/auth/mfa/setup:
+    post:
+      tags: [Auth]
+      summary: Setup MFA TOTP
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role_id]
+              properties:
+                role_id: { type: string }
+      responses:
+        '200':
+          description: TOTP secret + QR code URI
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      secret: { type: string }
+                      uri: { type: string }
+                      issuer: { type: string }
+                      account: { type: string }
+
+  /api/v1/auth/mfa/verify:
+    post:
+      tags: [Auth]
+      summary: Verify TOTP code and enable MFA
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role_id, code]
+              properties:
+                role_id: { type: string }
+                code: { type: string, description: "6-digit TOTP code" }
+      responses:
+        '200':
+          description: MFA enabled
+
+  /api/v1/auth/mfa/disable:
+    post:
+      tags: [Auth]
+      summary: Disable MFA (requires current TOTP code)
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role_id, code]
+              properties:
+                role_id: { type: string }
+                code: { type: string }
+      responses:
+        '200':
+          description: MFA disabled
+
+  /api/v1/approvals:
+    post:
+      tags: [Quorum]
+      summary: Create approval ticket
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [operation, required]
+              properties:
+                operation: { type: string }
+                key_id: { type: string }
+                required: { type: integer, description: "K (quorum threshold)" }
+                ttl_hours: { type: integer, default: 24 }
+      responses:
+        '200':
+          description: Ticket created
+    get:
+      tags: [Quorum]
+      summary: List pending approvals or get by ID
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Approval list or single ticket
+
+  /api/v1/approvals/approve:
+    post:
+      tags: [Quorum]
+      summary: Approve a ticket
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ticket_id]
+              properties:
+                ticket_id: { type: string }
+      responses:
+        '200':
+          description: Ticket updated
+
+  /api/v1/approvals/reject:
+    post:
+      tags: [Quorum]
+      summary: Reject a ticket
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ticket_id]
+              properties:
+                ticket_id: { type: string }
+      responses:
+        '200':
+          description: Ticket rejected
+
 components:
   securitySchemes:
     BearerAuth:
