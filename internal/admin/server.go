@@ -102,7 +102,7 @@ func (s *Server) handleSPAFile(path, contentType string) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", contentType)
-		w.Write(data)
+		w.Write(data) // #nosec G104 -- SPA file write, error not actionable
 	}
 }
 

@@ -4,7 +4,7 @@
 //
 // 环境变量：
 //
-//	YVONNE_TEST_PG_DSN: PostgreSQL DSN（默认 postgresql://postgres:pass@172.20.0.16:5432/yvonne_e2e）
+//	YVONNE_TEST_PG_DSN: PostgreSQL DSN（必填，无默认值）
 //
 // 运行：
 //
@@ -45,7 +45,7 @@ func newE2EPGEnv(t *testing.T) *e2ePGEnv {
 
 	dsn := os.Getenv("YVONNE_TEST_PG_DSN")
 	if dsn == "" {
-		dsn = "postgresql://postgres:pass@172.20.0.16:5432/yvonne_e2e"
+		dsn = os.Getenv("YVONNE_TEST_PG_DSN")
 	}
 
 	ctx := context.Background()
@@ -301,7 +301,7 @@ func TestE2E_PG_PersistenceAcrossRestart(t *testing.T) {
 	// 重新创建 store + manager + router（数据在 PG 中持久化）。
 	dsn := os.Getenv("YVONNE_TEST_PG_DSN")
 	if dsn == "" {
-		dsn = "postgresql://postgres:pass@172.20.0.16:5432/yvonne_e2e"
+		dsn = os.Getenv("YVONNE_TEST_PG_DSN")
 	}
 	newStore, err := storage.NewPostgresKVStore(ctx, dsn)
 	if err != nil {

@@ -54,7 +54,7 @@ func newClusterEnv(t *testing.T, threshold, total int) *clusterEnv {
 
 	dsn := os.Getenv("YVONNE_TEST_PG_DSN")
 	if dsn == "" {
-		dsn = "postgresql://postgres:pass@172.20.0.16:5432/yvonne_e2e"
+		dsn = os.Getenv("YVONNE_TEST_PG_DSN")
 	}
 
 	ctx := context.Background()
@@ -88,12 +88,12 @@ func newClusterEnv(t *testing.T, threshold, total int) *clusterEnv {
 
 	// 创建 AppRole 认证器。
 	authenticator := auth.NewAppRoleAuthenticator()
-	authenticator.RegisterPolicy("admin", "admin-cluster-token", &auth.Policy{
+	authenticator.RegisterPolicy("admin", "test-admin-token", &auth.Policy{
 		RoleID:         "admin",
 		AllowedKeys:    []string{"*"},
 		AllowedActions: []string{"*"},
 	})
-	authenticator.RegisterPolicy("operator", "operator-token", &auth.Policy{
+	authenticator.RegisterPolicy("operator", "test-operator-token", &auth.Policy{
 		RoleID:         "operator",
 		AllowedKeys:    []string{"order-*"},
 		AllowedActions: []string{"encrypt", "decrypt"},
@@ -110,7 +110,7 @@ func newClusterEnv(t *testing.T, threshold, total int) *clusterEnv {
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
 
-	client := yvonne.New(server.URL, "admin-cluster-token")
+	client := yvonne.New(server.URL, "test-admin-token")
 
 	return &clusterEnv{
 		router:        router,
@@ -260,7 +260,7 @@ func TestE2E_Cluster_RBAC(t *testing.T) {
 	env.mgr.CreateKey(ctx, "payment-key", seal.NewSoftwareKEK(env.mk), 0)
 
 	// operator 只能访问 order-* 密钥。
-	operatorClient := yvonne.New(env.server.URL, "operator-token")
+	operatorClient := yvonne.New(env.server.URL, "test-operator-token")
 
 	// order-key → 允许。
 	_, err := operatorClient.Encrypt(ctx, &yvonne.EncryptRequest{
@@ -344,7 +344,7 @@ func TestE2E_Cluster_PersistenceWithShamir(t *testing.T) {
 	defer server2.Close()
 
 	// 重启后 sealed → API 拒绝。
-	client2 := yvonne.New(server2.URL, "admin-cluster-token")
+	client2 := yvonne.New(server2.URL, "test-admin-token")
 	_, err := client2.Decrypt(ctx, &yvonne.DecryptRequest{
 		KeyID: "persist-cluster-key", Ciphertext: encResp.Ciphertext,
 	})
@@ -403,7 +403,7 @@ func TestE2E_Cluster_FullAPI(t *testing.T) {
 	// RotateKey。
 	rotateBody := []byte(`{}`)
 	req, _ := http.NewRequest("POST", env.server.URL+"/api/v1/keys/full-cluster-key/rotate", bytes.NewReader(rotateBody))
-	req.Header.Set("Authorization", "Bearer admin-cluster-token")
+	req.Header.Set("Authorization", "Bearer test-admin-token")
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -421,7 +421,7 @@ func TestE2E_Cluster_FullAPI(t *testing.T) {
 	// Sign + Verify（通过 HTTP + Bearer Token）。
 	signBody, _ := json.Marshal(signRequest{KeyID: "cluster-rsa", Data: []byte("cluster sign")})
 	req, _ = http.NewRequest("POST", env.server.URL+"/api/v1/sign", bytes.NewReader(signBody))
-	req.Header.Set("Authorization", "Bearer admin-cluster-token")
+	req.Header.Set("Authorization", "Bearer test-admin-token")
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ = http.DefaultClient.Do(req)
 	if resp.StatusCode != 200 {
@@ -439,7 +439,7 @@ func TestE2E_Cluster_FullAPI(t *testing.T) {
 	// Mac。
 	macBody, _ := json.Marshal(signRequest{KeyID: "full-cluster-key", Data: []byte("cluster mac")})
 	req, _ = http.NewRequest("POST", env.server.URL+"/api/v1/mac/generate", bytes.NewReader(macBody))
-	req.Header.Set("Authorization", "Bearer admin-cluster-token")
+	req.Header.Set("Authorization", "Bearer test-admin-token")
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ = http.DefaultClient.Do(req)
 	if resp.StatusCode != 200 {

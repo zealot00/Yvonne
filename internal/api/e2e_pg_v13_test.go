@@ -42,7 +42,7 @@ func newE2EPGEnvV13(t *testing.T) *e2ePGEnvV13 {
 
 	dsn := os.Getenv("YVONNE_TEST_PG_DSN")
 	if dsn == "" {
-		dsn = "postgresql://postgres:pass@172.20.0.16:5432/yvonne_e2e"
+		dsn = os.Getenv("YVONNE_TEST_PG_DSN")
 	}
 
 	ctx := context.Background()

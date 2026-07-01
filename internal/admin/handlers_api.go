@@ -94,7 +94,7 @@ func (s *Server) handleAPIDashboard(w http.ResponseWriter, req *http.Request) {
 // writeJSON 写 JSON 响应。
 func writeJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
+	_ = json.NewEncoder(w).Encode(data) // #nosec G104 -- JSON encode write, error not actionable
 }
 
 // readBody 读取请求体。

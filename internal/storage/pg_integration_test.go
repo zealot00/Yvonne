@@ -4,7 +4,7 @@
 //
 // 环境变量：
 //
-//	YVONNE_TEST_PG_DSN: PostgreSQL DSN（默认 postgresql://postgres:pass@172.20.0.16:5432/yvonne_test）
+//	YVONNE_TEST_PG_DSN: PostgreSQL DSN（必填，无默认值）
 //
 // 运行：
 //
@@ -25,7 +25,7 @@ func testDSN(t testing.TB) string {
 	t.Helper()
 	dsn := os.Getenv("YVONNE_TEST_PG_DSN")
 	if dsn == "" {
-		dsn = "postgresql://postgres:pass@172.20.0.16:5432/yvonne_test"
+		dsn = os.Getenv("YVONNE_TEST_PG_DSN")
 	}
 	return dsn
 }

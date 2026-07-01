@@ -199,7 +199,7 @@ func TestPrintSummary_Shamir(t *testing.T) {
 }
 
 func TestRedactDSN_URL(t *testing.T) {
-	result := redactDSN("postgresql://postgres:secret@172.20.0.16:5432/yvonne")
+	result := redactDSN("postgresql://postgres:secret@localhost:5432/yvonne")
 	if contains(result, "secret") {
 		t.Fatal("password should be redacted")
 	}

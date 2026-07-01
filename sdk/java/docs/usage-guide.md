@@ -68,7 +68,7 @@ public class QuickStart {
 ```java
 YvonneClient client = YvonneClient.builder()
     .baseUrl("https://kms.internal:8200")
-    .token("admin-cluster-token")           // Bearer Token
+    .token("your-admin-token")           // Bearer Token
     .timeout(Duration.ofSeconds(30))         // 请求超时
     .retry(RetryConfig.defaultConfig())      // 重试（3 次 + 指数退避）
     .circuitBreaker(CircuitBreaker.defaultBreaker()) // 熔断器（10 次失败 + 60s 恢复）
@@ -292,7 +292,7 @@ public class FullExample {
         // 1. 创建带完整配置的客户端
         YvonneClient client = YvonneClient.builder()
             .baseUrl("https://kms.internal:8200")
-            .token("admin-cluster-token")
+            .token("your-admin-token")
             .timeout(Duration.ofSeconds(30))
             .retry(RetryConfig.defaultConfig())
             .circuitBreaker(CircuitBreaker.defaultBreaker())

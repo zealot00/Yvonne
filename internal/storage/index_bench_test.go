@@ -4,7 +4,7 @@
 //
 // 运行：
 //
-//	YVONNE_TEST_PG_DSN="postgresql://postgres:pass@172.20.0.16:5432/yvonne_bench" \
+//	YVONNE_TEST_PG_DSN="postgresql://postgres:${PG_PASSWORD}@${PG_HOST}:5432/yvonne_bench" \
 //	go test -tags=integration -bench BenchmarkIndex -benchmem -run=^$ -timeout 300s ./internal/storage/
 package storage
 
