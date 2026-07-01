@@ -25,9 +25,12 @@ import (
 
 // Client 是 Yvonne KMS 客户端。
 type Client struct {
-	baseURL string
-	token   string
-	http    *http.Client
+	baseURL        string
+	token          string
+	http           *http.Client
+	retryConfig    *RetryConfig
+	circuitBreaker *CircuitBreaker
+	traceIDHeader  string
 }
 
 // New 创建客户端。baseURL 不含尾斜杠（如 http://127.0.0.1:8400）。
@@ -245,6 +248,15 @@ func (c *Client) post(ctx context.Context, path string, body interface{}, out in
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body interface{}, out interface{}) error {
+	// v1.2: 如果配置了重试或熔断，走 doWithRetry。
+	if c.retryConfig != nil || c.circuitBreaker != nil {
+		return c.doWithRetry(ctx, method, path, body, out)
+	}
+	return c.doOnce(ctx, method, path, body, out)
+}
+
+// doOnce 执行单次请求（无重试）。
+func (c *Client) doOnce(ctx context.Context, method, path string, body interface{}, out interface{}) error {
 	var bodyReader io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -263,6 +275,14 @@ func (c *Client) do(ctx context.Context, method, path string, body interface{}, 
 	}
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	// v1.2: trace_id 透传。
+	if c.traceIDHeader != "" {
+		traceID, _ := ctx.Value(traceIDKey{}).(string)
+		if traceID != "" {
+			req.Header.Set(c.traceIDHeader, traceID)
+		}
 	}
 
 	resp, err := c.http.Do(req)

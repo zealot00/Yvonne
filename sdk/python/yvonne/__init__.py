@@ -29,16 +29,44 @@ class YvonneError(Exception):
 class YvonneClient:
     """Yvonne KMS 客户端。"""
 
-    def __init__(self, base_url: str, token: str = "", timeout: float = 30.0):
+    def __init__(
+        self,
+        base_url: str,
+        token: str = "",
+        timeout: float = 30.0,
+        max_retries: int = 0,
+        retry_backoff: float = 0.1,
+        circuit_breaker_threshold: int = 0,
+        circuit_breaker_reset: float = 60.0,
+        trace_id_header: str = "",
+    ):
         """
         Args:
             base_url: KMS 地址，如 http://127.0.0.1:8400
             token: Bearer Token（AppRole 或 JWT）。Dev 模式可留空。
             timeout: 请求超时（秒）。
+            max_retries: 最大重试次数（0=不重试）。
+            retry_backoff: 初始退避时间（秒，指数退避）。
+            circuit_breaker_threshold: 熔断阈值（连续失败次数，0=不熔断）。
+            circuit_breaker_reset: 熔断后恢复时间（秒）。
+            trace_id_header: trace_id 透传的 header 名（如 X-Request-ID）。
         """
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.timeout = timeout
+        self.max_retries = max_retries
+        self.retry_backoff = retry_backoff
+        self.trace_id_header = trace_id_header
+
+        # 熔断器状态。
+        self._cb_threshold = circuit_breaker_threshold
+        self._cb_reset = circuit_breaker_reset
+        self._cb_failures = 0
+        self._cb_opened_at = 0.0
+
+        # 可重试的 HTTP 状态码。
+        self._retryable_status = {502, 503, 504}
+
         self._session = requests.Session()
         if token:
             self._session.headers["Authorization"] = f"Bearer {token}"
@@ -46,14 +74,65 @@ class YvonneClient:
 
     def _request(self, method: str, path: str, body: Optional[Dict] = None) -> Dict:
         url = f"{self.base_url}{path}"
-        resp = self._session.request(method, url, json=body, timeout=self.timeout)
-        if resp.status_code >= 400:
+
+        # 生成/透传 trace_id。
+        headers = {}
+        if self.trace_id_header:
+            import uuid
+            headers[self.trace_id_header] = uuid.uuid4().hex
+
+        # 熔断检查。
+        if self._cb_threshold > 0 and self._cb_failures >= self._cb_threshold:
+            import time as _time
+            if _time.time() - self._cb_opened_at < self._cb_reset:
+                raise YvonneError(503, "circuit breaker is open")
+            # 半开状态：重置失败计数，允许尝试。
+            self._cb_failures = 0
+
+        # 重试循环。
+        import time as _time
+        last_err = None
+        for attempt in range(self.max_retries + 1):
+            if attempt > 0:
+                backoff = self.retry_backoff * (2 ** (attempt - 1))
+                _time.sleep(min(backoff, 5.0))
+
             try:
-                err = resp.json().get("error", resp.text)
-            except Exception:
-                err = resp.text
-            raise YvonneError(resp.status_code, err)
-        return resp.json()
+                resp = self._session.request(method, url, json=body, timeout=self.timeout, headers=headers)
+
+                if resp.status_code >= 400:
+                    try:
+                        err = resp.json().get("error", resp.text)
+                    except Exception:
+                        err = resp.text
+
+                    # 可重试的状态码。
+                    if resp.status_code in self._retryable_status and attempt < self.max_retries:
+                        last_err = YvonneError(resp.status_code, err)
+                        # 记录熔断失败。
+                        if self._cb_threshold > 0:
+                            self._cb_failures += 1
+                            if self._cb_failures >= self._cb_threshold:
+                                self._cb_opened_at = _time.time()
+                        continue
+                    raise YvonneError(resp.status_code, err)
+
+                # 成功：重置熔断器。
+                if self._cb_threshold > 0:
+                    self._cb_failures = 0
+                return resp.json()
+
+            except requests.ConnectionError as e:
+                if attempt < self.max_retries:
+                    last_err = YvonneError(0, str(e))
+                    if self._cb_threshold > 0:
+                        self._cb_failures += 1
+                        if self._cb_failures >= self._cb_threshold:
+                            self._cb_opened_at = _time.time()
+                    continue
+                raise YvonneError(0, str(e))
+
+        raise last_err or YvonneError(500, "max retries exceeded")
 
     # === 系统 ===
 
