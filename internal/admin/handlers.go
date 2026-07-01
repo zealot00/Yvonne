@@ -163,7 +163,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, req *http.Request) {
 		// 未匹配的路径回退到 index.html，供前端路由使用。
 		req.URL.Path = "/"
 	}
-	data, err := staticFS.ReadFile("web/static/index.html")
+	data, err := staticFS.ReadFile("web/index.html")
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

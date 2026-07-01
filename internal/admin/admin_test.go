@@ -220,7 +220,7 @@ func TestHandleIndex_MethodNotAllowed(t *testing.T) {
 func TestStaticAssets(t *testing.T) {
 	s := newTestAdminServer(t)
 
-	assets := []string{"/static/app.js", "/static/style.css"}
+	assets := []string{"/static/console.js", "/static/style.css"}
 	for _, path := range assets {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()

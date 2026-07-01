@@ -234,6 +234,7 @@ func buildDevMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, metrics
 	// 装配 Admin Web UI（Dev 模式默认启用，绑 127.0.0.1:8250）。
 	adminSrv := buildAdminServer(cfg, vault)
 	adminSrv.SetManager(lifecycleMgr) // P1: Admin UI 密钥列表
+	adminSrv.SetAPIHandler(v1Router)  // v1.3.1: Web 控制台 API 转发
 
 	// Core service 层（共享给 gRPC/MCP）。
 	core := service.NewManager(lifecycleMgr, vault, auditLog)
@@ -470,6 +471,8 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 
 	// 装配 Admin Web UI。
 	adminSrv := buildAdminServer(cfg, vault)
+	adminSrv.SetManager(lifecycleMgr)
+	adminSrv.SetAPIHandler(v1Router)
 
 	// 装配 RotationDaemon（Cluster 模式专用）。
 	// 使用 AdvisoryLocker 实现集群选主，确保只有一个节点执行轮转。

@@ -4,13 +4,123 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Yvonne KMS Console</title>
-    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-    <script src="https://unpkg.com/vue-router@4/dist/vue-router.global.prod.js"></script>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2/dist/tailwind.min.css" rel="stylesheet">
     <link href="/static/style.css" rel="stylesheet">
 </head>
-<body class="bg-gray-50 min-h-screen">
-    <div id="app"></div>
-    <script src="/app.js"></script>
+<body>
+    <nav>
+        <div class="nav-links">
+            <span class="nav-brand">Yvonne KMS</span>
+            <a id="nav-dashboard">Dashboard</a>
+            <a id="nav-keys">Keys</a>
+            <a id="nav-crypto">Crypto</a>
+            <a id="nav-audit">Audit</a>
+            <a id="nav-mfa">MFA &amp; Quorum</a>
+        </div>
+        <div class="nav-token">
+            <input id="tokenInput" type="password" placeholder="Bearer Token">
+        </div>
+    </nav>
+
+    <main>
+        <!-- Dashboard -->
+        <div id="page-dashboard" class="page">
+            <h2>Dashboard</h2>
+            <div class="grid grid-3">
+                <div class="card-sm">
+                    <div class="stat-label">Key Count</div>
+                    <div id="stat-keys" class="stat-value text-blue">-</div>
+                </div>
+                <div class="card-sm">
+                    <div class="stat-label">Vault State</div>
+                    <div id="stat-state" class="stat-value text-green">-</div>
+                </div>
+                <div class="card-sm">
+                    <div class="stat-label">Sealed</div>
+                    <div id="stat-sealed" class="stat-value text-green">-</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Keys -->
+        <div id="page-keys" class="page hidden">
+            <div class="flex-between">
+                <h2>Keys</h2>
+                <button id="btn-refresh-keys" class="btn btn-blue">Refresh</button>
+            </div>
+            <div id="keys-loading" class="text-gray">Click Refresh to load.</div>
+            <table id="keys-table" class="hidden">
+                <thead><tr><th>Key ID</th></tr></thead>
+                <tbody id="keys-body"></tbody>
+            </table>
+        </div>
+
+        <!-- Crypto -->
+        <div id="page-crypto" class="page hidden">
+            <h2>Crypto Tool</h2>
+            <div class="card">
+                <p class="text-gray text-sm mb-4">Encrypt / Decrypt test. Requires a valid Bearer Token with key access.</p>
+                <div>
+                    <label>Key ID</label>
+                    <input id="crypto-keyid" type="text" placeholder="key-id">
+                </div>
+                <div>
+                    <label>Plaintext (UTF-8)</label>
+                    <textarea id="crypto-data" rows="3" placeholder="data to encrypt"></textarea>
+                </div>
+                <div class="btn-gap">
+                    <button id="btn-encrypt" class="btn btn-green">Encrypt</button>
+                    <button id="btn-decrypt" class="btn btn-orange">Decrypt</button>
+                </div>
+                <div id="crypto-result" class="hidden mt-4">
+                    <pre id="crypto-output"></pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Audit -->
+        <div id="page-audit" class="page hidden">
+            <h2>Audit Log</h2>
+            <div id="audit-loading" class="text-gray">Loading...</div>
+            <table id="audit-table" class="hidden">
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Action</th>
+                        <th>Actor</th>
+                        <th>Result</th>
+                    </tr>
+                </thead>
+                <tbody id="audit-body"></tbody>
+            </table>
+        </div>
+
+        <!-- MFA & Quorum -->
+        <div id="page-mfa" class="page hidden">
+            <h2>MFA &amp; Quorum</h2>
+            <div class="grid grid-2">
+                <div class="card">
+                    <h3>MFA Status</h3>
+                    <p class="text-gray text-sm">Use the API endpoints to manage MFA:</p>
+                    <ul>
+                        <li>POST /api/v1/auth/mfa/setup</li>
+                        <li>POST /api/v1/auth/mfa/verify</li>
+                        <li>POST /api/v1/auth/mfa/disable</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>Quorum Approvals</h3>
+                    <p class="text-gray text-sm">Use the API endpoints to manage approvals:</p>
+                    <ul>
+                        <li>POST /api/v1/approvals</li>
+                        <li>GET /api/v1/approvals</li>
+                        <li>POST /api/v1/approvals/approve</li>
+                        <li>POST /api/v1/approvals/reject</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/static/console.js"></script>
 </body>
 </html>

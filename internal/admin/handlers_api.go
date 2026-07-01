@@ -1,26 +1,12 @@
 // Package admin — Web 控制台 REST API handlers。
-//
-// 提供密钥管理、密码运算、审计查看、MFA/Quorum 管理的 REST API。
-// 所有端点需 adminToken 认证。
 package admin
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
 )
-
-// adminAPIRequest 是通用请求体。
-type adminAPIRequest struct {
-	KeyID      string `json:"key_id,omitempty"`
-	KeyType    string `json:"key_type,omitempty"`
-	Data       []byte `json:"data,omitempty"`
-	Plaintext  []byte `json:"plaintext,omitempty"`
-	Ciphertext []byte `json:"ciphertext,omitempty"`
-	Signature  []byte `json:"signature,omitempty"`
-	Limit      int    `json:"limit,omitempty"`
-	Version    int    `json:"version,omitempty"`
-}
 
 // handleAPIKeys 列出密钥。
 func (s *Server) handleAPIKeys(w http.ResponseWriter, req *http.Request) {
@@ -31,36 +17,49 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, req *http.Request) {
 	s.handleListKeys(w, req)
 }
 
-// handleAPIEncrypt 加密测试。
+// handleAPIEncrypt 加密测试 — 代理转发到 V1Router。
 func (s *Server) handleAPIEncrypt(w http.ResponseWriter, req *http.Request) {
-	if req.Method != http.MethodPost {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
-		return
-	}
-	writeJSON(w, map[string]interface{}{
-		"ok":   true,
-		"data": map[string]interface{}{"message": "encrypt endpoint — connect to V1Router for actual crypto"},
-	})
+	s.proxyAPI(w, req, "/api/v1/encrypt")
 }
 
-// handleAPIDecrypt 解密测试。
+// handleAPIDecrypt 解密测试 — 代理转发到 V1Router。
 func (s *Server) handleAPIDecrypt(w http.ResponseWriter, req *http.Request) {
-	if req.Method != http.MethodPost {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	s.proxyAPI(w, req, "/api/v1/decrypt")
+}
+
+// proxyAPI 代理 API 请求到 V1Router。
+func (s *Server) proxyAPI(w http.ResponseWriter, req *http.Request, targetPath string) {
+	if s.apiHandler == nil {
+		writeJSON(w, map[string]interface{}{"ok": false, "error": "API handler not configured"})
 		return
 	}
-	writeJSON(w, map[string]interface{}{
-		"ok":   true,
-		"data": map[string]interface{}{"message": "decrypt endpoint — connect to V1Router for actual crypto"},
-	})
+
+	// 保存原始值，defer 恢复。
+	origPath := req.URL.Path
+	origMethod := req.Method
+	defer func() {
+		req.URL.Path = origPath
+		req.Method = origMethod
+	}()
+
+	// 设置为目标路径 + POST method。
+	req.URL.Path = targetPath
+	req.Method = http.MethodPost
+
+	// 重新读取 body（因为 body 可能已被读取过）。
+	if req.Body != nil {
+		bodyBytes, err := io.ReadAll(req.Body)
+		if err == nil {
+			req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			req.ContentLength = int64(len(bodyBytes))
+		}
+	}
+
+	s.apiHandler.ServeHTTP(w, req)
 }
 
 // handleAPIAudit 审计查询。
 func (s *Server) handleAPIAudit(w http.ResponseWriter, req *http.Request) {
-	if req.Method != http.MethodGet {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
-		return
-	}
 	writeJSON(w, map[string]interface{}{
 		"ok":   true,
 		"data": map[string]interface{}{"entries": []interface{}{}, "count": 0},
@@ -94,10 +93,5 @@ func (s *Server) handleAPIDashboard(w http.ResponseWriter, req *http.Request) {
 // writeJSON 写 JSON 响应。
 func writeJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(data) // #nosec G104 -- JSON encode write, error not actionable
-}
-
-// readBody 读取请求体。
-func readBody(req *http.Request) ([]byte, error) {
-	return io.ReadAll(req.Body)
+	_ = json.NewEncoder(w).Encode(data) // #nosec G104
 }

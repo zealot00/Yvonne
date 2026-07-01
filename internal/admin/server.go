@@ -22,7 +22,7 @@ import (
 	"yvonne/internal/seal"
 )
 
-//go:embed web/static/* web/index.html web/app.js
+//go:embed web/static/* web/index.html
 var staticFS embed.FS
 
 // 确保 context 包被引用。
@@ -34,6 +34,7 @@ type Server struct {
 	manager    keyLister // 可选：密钥列表查询
 	adminToken string
 	mux        *http.ServeMux
+	apiHandler http.Handler // 可选：V1Router 引用（转发 API 请求）
 }
 
 // keyLister 是 admin 查询密钥列表所需的最小接口。
@@ -63,6 +64,11 @@ func (s *Server) SetManager(mgr keyLister) {
 	s.manager = mgr
 }
 
+// SetAPIHandler 注入 V1Router 用于转发 API 请求（加密/解密等）。
+func (s *Server) SetAPIHandler(h http.Handler) {
+	s.apiHandler = h
+}
+
 func (s *Server) register() {
 	// 静态资源：/static/* 来自 embed.FS
 	// Go 1.21 ServeMux 不支持 "GET /path" 方法前缀，用 path 注册 + handler 内检查 Method。
@@ -71,9 +77,6 @@ func (s *Server) register() {
 		panic("admin: embed static fs: " + err.Error())
 	}
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticRoot))))
-
-	// v1.3.1: Vue SPA 资源。
-	s.mux.HandleFunc("/app.js", s.handleSPAFile("web/app.js", "application/javascript"))
 
 	// 页面路由：返回入口 HTML，由前端 JS 调用 /api/* 与 /sys/*。
 	s.mux.HandleFunc("/", s.handleIndex)
@@ -91,19 +94,6 @@ func (s *Server) register() {
 	// seal/unseal 需要认证（如果设置了 adminToken）。
 	s.mux.HandleFunc("/admin/api/seal", s.requireAdminToken(s.handleSeal))
 	s.mux.HandleFunc("/admin/api/unseal", s.requireAdminToken(s.handleUnseal))
-}
-
-// handleSPAFile 返回内嵌的 SPA 文件。
-func (s *Server) handleSPAFile(path, contentType string) http.HandlerFunc {
-	return func(w http.ResponseWriter, req *http.Request) {
-		data, err := staticFS.ReadFile(path)
-		if err != nil {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", contentType)
-		w.Write(data) // #nosec G104 -- SPA file write, error not actionable
-	}
 }
 
 // requireAdminToken 包装 handler，要求 Bearer Token 认证。
@@ -136,6 +126,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Referrer-Policy", "no-referrer")
+	// CSP：所有资源本地加载，无 CDN，无 unsafe-eval（纯原生 JS）。
 	w.Header().Set("Content-Security-Policy",
 		"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'")
 
