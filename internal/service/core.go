@@ -7,8 +7,11 @@ package service
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
+	"runtime"
 	"time"
 
 	"yvonne/internal/audit"
@@ -24,16 +27,32 @@ import (
 // 所有方法接收 *auth.Policy 做资源级授权（nil Policy = Dev 模式放行）。
 // 所有方法内置：Sealed 拦截 → 授权校验 → 业务调用 → 审计记录。
 // PG 断连时进入 degraded 模式：写操作拒绝，读操作用缓存。
+//
+// Bug-6 修复: KEK 解密失败（HSM 离线/MasterKey 损坏）触发 CRITICAL 告警。
 type Core struct {
 	manager    *lifecycle.Manager
 	seal       seal.Unsealer
 	auditLog   audit.Auditor
-	adminToken string // EmergencySeal 校验用
+	adminToken string  // EmergencySeal 校验用
+	alerter    Alerter // Bug-6: KEK 解密失败告警（nil = NoopAlerter）
+}
+
+// Alerter 是 service 层的告警接口（避免直接 import observability 包循环依赖）。
+// Bug-6 修复: KEK 解密失败等系统级危机触发告警。
+type Alerter interface {
+	Alert(ctx context.Context, operation, resource, description string) error
+}
+
+// noopAlerter 默认无操作告警器。
+type noopAlerter struct{}
+
+func (noopAlerter) Alert(ctx context.Context, operation, resource, description string) error {
+	return nil
 }
 
 // NewCore 创建 Core 实例（PD-9: 重命名为 NewCore，旧名保持兼容）。
 func NewCore(mgr *lifecycle.Manager, s seal.Unsealer, log audit.Auditor) *Core {
-	return &Core{manager: mgr, seal: s, auditLog: log}
+	return &Core{manager: mgr, seal: s, auditLog: log, alerter: noopAlerter{}}
 }
 
 // NewManager 别名（向后兼容，PD-9 建议用 NewCore）。
@@ -44,6 +63,17 @@ func NewManager(mgr *lifecycle.Manager, s seal.Unsealer, log audit.Auditor) *Cor
 // SetAdminToken 设置 EmergencySeal 用的 admin token（BUG-8 修复）。
 func (c *Core) SetAdminToken(token string) {
 	c.adminToken = token
+}
+
+// SetAlerter 注入告警器（Bug-6 修复）。
+// KEK 解密失败等系统级危机触发告警。
+// 不调用时默认 NoopAlerter（向后兼容）。
+func (c *Core) SetAlerter(a Alerter) {
+	if a == nil {
+		c.alerter = noopAlerter{}
+		return
+	}
+	c.alerter = a
 }
 
 // === 系统管理 ===
@@ -222,9 +252,42 @@ func (c *Core) RestoreKey(ctx context.Context, keyID string, version int, policy
 // === 数据密钥 ===
 
 // GenerateDataKeyResult 是 GenerateDataKey 的返回。
+//
+// Bug-7 修复: 明文 DEK 不再以 *memguard.SecureBuffer 直接暴露给调用方。
+// 调用方必须通过 WriteBase64To 方法写入响应，由 Core 内部控制 Wipe 时机，
+// 从接口设计上消除"Handler 遗漏 defer Wipe"的风险。
 type GenerateDataKeyResult struct {
-	PlaintextDEK *memguard.SecureBuffer
+	plaintextDEK *memguard.SecureBuffer // 私有，调用方无法直接访问
 	Ciphertext   []byte
+}
+
+// WriteBase64To 将明文 DEK 以 Base64 编码写入 w，写入完成后立即 Wipe 内部 SecureBuffer。
+//
+// Bug-7 修复: 受控暴露接口 — 调用方无法获取 SecureBuffer 引用，
+// Core 内部保证写入后立即擦除，从设计上消除内存逃逸风险。
+//
+// 注意: 此方法只能调用一次（Wipe 后 SecureBuffer 已清空）。
+// 重复调用返回 error（不 panic，便于调用方优雅处理）。
+func (r *GenerateDataKeyResult) WriteBase64To(w io.Writer) error {
+	if r == nil || r.plaintextDEK == nil {
+		return errors.New("service: plaintext DEK already wiped or nil")
+	}
+	if r.plaintextDEK.IsDestroyed() {
+		return errors.New("service: plaintext DEK already wiped")
+	}
+	defer r.plaintextDEK.Wipe()
+
+	return r.plaintextDEK.WithKey(func(dek []byte) error {
+		encoded := make([]byte, base64.StdEncoding.EncodedLen(len(dek)))
+		base64.StdEncoding.Encode(encoded, dek)
+		_, err := w.Write(encoded)
+		// 擦除编码缓冲。
+		for i := range encoded {
+			encoded[i] = 0
+		}
+		runtime.KeepAlive(encoded)
+		return err
+	})
 }
 
 // GenerateDataKey 生成数据密钥。
@@ -242,8 +305,9 @@ func (c *Core) GenerateDataKey(ctx context.Context, keyID string, policy *auth.P
 		if e != nil {
 			return e
 		}
+		// Bug-7 修复: plaintextDEK 作为私有字段存储，调用方通过 WriteBase64To 受控访问。
 		result = &GenerateDataKeyResult{
-			PlaintextDEK: plainDEK,
+			plaintextDEK: plainDEK,
 			Ciphertext:   ciphertext,
 		}
 		return nil
@@ -283,6 +347,9 @@ func (c *Core) Encrypt(ctx context.Context, keyID string, plaintext []byte, poli
 	err = c.seal.KEKRef(func(kek seal.KEK) error {
 		plaintextDEK, e := kek.UnwrapDEK(meta.EncryptedMaterial)
 		if e != nil {
+			// Bug-6 修复: KEK 解密失败属于系统级危机，触发 CRITICAL 告警。
+			c.alerter.Alert(ctx, "KEKUnwrapFailure", keyID,
+				fmt.Sprintf("encrypt: KEK failed to unwrap DEK: %v", e))
 			return e
 		}
 		defer plaintextDEK.Wipe()
@@ -331,6 +398,9 @@ func (c *Core) Decrypt(ctx context.Context, keyID string, ciphertext []byte, pol
 	err = c.seal.KEKRef(func(kek seal.KEK) error {
 		plaintextDEK, e := kek.UnwrapDEK(meta.EncryptedMaterial)
 		if e != nil {
+			// Bug-6 修复: KEK 解密失败属于系统级危机，触发 CRITICAL 告警。
+			c.alerter.Alert(ctx, "KEKUnwrapFailure", keyID,
+				fmt.Sprintf("decrypt: KEK failed to unwrap DEK: %v", e))
 			return e
 		}
 		defer plaintextDEK.Wipe()

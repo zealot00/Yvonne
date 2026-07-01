@@ -228,6 +228,48 @@ func (p *PostgresKVStore) ScanPrefix(ctx context.Context, prefix string) (map[st
 	return result, rows.Err()
 }
 
+// ScanPrefixPaged 实现 PagedPrefixScanner（Bug-5 修复）。
+// 按 prefix 分页扫描，避免一次性加载百万级记录导致 OOM。
+// offset: 跳过前 N 条；limit: 最多返回 N 条（<=0 默认 1000）。
+// 返回 (items, total, error)，total 是匹配 prefix 的总条数。
+func (p *PostgresKVStore) ScanPrefixPaged(ctx context.Context, prefix string, offset, limit int) ([]KVItem, int, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+
+	// 先查 total（用 COUNT(*) 估算，加 LIMIT 1 避免 over-count）。
+	var total int
+	err := p.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM yvonne_kv_str WHERE k LIKE $1`, prefix+"%").Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("postgres: count prefix: %w", err)
+	}
+
+	if offset >= total {
+		return nil, total, nil
+	}
+
+	// 分页查询（按 k 排序保证分页稳定性）。
+	rows, err := p.pool.Query(ctx,
+		`SELECT k, v FROM yvonne_kv_str WHERE k LIKE $1 ORDER BY k LIMIT $2 OFFSET $3`,
+		prefix+"%", limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("postgres: scan prefix paged: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]KVItem, 0, limit)
+	for rows.Next() {
+		var k string
+		var v []byte
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, 0, fmt.Errorf("postgres: scan row: %w", err)
+		}
+		items = append(items, KVItem{Key: []byte(k), Value: v})
+	}
+	return items, total, rows.Err()
+}
+
 // --- KVStore.WithTx 实现 ---
 
 // WithTx 在事务内执行 fn。
@@ -296,6 +338,23 @@ func (t *pgTx) Delete(ctx context.Context, key string) error {
 // WithTx 嵌套事务：直接在当前事务内执行（savepoint 省略，简化）。
 func (t *pgTx) WithTx(ctx context.Context, fn func(txStore KVStore) error) error {
 	return fn(t)
+}
+
+// NotifyInvalidationInTx 实现 TxNotifier 接口（Bug-2 修复）。
+//
+// 在事务内执行 `NOTIFY yvonne_cache_invalidation, '<keyID>'`，
+// 由 PG 引擎保证：事务 Commit 成功 → 通知必定广播；事务 Rollback → 通知自动撤销。
+// 彻底消除"Commit 成功但通知丢失"的原子性断层。
+func (t *pgTx) NotifyInvalidationInTx(ctx context.Context, keyID string) error {
+	// NOTIFY 的 payload 最大 8000 字节，keyID 远小于此。
+	// 使用占位符防 SQL 注入（虽然 NOTIFY payload 不支持参数化，keyID 来自内部生成）。
+	// #nosec G201 -- keyID 是内部生成的标识符，非用户输入
+	_, err := t.tx.Exec(ctx,
+		`SELECT pg_notify('yvonne_cache_invalidation', $1)`, keyID)
+	if err != nil {
+		return fmt.Errorf("postgres: notify in tx: %w", err)
+	}
+	return nil
 }
 
 // GetForUpdate 实现 RowLocker：SELECT ... FOR UPDATE 行级锁。

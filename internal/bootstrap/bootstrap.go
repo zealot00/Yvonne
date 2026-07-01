@@ -35,6 +35,7 @@ import (
 	"yvonne/internal/mcp"
 	"yvonne/internal/memguard"
 	"yvonne/internal/metrics"
+	"yvonne/internal/observability"
 	"yvonne/internal/seal"
 	"yvonne/internal/service"
 	"yvonne/internal/storage"
@@ -493,6 +494,15 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 	core := service.NewManager(lifecycleMgr, unsealer, auditLog)
 	core.SetAdminToken(cfg.Server.Admin.AdminToken)
 
+	// Bug-6 修复: 注入 Alerter 到 Core，KEK 解密失败触发 CRITICAL 告警。
+	alertCfg := observability.AlertConfig{
+		Enabled:            cfg.Observability.Alerting.Enabled,
+		WebhookURL:         cfg.Observability.Alerting.WebhookURL,
+		HighRiskOperations: cfg.Observability.Alerting.HighRiskOperations,
+	}
+	alerter := observability.NewAlerter(alertCfg)
+	core.SetAlerter(&coreAlerterAdapter{alerter: alerter})
+
 	// v1.3: MFA TOTP 装配（内存存储，生产可换 PG 实现）。
 	if cfg.MFA.Enabled {
 		mfaStore := auth.NewMemoryMFAStore()
@@ -592,4 +602,24 @@ func buildAdminServer(cfg *config.YvonneConfig, unsealer seal.Unsealer) *admin.S
 		log.Printf("WARNING: admin web UI has no admin_token — UNPROTECTED (bind 127.0.0.1 only)")
 	}
 	return srv
+}
+
+// coreAlerterAdapter 把 observability.Alerter 适配为 service.Alerter（Bug-6 修复）。
+//
+// service 层不直接 import observability 包（避免循环依赖），
+// 由 bootstrap 层注入 adapter，把 service.Alerter.Alert 调用
+// 转换为 observability.Alerter.Alert 调用。
+type coreAlerterAdapter struct {
+	alerter observability.Alerter
+}
+
+// Alert 实现 service.Alerter 接口。
+// 将 service 层的 (operation, resource, description) 转换为 observability.AlertEvent。
+func (a *coreAlerterAdapter) Alert(ctx context.Context, operation, resource, description string) error {
+	return a.alerter.Alert(ctx, observability.AlertEvent{
+		Operation:   operation,
+		Resource:    resource,
+		Description: description,
+		Timestamp:   time.Now().UTC(),
+	})
 }

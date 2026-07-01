@@ -5,7 +5,9 @@
 package grpc
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 
 	pb "yvonne/gen/proto/yvonne/v1"
@@ -157,15 +159,15 @@ func (s *Server) GenerateDataKey(ctx context.Context, req *pb.GenerateDataKeyReq
 		return nil, err
 	}
 
-	var dekBytes []byte
-	if result.PlaintextDEK != nil {
-		_ = result.PlaintextDEK.WithKey(func(d []byte) error {
-			dekBytes = make([]byte, len(d))
-			copy(dekBytes, d)
-			return nil
-		})
-		result.PlaintextDEK.Wipe()
+	// Bug-7 修复: 通过 WriteBase64To 受控暴露，Core 内部保证 Wipe。
+	var dekBuf bytes.Buffer
+	if err := result.WriteBase64To(&dekBuf); err != nil {
+		return nil, err
 	}
+	// base64 解码为 protobuf 需要的 []byte（grpc 走 protobuf 二进制，非 base64）。
+	dekBytes, _ := base64.StdEncoding.DecodeString(dekBuf.String())
+	// 清理 base64 中间缓冲。
+	dekBuf.Reset()
 
 	return &pb.GenerateDataKeyResponse{
 		PlaintextDek:  dekBytes,

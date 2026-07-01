@@ -342,14 +342,24 @@ func (m *Manager) saveMetadata(ctx context.Context, meta KeyMetadata) error {
 func (m *Manager) loadMetadata(ctx context.Context, keyID string, version int) (*KeyMetadata, error) {
 	key := metadataKey(keyID, version)
 
-	// 先查缓存。
+	// 先查正缓存。
 	if meta, ok := m.cache.get(key); ok {
 		return meta, nil
+	}
+
+	// Bug-4 修复：查负缓存。命中则直接返回 ErrNotFound，
+	// 防止伪造版本号穿透到 DB。
+	if m.cache.isNegative(key) {
+		return nil, storage.ErrNotFound
 	}
 
 	// 缓存未命中，查 DB。
 	data, err := m.store.Get(ctx, key)
 	if err != nil {
+		// Bug-4: DB 返回 ErrNotFound 时写入负缓存（短 TTL）。
+		if errors.Is(err, storage.ErrNotFound) {
+			m.cache.putNegative(key)
+		}
 		return nil, err
 	}
 	var meta KeyMetadata
@@ -357,7 +367,7 @@ func (m *Manager) loadMetadata(ctx context.Context, keyID string, version int) (
 		return nil, fmt.Errorf("lifecycle: unmarshal metadata: %w", err)
 	}
 
-	// 写入缓存。
+	// 写入正缓存。
 	m.cache.put(key, &meta)
 	return &meta, nil
 }
@@ -538,6 +548,16 @@ func (m *Manager) RotateKey(ctx context.Context, keyID string, kek seal.KEK) (*K
 		_ = txStore.Put(ctx, latestVersionMetadataKey(keyID), latestData)
 
 		plaintextDEK = plainDEK
+
+		// Bug-2 修复：在事务内执行 NOTIFY，保证 Commit 与通知原子性。
+		// 若 Rollback，NOTIFY 自动撤销；若 Commit 成功，通知必定广播。
+		if txNotifier, ok := txStore.(storage.TxNotifier); ok {
+			if notifyErr := txNotifier.NotifyInvalidationInTx(ctx, keyID); notifyErr != nil {
+				// 通知失败不阻断事务（与旧行为一致），但记录告警。
+				fmt.Printf("lifecycle: WARNING in-tx notify failed for key %s: %v\n", keyID, notifyErr)
+			}
+		}
+
 		return nil
 	})
 
@@ -548,8 +568,8 @@ func (m *Manager) RotateKey(ctx context.Context, keyID string, kek seal.KEK) (*K
 		return nil, nil, err
 	}
 
-	// 事务提交成功后：失效本地缓存 + 通知集群其他节点。
-	// 若此阶段 panic（如网络故障），确保 plaintextDEK 被 Wipe。
+	// 事务提交成功后：失效本地缓存（事务内 NOTIFY 已通知集群其他节点）。
+	// 对于未实现 TxNotifier 的 store（MemoryStore/BoltDB），回退到外部 notifier。
 	defer func() {
 		if r := recover(); r != nil {
 			if plaintextDEK != nil {
@@ -559,7 +579,7 @@ func (m *Manager) RotateKey(ctx context.Context, keyID string, kek seal.KEK) (*K
 		}
 	}()
 	m.cache.invalidate(keyID)
-	m.notifyCluster(keyID)
+	m.notifyClusterIfNoTxNotifier(keyID)
 
 	return newMeta, plaintextDEK, nil
 }
@@ -612,6 +632,13 @@ func (m *Manager) ShredKey(ctx context.Context, keyID string, version int) error
 			return fmt.Errorf("lifecycle: delete after shred: %w", err)
 		}
 
+		// Bug-2 修复：事务内 NOTIFY，保证 Commit 与通知原子性。
+		if txNotifier, ok := txStore.(storage.TxNotifier); ok {
+			if notifyErr := txNotifier.NotifyInvalidationInTx(ctx, keyID); notifyErr != nil {
+				fmt.Printf("lifecycle: WARNING in-tx notify failed for shred %s: %v\n", keyID, notifyErr)
+			}
+		}
+
 		return nil
 	})
 
@@ -619,21 +646,39 @@ func (m *Manager) ShredKey(ctx context.Context, keyID string, version int) error
 		return err
 	}
 
-	// 事务提交成功后：失效本地缓存 + 通知集群。
+	// 事务提交成功后：失效本地缓存（事务内 NOTIFY 已通知集群）。
 	m.cache.invalidate(keyID)
-	m.notifyCluster(keyID)
+	m.notifyClusterIfNoTxNotifier(keyID)
 	return nil
 }
 
-// notifyCluster 通知集群其他节点缓存失效。
-// 若 notifier 为 nil（MemoryStore），跳过（单机无需通知）。
-func (m *Manager) notifyCluster(keyID string) {
+// notifyClusterIfNoTxNotifier 通知集群其他节点缓存失效（Bug-2 修复）。
+//
+// 仅对未实现 TxNotifier 的 store（MemoryStore/BoltDB）生效：
+//   - PostgresKVStore 已在事务内通过 NOTIFY 通知，此处跳过（避免双重通知）。
+//   - MemoryStore 无需通知（单机）。
+//   - BoltDB 无监听机制，此处可选触发外部 notifier。
+//
+// 若 notifier 为 nil，跳过。
+func (m *Manager) notifyClusterIfNoTxNotifier(keyID string) {
+	// 检查 store 是否实现了 TxNotifier（PostgresKVStore 实现）。
+	// 若已实现，事务内 NOTIFY 已完成，此处跳过。
+	if _, ok := m.store.(storage.TxNotifier); ok {
+		return
+	}
 	if m.notifier != nil {
 		if err := m.notifier.NotifyInvalidation(keyID); err != nil {
 			// NOTIFY 失败不阻断操作（已提交到 DB），但记录告警。
 			fmt.Printf("lifecycle: WARNING cluster notify failed for key %s: %v\n", keyID, err)
 		}
 	}
+}
+
+// notifyCluster 旧名保留向后兼容（内部已重定向到 notifyClusterIfNoTxNotifier）。
+//
+// 已废弃：请使用 notifyClusterIfNoTxNotifier。
+func (m *Manager) notifyCluster(keyID string) {
+	m.notifyClusterIfNoTxNotifier(keyID)
 }
 
 // GetKey 读取指定版本的元数据。
@@ -762,7 +807,7 @@ func (m *Manager) SoftDeleteKey(ctx context.Context, keyID string, version int) 
 //   - Active/Deactivated → 幂等返回 nil
 //   - Destroyed → 返回 ErrKeyDestroyed
 func (m *Manager) RestoreKey(ctx context.Context, keyID string, version int) error {
-	return m.store.WithTx(ctx, func(txStore storage.KVStore) error {
+	err := m.store.WithTx(ctx, func(txStore storage.KVStore) error {
 		key := metadataKey(keyID, version)
 
 		rl, _ := txStore.(storage.RowLocker)
@@ -802,10 +847,26 @@ func (m *Manager) RestoreKey(ctx context.Context, keyID string, version int) err
 			return fmt.Errorf("lifecycle: restore: put: %w", err)
 		}
 
-		// 失效缓存 + 通知集群。
+		// Bug-2 修复：事务内 NOTIFY，保证 Commit 与通知原子性。
+		if txNotifier, ok := txStore.(storage.TxNotifier); ok {
+			if notifyErr := txNotifier.NotifyInvalidationInTx(ctx, keyID); notifyErr != nil {
+				fmt.Printf("lifecycle: WARNING in-tx notify failed for restore %s: %v\n", keyID, notifyErr)
+			}
+		}
+
+		// 失效本地缓存（事务内执行，Rollback 时 cache 可能短暂不一致，
+		// 但 GetActiveKey 会从 DB 重新加载，影响可接受）。
 		m.cache.invalidate(keyID)
 		return nil
 	})
+
+	if err != nil {
+		return err
+	}
+
+	// 事务提交成功后：对未实现 TxNotifier 的 store 触发外部通知。
+	m.notifyClusterIfNoTxNotifier(keyID)
+	return nil
 }
 
 // StartSoftDeleteReaper 启动后台 goroutine，定期扫描并物理粉碎超过 TTL 的软删除密钥。
@@ -831,12 +892,64 @@ func (m *Manager) reaperLoop(ttl time.Duration, onReaped func(keyID string, vers
 
 // reapExpiredSoftDeletes 扫描并物理粉碎过期的软删除密钥。
 //
-// 扫描所有 "key:" 前缀的元数据，找出 State=SoftDeleted 且 DeletedAt 超过 ttl 的，
-// 逐个执行 ShredKey 物理粉碎。
+// Bug-5 修复: 改用 PagedPrefixScanner 分页扫描，避免一次性加载百万级
+// 历史版本导致内存 OOM 尖刺。每页默认 1000 条，常数级内存开销。
 func (m *Manager) reapExpiredSoftDeletes(ttl time.Duration, onReaped func(keyID string, version int)) {
+	// Bug-5: 优先使用分页扫描接口。
+	pagedScanner, ok := m.store.(storage.PagedPrefixScanner)
+	if !ok {
+		// 回退到旧版一次性扫描（仅理论上存在，MemoryStore 和 PostgresKVStore 都实现了分页）。
+		m.reapExpiredSoftDeletesLegacy(ttl, onReaped)
+		return
+	}
+
+	ctx := context.Background()
+	cutoff := time.Now().UTC().Add(-ttl)
+
+	// 分页遍历，每页 1000 条。
+	const pageSize = 1000
+	offset := 0
+	for {
+		items, _, err := pagedScanner.ScanPrefixPaged(ctx, "key:", offset, pageSize)
+		if err != nil {
+			return
+		}
+		if len(items) == 0 {
+			return
+		}
+
+		for _, item := range items {
+			var meta KeyMetadata
+			if err := json.Unmarshal(item.Value, &meta); err != nil {
+				continue
+			}
+			if meta.State != StateSoftDeleted {
+				continue
+			}
+			if meta.DeletedAt.IsZero() || meta.DeletedAt.After(cutoff) {
+				continue
+			}
+
+			// 物理粉碎。
+			if err := m.ShredKey(ctx, meta.KeyID, meta.Version); err != nil {
+				continue
+			}
+			if onReaped != nil {
+				onReaped(meta.KeyID, meta.Version)
+			}
+		}
+
+		offset += len(items)
+		if len(items) < pageSize {
+			return // 最后一页
+		}
+	}
+}
+
+// reapExpiredSoftDeletesLegacy 旧版一次性扫描（向后兼容，Bug-5 修复的回退路径）。
+func (m *Manager) reapExpiredSoftDeletesLegacy(ttl time.Duration, onReaped func(keyID string, version int)) {
 	scanner, ok := m.store.(storage.PrefixScanner)
 	if !ok {
-		// 存储不支持前缀扫描（理论上不会发生，MemoryStore 和 PostgresKVStore 都实现了）。
 		return
 	}
 
@@ -862,7 +975,6 @@ func (m *Manager) reapExpiredSoftDeletes(ttl time.Duration, onReaped func(keyID 
 			continue
 		}
 
-		// 物理粉碎。
 		if err := m.ShredKey(ctx, meta.KeyID, meta.Version); err != nil {
 			continue
 		}
@@ -879,11 +991,45 @@ func (m *Manager) ReapNow(ttl time.Duration, onReaped func(keyID string, version
 }
 
 // countKeys 统计当前全局唯一 KeyID 数量（用于配额检查）。
-// 通过 ScanPrefix 扫描 "key:" 前缀，去重 KeyID。
+// Bug-5 修复: 改用 PagedPrefixScanner 分页扫描，避免 OOM。
 func (m *Manager) countKeys(ctx context.Context) (int, error) {
+	pagedScanner, ok := m.store.(storage.PagedPrefixScanner)
+	if !ok {
+		// 回退到旧版一次性扫描。
+		return m.countKeysLegacy(ctx)
+	}
+
+	seen := make(map[string]bool)
+	const pageSize = 1000
+	offset := 0
+	for {
+		items, _, err := pagedScanner.ScanPrefixPaged(ctx, "key:", offset, pageSize)
+		if err != nil {
+			return 0, err
+		}
+		if len(items) == 0 {
+			break
+		}
+		for _, item := range items {
+			var meta KeyMetadata
+			if err := json.Unmarshal(item.Value, &meta); err != nil {
+				continue
+			}
+			seen[meta.KeyID] = true
+		}
+		offset += len(items)
+		if len(items) < pageSize {
+			break
+		}
+	}
+	return len(seen), nil
+}
+
+// countKeysLegacy 旧版一次性扫描（Bug-5 回退路径）。
+func (m *Manager) countKeysLegacy(ctx context.Context) (int, error) {
 	scanner, ok := m.store.(storage.PrefixScanner)
 	if !ok {
-		return 0, nil // 不支持扫描的 store 不限制
+		return 0, nil
 	}
 
 	items, err := scanner.ScanPrefix(ctx, "key:")
@@ -904,10 +1050,49 @@ func (m *Manager) countKeys(ctx context.Context) (int, error) {
 
 // ListKeyIDs 返回所有唯一 KeyID（用于 Admin UI 密钥列表）。
 // 仅返回 KeyID，不含元数据/明文/密文。
+// Bug-5 修复: 改用 PagedPrefixScanner 分页扫描，避免 OOM。
 func (m *Manager) ListKeyIDs(ctx context.Context) ([]string, error) {
+	pagedScanner, ok := m.store.(storage.PagedPrefixScanner)
+	if !ok {
+		// 回退到旧版一次性扫描。
+		return m.listKeyIDsLegacy(ctx)
+	}
+
+	seen := make(map[string]bool)
+	var keyIDs []string
+	const pageSize = 1000
+	offset := 0
+	for {
+		items, _, err := pagedScanner.ScanPrefixPaged(ctx, "key:", offset, pageSize)
+		if err != nil {
+			return nil, err
+		}
+		if len(items) == 0 {
+			break
+		}
+		for _, item := range items {
+			var meta KeyMetadata
+			if err := json.Unmarshal(item.Value, &meta); err != nil {
+				continue
+			}
+			if !seen[meta.KeyID] {
+				seen[meta.KeyID] = true
+				keyIDs = append(keyIDs, meta.KeyID)
+			}
+		}
+		offset += len(items)
+		if len(items) < pageSize {
+			break
+		}
+	}
+	return keyIDs, nil
+}
+
+// listKeyIDsLegacy 旧版一次性扫描（Bug-5 回退路径）。
+func (m *Manager) listKeyIDsLegacy(ctx context.Context) ([]string, error) {
 	scanner, ok := m.store.(storage.PrefixScanner)
 	if !ok {
-		return nil, nil // 不支持扫描的 store 返回空列表
+		return nil, nil
 	}
 
 	items, err := scanner.ScanPrefix(ctx, "key:")

@@ -69,6 +69,18 @@ func (r *V1Router) SetRateLimit(rate float64, burst int) {
 	r.rateLimiter = NewRateLimiter(rate, burst)
 }
 
+// SetTrustedProxies 设置授信反向代理 IP 白名单（Bug-3 修复）。
+//
+// 仅当 RemoteAddr 在白名单内时，才信任 X-Forwarded-For / X-Real-IP 头。
+// 生产环境应配置为 Nginx/K8s Ingress 的内网 IP，防止客户端伪造代理头绕过限流。
+//
+// 默认空 = 不信任任何代理头，回退到 RemoteAddr（向后兼容）。
+func (r *V1Router) SetTrustedProxies(proxies []string) {
+	if r.rateLimiter != nil {
+		r.rateLimiter.SetTrustedProxies(proxies)
+	}
+}
+
 // SetAdminToken 设置紧急封印 Admin Token。
 func (r *V1Router) SetAdminToken(token string) {
 	r.adminToken = token
@@ -195,12 +207,11 @@ func (r *V1Router) SetCORSConfig(cfg CORSConfig) {
 
 func (r *V1Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// 最外层：IP 级速率限制（防暴力枚举）。
+	// Bug-3 修复：使用 clientIP() 支持 X-Forwarded-For + 授信代理白名单，
+	// 避免在 Nginx/K8s Ingress 后端所有请求共享同一令牌桶导致全局误杀。
 	if r.rateLimiter != nil {
-		host, _, err := net.SplitHostPort(req.RemoteAddr)
-		if err != nil {
-			host = req.RemoteAddr
-		}
-		if !r.rateLimiter.Allow(host) {
+		ip := r.rateLimiter.clientIP(req)
+		if !r.rateLimiter.Allow(ip) {
 			w.Header().Set("Retry-After", "1")
 			writeJSONError(w, http.StatusTooManyRequests, "rate limit exceeded")
 			return

@@ -111,3 +111,90 @@ func TestCore_AuthorizeDenied(t *testing.T) {
 		t.Fatal("Encrypt with denied key should fail")
 	}
 }
+
+// mockAlerter 记录告警事件（Bug-6 测试）。
+type mockAlerter struct {
+	alerts []struct {
+		operation string
+		resource  string
+		desc      string
+	}
+}
+
+func (m *mockAlerter) Alert(ctx context.Context, operation, resource, desc string) error {
+	m.alerts = append(m.alerts, struct {
+		operation string
+		resource  string
+		desc      string
+	}{operation, resource, desc})
+	return nil
+}
+
+// TestCore_KEKFailureTriggersAlert Bug-6: KEK 解密失败触发 CRITICAL 告警。
+// 用一个会失败的 KEK 包装解密，验证 alerter 被调用。
+func TestCore_KEKFailureTriggersAlert(t *testing.T) {
+	core, mgr, mk := newTestCore(t)
+	ctx := context.Background()
+
+	// 注入 mock alerter。
+	al := &mockAlerter{}
+	core.SetAlerter(al)
+
+	// 用 core 的 vault master key 创建密钥（保证加密能成功）。
+	kek := seal.NewSoftwareKEK(mk)
+	_, _, err := mgr.CreateKey(ctx, "alert-test-key", kek, 0)
+	if err != nil {
+		t.Fatalf("CreateKey: %v", err)
+	}
+
+	// 用一个不同的 MasterKey 创建另一个 vault（模拟 HSM 离线/MasterKey 损坏）。
+	wrongMK, _ := memguard.NewSecureBufferFromRandom(32)
+	defer wrongMK.Wipe()
+
+	wrongVault := seal.NewVaultState(1, 1, 0)
+	if err := wrongVault.DirectUnseal(wrongMK); err != nil {
+		t.Fatalf("DirectUnseal wrong: %v", err)
+	}
+	wrongCore := NewCore(mgr, wrongVault, nil)
+	wrongCore.SetAlerter(al)
+
+	// 先用正确 KEK 加密。
+	encResult, err := core.Encrypt(ctx, "alert-test-key", []byte("test"), nil)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+
+	// 用错误 KEK 的 Core 解密 → KEK.UnwrapDEK 失败 → 触发告警。
+	_, err = wrongCore.Decrypt(ctx, "alert-test-key", encResult.Ciphertext, nil)
+	if err == nil {
+		t.Fatal("Decrypt with wrong KEK should fail")
+	}
+
+	// 验证告警被触发。
+	if len(al.alerts) == 0 {
+		t.Fatal("Bug-6: KEK unwrap failure should trigger alert")
+	}
+	last := al.alerts[len(al.alerts)-1]
+	if last.operation != "KEKUnwrapFailure" {
+		t.Fatalf("Bug-6: expected operation KEKUnwrapFailure, got %s", last.operation)
+	}
+	if last.resource != "alert-test-key" {
+		t.Fatalf("Bug-6: expected resource alert-test-key, got %s", last.resource)
+	}
+	t.Logf("✅ Bug-6: KEK unwrap failure triggered alert: op=%s resource=%s", last.operation, last.resource)
+}
+
+// TestCore_NoopAlerterDefault Bug-6: 默认无 alerter 不 panic。
+func TestCore_NoopAlerterDefault(t *testing.T) {
+	core, _, _ := newTestCore(t)
+	// 不调用 SetAlerter，默认 noopAlerter。
+
+	// 验证 SetAlerter(nil) 不会 panic。
+	core.SetAlerter(nil)
+
+	// alerter 字段应不为 nil（noopAlerter）。
+	if core.alerter == nil {
+		t.Fatal("alerter should default to noopAlerter, not nil")
+	}
+	t.Log("✅ Bug-6: default noopAlerter works")
+}

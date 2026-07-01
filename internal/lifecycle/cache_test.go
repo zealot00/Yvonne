@@ -65,6 +65,91 @@ func TestCache_Clear(t *testing.T) {
 	}
 }
 
+// TestCache_NegativeCache Bug-4: 空值缓存防穿透。
+// DB 返回 ErrNotFound 后，相同 key 的请求应命中负缓存，不再查 DB。
+func TestCache_NegativeCache(t *testing.T) {
+	c := newDekCache()
+
+	// 初始：未命中负缓存。
+	if c.isNegative("key:ghost:v:99999999") {
+		t.Fatal("should not be negative initially")
+	}
+
+	// 模拟 DB 返回 ErrNotFound，写入负缓存。
+	c.putNegative("key:ghost:v:99999999")
+
+	// 命中负缓存。
+	if !c.isNegative("key:ghost:v:99999999") {
+		t.Fatal("Bug-4: should hit negative cache after putNegative")
+	}
+	t.Log("✅ Bug-4: negative cache hit (blocks DB penetration)")
+}
+
+// TestCache_NegativeCachePutPositiveClears Bug-4: 写正缓存清除负缓存。
+// 密钥被创建后，旧的负缓存应被清除。
+func TestCache_NegativeCachePutPositiveClears(t *testing.T) {
+	c := newDekCache()
+
+	// 先写负缓存（密钥不存在）。
+	c.putNegative("key:newkey:v:1")
+	if !c.isNegative("key:newkey:v:1") {
+		t.Fatal("should be negative")
+	}
+
+	// 密钥被创建，写正缓存。
+	c.put("key:newkey:v:1", &KeyMetadata{KeyID: "newkey", Version: 1})
+
+	// 负缓存应被清除。
+	if c.isNegative("key:newkey:v:1") {
+		t.Fatal("Bug-4: negative cache should be cleared after positive put")
+	}
+	// 正缓存应命中。
+	if _, ok := c.get("key:newkey:v:1"); !ok {
+		t.Fatal("positive cache should hit")
+	}
+	t.Log("✅ Bug-4: positive put clears negative cache")
+}
+
+// TestCache_InvalidateClearsNegative Bug-4: invalidate 同步清除负缓存。
+func TestCache_InvalidateClearsNegative(t *testing.T) {
+	c := newDekCache()
+	c.putNegative("key:order:v:1")
+	c.putNegative("key:order:v:2")
+	c.put("key:order:v:3", &KeyMetadata{KeyID: "order", Version: 3})
+
+	c.invalidate("order")
+
+	if c.isNegative("key:order:v:1") {
+		t.Fatal("Bug-4: negative cache for order:v:1 should be cleared")
+	}
+	if c.isNegative("key:order:v:2") {
+		t.Fatal("Bug-4: negative cache for order:v:2 should be cleared")
+	}
+	t.Log("✅ Bug-4: invalidate clears negative cache")
+}
+
+// TestManager_LoadMetadata_NegativeCache Bug-4: loadMetadata 命中负缓存返回 ErrNotFound。
+func TestManager_LoadMetadata_NegativeCache(t *testing.T) {
+	store := storage.NewMemoryStore()
+	mgr := NewManager(store)
+	ctx := context.Background()
+
+	// 第一次查不存在的版本 → DB 返回 ErrNotFound，写入负缓存。
+	_, err := mgr.loadMetadata(ctx, "ghost-key", 99999999)
+	if err == nil {
+		t.Fatal("first load should return error (not found)")
+	}
+
+	// 第二次查相同版本 → 应命中负缓存，直接返回 ErrNotFound。
+	// （若没有负缓存，会再次查 DB — 但 MemoryStore 行为一致，难以直接验证。
+	// 这里验证负缓存确实被写入。）
+	key := metadataKey("ghost-key", 99999999)
+	if !mgr.cache.isNegative(key) {
+		t.Fatal("Bug-4: negative cache should be populated after ErrNotFound")
+	}
+	t.Log("✅ Bug-4: loadMetadata writes negative cache on ErrNotFound")
+}
+
 // TestManager_GetKey_CacheHit 验证 GetKey 缓存命中。
 func TestManager_GetKey_CacheHit(t *testing.T) {
 	store := storage.NewMemoryStore()

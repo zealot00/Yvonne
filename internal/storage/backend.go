@@ -61,3 +61,27 @@ const (
 
 // ErrNotFound 键不存在。
 var ErrNotFound = errors.New("storage: key not found")
+
+// TxNotifier 是事务内可执行的缓存失效通知接口（Bug-2 修复）。
+//
+// PostgresKVStore 的 pgTx 实现此接口，在 WithTx 闭包内调用
+// NotifyInvalidationInTx，利用 PG NOTIFY 与事务同提交/回滚的原子性，
+// 消除"事务提交成功但通知丢失"的窗口。
+//
+// 未实现此接口的 store（MemoryStore/BoltDB）在事务外回退到 NotifyInvalidation。
+type TxNotifier interface {
+	NotifyInvalidationInTx(ctx context.Context, keyID string) error
+}
+
+// PagedPrefixScanner 是支持分页前缀扫描的存储接口（Bug-5 修复）。
+//
+// ScanPrefix 一次性返回全部结果，在百万级历史版本场景下会引发 OOM。
+// PagedPrefixScanner 提供 Limit/Offset 分页查询，保证常数级内存开销。
+//
+// MemoryStore 和 PostgresKVStore 均实现此接口。
+type PagedPrefixScanner interface {
+	// ScanPrefixPaged 按 prefix 分页扫描。
+	// offset: 跳过前 N 条；limit: 最多返回 N 条（0 = 默认 1000）。
+	// 返回 (items, total, error)，total 是匹配 prefix 的总条数（用于估算分页数）。
+	ScanPrefixPaged(ctx context.Context, prefix string, offset, limit int) (items []KVItem, total int, err error)
+}

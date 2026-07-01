@@ -18,8 +18,12 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"sort"
 	"sync"
 )
+
+// sortStrings 排序字符串切片（内存存储分页扫描需要稳定顺序）。
+func sortStrings(s []string) { sort.Strings(s) }
 
 // MemoryStore 是基于 sync.RWMutex + map 的纯内存 KVStore 实现。
 type MemoryStore struct {
@@ -169,4 +173,45 @@ func (m *MemoryStore) ScanPrefix(ctx context.Context, prefix string) (map[string
 		}
 	}
 	return result, nil
+}
+
+// ScanPrefixPaged 实现 PagedPrefixScanner（Bug-5 修复）。
+// 按 prefix 分页扫描，避免一次性加载百万级记录导致 OOM。
+// offset: 跳过前 N 条；limit: 最多返回 N 条（<=0 默认 1000）。
+// 返回 (items, total, error)，total 是匹配 prefix 的总条数。
+func (m *MemoryStore) ScanPrefixPaged(ctx context.Context, prefix string, offset, limit int) ([]KVItem, int, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// 先收集所有匹配的 key（排序保证分页稳定性）。
+	var keys []string
+	for k := range m.data {
+		if len(k) >= len(prefix) && k[:len(prefix)] == prefix {
+			keys = append(keys, k)
+		}
+	}
+	// 排序（map 迭代顺序随机，分页需要稳定顺序）。
+	sortStrings(keys)
+
+	total := len(keys)
+	if offset >= total {
+		return nil, total, nil
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+
+	items := make([]KVItem, 0, end-offset)
+	for _, k := range keys[offset:end] {
+		v := m.data[k]
+		cp := make([]byte, len(v))
+		copy(cp, v)
+		items = append(items, KVItem{Key: []byte(k), Value: cp})
+	}
+	return items, total, nil
 }

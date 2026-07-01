@@ -64,8 +64,18 @@ func GenerateTOTP(secret string, t time.Time) (string, error) {
 }
 
 // ValidateTOTP 验证 TOTP code，允许 ±1 窗口（±30s 时钟漂移）。
-// usedCodeCheck 函数用于防重放检查（可选，nil 跳过）。
-func ValidateTOTP(secret, code string, usedCodeCheck func(time.Time, string) bool) error {
+// markUsed 函数用于防重放（原子标记已使用，可选，nil 跳过）。
+//
+// Bug-1 修复（TOCTOU 并发漏洞）:
+//   - 旧实现 usedCodeCheck 只读检查与外部 markUsed 写入分离，并发下可双写。
+//   - 新实现改用 markUsed func(time.Time, string) error 原子回调:
+//     验证匹配后直接调 markUsed 尝试落库，依赖 DB 唯一约束保证只有一个请求成功。
+//   - 向后兼容: 旧 usedCodeCheck 签名通过 ValidateTOTPLegacy 支持。
+//
+// Bug-8 修复（uint64 溢出陷阱）:
+//   - 旧实现 uint64(skew) 当 skew=-1 时环绕为 18446744073709551615。
+//   - 新实现统一用 int64 计算 counter，最后转 uint64。
+func ValidateTOTP(secret, code string, markUsed func(time.Time, string) error) error {
 	if len(code) != totpDigits {
 		return ErrTOTPInvalid
 	}
@@ -77,13 +87,50 @@ func ValidateTOTP(secret, code string, usedCodeCheck func(time.Time, string) boo
 	}
 
 	// 检查 current + skew 窗口。
+	// Bug-8 修复：用 int64 计算，避免 uint64(skew) 溢出环绕。
+	nowUnix := int64(now.Unix())
+	baseCounter := nowUnix / int64(totpPeriod)
 	for skew := -totpSkew; skew <= totpSkew; skew++ {
-		// #nosec G115 -- Unix 时间戳转 uint64 不会溢出。
-		counter := uint64(now.Unix())/uint64(totpPeriod) + uint64(skew)
+		counter := uint64(baseCounter + int64(skew))
 		expected := hotp(hmacKey, counter)
 
 		if subtleEqualString(expected, code) {
-			// 防重放检查。
+			// Bug-1 修复：原子标记已使用，依赖 DB 唯一约束防并发重放。
+			if markUsed != nil {
+				windowStart := now.Add(time.Duration(skew*totpPeriod) * time.Second)
+				if err := markUsed(windowStart, code); err != nil {
+					return ErrTOTPAlreadyUsed
+				}
+			}
+			return nil
+		}
+	}
+
+	return ErrTOTPInvalid
+}
+
+// ValidateTOTPLegacy 旧版兼容接口（usedCodeCheck 只读检查）。
+//
+// 已废弃: 仅用于向后兼容，新代码应使用 ValidateTOTP + markUsed 原子回调。
+// 此接口存在 TOCTOU 并发风险（Bug-1），仅在不具备原子 markUsed 的场景使用。
+func ValidateTOTPLegacy(secret, code string, usedCodeCheck func(time.Time, string) bool) error {
+	if len(code) != totpDigits {
+		return ErrTOTPInvalid
+	}
+
+	now := time.Now()
+	hmacKey, err := base32.StdEncoding.DecodeString(strings.ToUpper(secret))
+	if err != nil {
+		return fmt.Errorf("auth: decode TOTP secret: %w", err)
+	}
+
+	nowUnix := int64(now.Unix())
+	baseCounter := nowUnix / int64(totpPeriod)
+	for skew := -totpSkew; skew <= totpSkew; skew++ {
+		counter := uint64(baseCounter + int64(skew))
+		expected := hotp(hmacKey, counter)
+
+		if subtleEqualString(expected, code) {
 			if usedCodeCheck != nil {
 				windowStart := now.Add(time.Duration(skew*totpPeriod) * time.Second)
 				if usedCodeCheck(windowStart, code) {
