@@ -1,247 +1,232 @@
 # 🧊 Yvonne KMS
 
+A self-hosted KMS. 13MB. Memory-safe. Auditor-ready.
+
 [English](#english) | [中文](#中文)
 
 ---
 
 <a id="english"></a>
 
-## English
+## Why Yvonne?
 
-A self-hosted KMS focused on envelope encryption, auditable key lifecycle, absolute memory discipline, and JWT-based RBAC.
+Three promises that no other KMS makes:
 
-### Why Yvonne?
+1. **Your plaintext keys never touch Go's garbage collector.**
+   Every secret lives in `memguard.SecureBuffer`. Wiped with `clear()` + `runtime.KeepAlive()`. A memory dump reveals nothing — we verified this.
 
-Yvonne is built for teams who need centralized key management without surrendering control to cloud vendors. She doesn't trust the network, the database, or Go's Garbage Collector. Every plaintext key is pinned in `memguard.SecureBuffer`, wiped with `clear()` + `runtime.KeepAlive()`, and never leaves the process boundary in plaintext form.
+2. **You can prove every key operation to an auditor.**
+   HMAC hash chain audit log. File rotation + syslog dual-write. Tamper with one entry and the entire chain breaks — verifiably.
 
-### Core Features
+3. **You don't need a dedicated team to run it.**
+   Single 13MB binary. No plugins, no script engines, no reflection. `./bin/yvonne dev` and you're encrypting in 30 seconds.
 
-- **Absolute Memory Discipline**: `clear()` + `runtime.KeepAlive()` defeats DCE. Memory dumps yield nothing but ghosts.
-- **Versioned Self-Routing Ciphertext**: `[uint32 version BE][nonce][ciphertext+tag]` — decrypt auto-routes to correct DEK version.
-- **Shamir's Secret Sharing**: Master Key shattered into N shards across GF(2^8). K shards to resurrect.
-- **Dual-Write Audit Chain**: HMAC-SHA256 or HMAC-SM3 hash chain + daily file rotation + async syslog dual-write. Tamper = chain breaks.
-- **JWT RBAC Engine**: RS256/384/512, ES256/384/512, HS256/384/512, SM2 (国密). Algorithm confusion prevention. Configurable role claim paths.
-- **Resource-Level Authorization**: Body `KeyID` checked against `Policy.AllowedKeys` (wildcard + prefix match). Default deny.
-- **Auto Key Rotation**: PostgreSQL Advisory Lock elects cluster leader. Hourly scan for expired keys. Actor=`SYSTEM_DAEMON`.
-- **Soft Delete + Recycle Bin**: 90-day TTL with auto-shred reaper. Restorable. Crypto-shredding for permanent destruction.
-- **BYOK (Bring Your Own Key)**: Temporary RSA-4096 transit key. Burn-after-reading. External DEK import without plaintext transmission.
-- **GDK (Generate Data Key)**: Client-side envelope encryption. KMS never sees business plaintext.
-- **Cold Storage Backup**: Shamir-split Wrapped CMK to N USB drives. HMAC integrity per shard.
-- **Emergency Seal**: One API call wipes everything. Deep freeze until manual restart + Shamir unseal.
-- **Multi-Protocol API**: HTTP REST + gRPC (full mirror) + MCP (AI agent integration, encrypt + restricted decrypt).
-- **Pluggable Crypto Suite**: AES-256-GCM + SHA-256 (default) or SM4-GCM + SM3 (国密, `-tags gmsm`). SM2 public key crypto + JWT SM2 signing.
-- **HSM Support**: Pluggable KEK abstraction (`softwareKEK` / `hsmKEK`), CMK never leaves chip. PKCS#11 backend via crypto11 + SoftHSM CI.
-- **Strict GM Mode**: `crypto.strict: true` enforces SM2/SM3/SM4 only, disables AES/RSA/ECDSA.
-- **HMAC API (v1.2)**: `GenerateMac` / `VerifyMac` with `hmac.Equal` constant-time comparison. Symmetric keys only.
-- **Envelope Encryption API (v1.2)**: `GenerateDataKeyWithoutPlaintext` returns ciphertext-only DEK (safer, no plaintext in transit).
-- **Asymmetric Key API (v1.2)**: `Sign` / `Verify` / `GetPublicKey` / `ReEncrypt` endpoints.
-- **CORS Support**: Configurable `AllowedOrigins` + preflight handling + `SetCORSConfig()` for Cluster mode.
-- **MFA TOTP (v1.3)**: RFC 6238 TOTP for sensitive operations (ShredKey/EmergencySeal). X-MFA-Code header + replay protection.
-- **Quorum Approval (v1.3)**: K-of-N approval workflow. Anti-self-approve + idempotent + expiry cleanup.
-- **RFC 8998 GM TLS (v1.3)**: SM2 dual certificates + SM4/SM3 cipher suites. gmsm build tag.
-- **OpenTelemetry tracing (v1.3)**: OTLP gRPC exporter + otelhttp auto-instrumentation + TraceID propagation to audit log.
-- **Config Reload (v1.3)**: SIGHUP hot reload (logging/audit/observability).
-- **Alerting Webhook (v1.3)**: Slack/DingTalk/PagerDuty auto-detection. High-risk operation alerts.
-- **Multi-Tenant Isolation (v1.3.1)**: keyID prefix scoping (`tenant-a:key1`). Transparent to storage. Backward compatible.
-- **Web Console (v1.3.1)**: Vue 3 SPA (Dashboard + Keys + Crypto + Audit + MFA/Quorum). go:embed. Admin REST API.
-
-### Quick Start
+## Quick Start
 
 ```bash
-# Dev mode (zero config, in-memory)
-./bin/yvonne dev
-
-# Full cluster setup
-./bin/yvonne unseal-keygen --out /secure/unseal.pem
-./bin/yvonne init --config config.json --pub-key /tmp/pub.pem
-./bin/yvonne server --config config.json
+./bin/yvonne dev --demo       # 30s: keys created, curl examples printed
+./bin/yvonne dev --dashboard  # opens browser to Web Console (port 8250)
 ```
 
-### Documentation
+## Capabilities
 
-- [HTTP API Guide](docs/api.md)
+### Foundation
+- AES-256-GCM & SM4-GCM envelope encryption with versioned self-routing ciphertext
+- RSA-4096 / ECDSA P-256 / SM2 asymmetric crypto (Sign / Verify / ReEncrypt)
+- HMAC generate / verify (constant-time comparison)
+- Create / Rotate / Shred / Soft-Delete / Restore key lifecycle
+- BYOK (Bring Your Own Key) with burn-after-reading transit key
+- GDK (Generate Data Key) with optional no-plaintext mode
+- JWT RBAC (RS/ES/HS/SM2), AppRole tokens, K8s SA auth
+- PostgreSQL-backed cluster with Advisory Lock leader election
+- Cold storage backup via Shamir secret splitting to USB drives
+- Emergency seal — one API call wipes everything
+- HTTP REST + gRPC (full mirror) + MCP (AI agent) three-protocol support
+- Web Console (Dashboard / Keys / Crypto / Audit / MFA & Quorum)
+
+### Security engineering
+- Multi-tenant key isolation (prefix-scoped, backward compatible)
+- MFA TOTP (RFC 6238) for Shred / EmergencySeal
+- K-of-N Quorum approval workflow (anti-self-approve, idempotent, expiry)
+- Pluggable KEK abstraction (`softwareKEK` / `hsmKEK`), PKCS#11 HSM support
+- Strict GM mode: `crypto.strict: true` disables AES/RSA/ECDSA
+- RFC 8998 GM TLS (SM2 dual certificates + SM4/SM3)
+- OpenTelemetry tracing (OTLP + TraceID propagation to audit log)
+- Alerting webhook (Slack / DingTalk / PagerDuty auto-detection)
+- Config hot-reload via SIGHUP
+- gosec 0 issues + govulncheck 0 vulnerabilities (12 internal security checks)
+- 300+ tests: unit / integration (PG) / gRPC / browser Selenium E2E (39/39 pass)
+
+### Things no one else has
+- **MCP (AI Agent) integration** — Claude/GPT can call Yvonne natively (encrypt + restricted decrypt)
+- **国密全栈 (GM/T)** — SM2/SM3/SM4 + JWT SM2 + HMAC-SM3 audit chain + RFC 8998 TLS + strict mode
+- **13MB single binary** — no runtime deps, runs on Raspberry Pi and industrial gateways
+- **Three-language SDK** — Go / Python / Java with retry, circuit breaker, trace_id propagation
+
+## Documentation
+
+- [产品演进路线图](docs/roadmap.md) — v1.0 → v1.3.1 → v2.0
+- [v1.3 合规功能指南](docs/v1.3-compliance.md) — MFA / Quorum / GM TLS / OTel
+- [国密合规指南](docs/gmsm-compliance.md) — 编译配置 + 密评二级对照表
+- [密评二级自评报告](docs/compliance/self-assessment-level2.md) — 24 项逐项评估
+- [交付物清单](docs/deliverables.md) — 25 项文档 + 版本历史
+- [覆盖率审计报告](docs/coverage-audit.md) — 各包覆盖率 + 提升计划
+- [部署指南](docs/deployment.md)
 - [gRPC API Guide](docs/grpc-api.md)
 - [MCP (AI Agent) Guide](docs/mcp-api.md)
 - [PKCS#11 HSM Guide](docs/pkcs11-hsm.md)
-- [国密合规路线图](docs/gmsm-roadmap.md)
-- [产品演进路线图](docs/roadmap.md)
-- [v1.3 合规功能指南](docs/v1.3-compliance.md)
 - [AES→SM4 迁移指南](docs/aes-to-sm4-migration.md)
-- [合规证据包](docs/compliance/README.md)
 - [升级指南](docs/upgrade-guide.md)
-- [Benchmark Report](docs/benchmark-report.html)
-- [Deployment Guide](docs/deployment.md)
-- [Test Coverage Report](docs/coverage.md)
-- [Security Policy](SECURITY.md)
-- [Changelog](CHANGELOG.md)
-- [Contributing Guide](CONTRIBUTING.md)
+- [合规证据包](docs/compliance/README.md)
+- [Changelog](CHANGELOG.md) | [Security Policy](SECURITY.md) | [Contributing Guide](CONTRIBUTING.md)
 
-### Compliance Disclaimer
-
-> **⚠️ IMPORTANT: This project has NOT passed FIPS 140-3 or PCI-DSS formal audit certification.**
->
-> Yvonne provides foundational cryptographic security and compliance audit mechanisms, but it is **not** a FIPS-validated cryptographic module. It is suitable as:
-> - An internal infrastructure hardening prototype
-> - A self-hosted KMS for non-strongly-regulated scenarios
-> - A reference implementation for security engineering teams
->
-> For strongly regulated environments (financial payments, healthcare, government), you MUST:
-> 1. Complete formal third-party security audit
-> 2. Integrate FIPS-validated HSM (PKCS#11/TPM) via `CryptoBackend` interface
-> 3. Establish operational procedures (key custody, break-glass, recovery drills)
-> 4. Obtain relevant compliance certifications before production deployment
-
-### Build & Test
+## Build & Test
 
 ```bash
-make build          # compile
-make ci             # local CI (vet + fmt + security + tests)
-make coverage       # coverage report
-bash scripts/security-check.sh  # 12 security checks
+make build                     # compile
+make ci                        # vet + fmt + security + tests
+go test -tags=integration ./...  # PG integration tests
+gosec ./...                    # 0 issues
+govulncheck ./...              # 0 vulnerabilities
 ```
 
-### API Endpoints
+## API Endpoints
 
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/v1/sys/health` | Health check |
 | POST | `/api/v1/sys/unseal` | Submit Shamir shard |
 | POST | `/api/v1/sys/panic` | Emergency seal (irreversible) |
-| POST | `/api/v1/keys` | Create key (AES/RSA/ECDSA) |
-| GET | `/api/v1/keys/transit-pub` | Get BYOK transit public key |
-| POST | `/api/v1/keys/import` | Import external key (BYOK) |
+| POST | `/api/v1/keys` | Create symmetric key |
+| POST | `/api/v1/keys/asymmetric` | Create RSA/ECDSA/SM2 key |
 | POST | `/api/v1/keys/{id}/rotate` | Rotate key |
-| DELETE | `/api/v1/keys/{id}/shred` | Crypto-shred |
-| PATCH | `/api/v1/keys/{id}/soft-delete` | Soft delete (recycle bin) |
-| POST | `/api/v1/keys/{id}/restore` | Restore from recycle bin |
-| POST | `/api/v1/keys/{id}/generate-data-key` | Generate data key (GDK) |
+| DELETE | `/api/v1/keys/{id}/shred` | Crypto-shred (MFA required) |
 | POST | `/api/v1/encrypt` | Envelope encrypt |
 | POST | `/api/v1/decrypt` | Envelope decrypt |
-| POST | `/api/v1/audit/query` | Query audit log (requires AuditQuery action) |
+| POST | `/api/v1/sign` | Asymmetric sign |
+| POST | `/api/v1/verify` | Verify signature |
+| POST | `/api/v1/mac/generate` | Generate HMAC |
+| POST | `/api/v1/mac/verify` | Verify HMAC |
+| POST | `/api/v1/re-encrypt` | Re-encrypt with different key |
+| POST | `/api/v1/auth/mfa/setup` | MFA TOTP setup |
+| POST | `/api/v1/auth/mfa/verify` | MFA verify + enable |
+| POST | `/api/v1/approvals` | Create Quorum approval |
+| POST | `/api/v1/approvals/approve` | Approve ticket |
+| GET | `/admin/api/dashboard` | Web Console dashboard |
+| GET | `/admin/api/keys` | Web Console key list |
 | GET | `/metrics` | Prometheus metrics |
 
-### Roadmap
+Full OpenAPI spec: [docs/openapi.yaml](docs/openapi.yaml) (31 endpoints)
 
-- [x] mTLS client certificate authentication (v1.0)
-- [x] PKCS#11 HSM integration (v1.1, crypto11 + SoftHSM CI)
-- [x] OpenAPI spec + Go SDK + Python SDK (v1.0/v1.2)
-- [x] SM2/SM3/SM4 国密闭环 + JWT SM2 + HMAC-SM3 审计链 (v1.1)
-- [x] HMAC API + GenerateDataKeyWithoutPlaintext + GetPublicKey (v1.2)
-- [x] CORS support + security hardening (gosec 0 issues, govulncheck 0 vulns) (v1.2.1)
-- [x] Sign / Verify 完整实现 + ReEncrypt + 非对称密钥创建 API (v1.2.2)
-- [x] MFA TOTP + Quorum Approval + RFC 8998 国密 TLS + OpenTelemetry + Config Reload + Alerting (v1.3.0)
-- [x] Multi-Tenant Isolation + Web Console (v1.3.1)
-- [ ] TPM 2.0 support — hardware-bound CMK unseal
-- [ ] Kubernetes KMS v2 plugin (gRPC over Unix socket)
-- [ ] Multi-tenant isolation + Web console (v2.0)
-- [ ] KMIP 1.4/2.1 + Vault compatibility (v2.0)
+## Roadmap
+
+- [x] mTLS + PKCS#11 HSM + OpenAPI SDK (v1.0-v1.1)
+- [x] SM2/SM3/SM4 国密闭环 + JWT SM2 + strict GM mode (v1.1)
+- [x] HMAC + Sign/Verify + ReEncrypt + 非对称密钥 API (v1.2)
+- [x] MFA + Quorum + RFC 8998 GM TLS + OTel + Config Reload + Alerting (v1.3.0)
+- [x] Multi-tenant isolation + Web Console (v1.3.1)
+- [ ] KMIP 1.4/2.1 + Vault compatibility + HSM cluster (v2.0)
+- [ ] TPM 2.0 + K8s KMS v2 plugin (v2.0)
 
 Full roadmap: [docs/roadmap.md](docs/roadmap.md)
 
-### License
+## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
 
 ---
 
+> **⚠️ Compliance Disclaimer:** This project has NOT passed FIPS 140-3 or PCI-DSS formal audit. It provides cryptographic security and audit mechanisms, but is not a FIPS-validated module. For strongly regulated environments, complete third-party audit + FIPS HSM integration + compliance certification before production deployment.
+
+---
+
 <a id="中文"></a>
 
-## 中文
+## 为什么选择 Yvonne？
 
-一个自托管 KMS，专注于信封加密、可审计的密钥生命周期、绝对内存纪律和基于 JWT 的 RBAC 鉴权。
+三个其他 KMS 做不到的承诺：
 
-### 为什么选择 Yvonne？
+1. **你的明文密钥永远不会被 Go 垃圾回收器触碰。**
+   每个密钥锁定在 `memguard.SecureBuffer` 中，用 `clear()` + `runtime.KeepAlive()` 擦除。内存转储什么都看不到——我们验证过。
 
-Yvonne 为需要集中化密钥管理但不愿向云厂商交出控制权的团队而构建。她不信任网络、不信任数据库、也不信任 Go 的垃圾回收器。每个明文密钥都锁定在 `memguard.SecureBuffer` 中，用 `clear()` + `runtime.KeepAlive()` 擦除，绝不以明文形式离开进程边界。
+2. **你可以向审计员证明每一次密钥操作。**
+   HMAC 哈希链审计日志。文件轮转 + Syslog 双写。篡改一条记录，整条链断裂——可验证。
 
-### 核心特性
+3. **你不需要专门的团队来运行它。**
+   单个 13MB 二进制。无插件、无脚本引擎、无反射。`./bin/yvonne dev` 30 秒开始加密。
 
-- **绝对内存纪律**：`clear()` + `runtime.KeepAlive()` 击败 DCE 优化。内存转储只能看到幽灵。
-- **版本化自路由密文**：`[uint32 版本号 BE][nonce][密文+tag]` — 解密自动路由到正确的 DEK 版本。
-- **Shamir 秘密分割**：主密钥在 GF(2^8) 有限域中被击碎为 N 份。K 份才能复活。
-- **双写哈希链审计**：HMAC-SHA256 或 HMAC-SM3 哈希链 + 按天文件轮转 + 异步 Syslog 双写。篡改即断链。
-- **JWT RBAC 引擎**：RS256/384/512、ES256/384/512、HS256/384/512、SM2（国密）。防算法混淆攻击。可配置角色 claim 路径。
-- **资源级授权**：body 中的 `KeyID` 校验 `Policy.AllowedKeys`（通配符 + 前缀匹配）。默认拒绝。
-- **自动密钥轮转**：PostgreSQL Advisory Lock 集群选主。每小时扫描过期密钥。Actor=`SYSTEM_DAEMON`。
-- **软删除 + 回收站**：90 天 TTL 自动粉碎。可恢复。永久销毁用 Crypto-Shredding。
-- **BYOK（自带密钥）**：临时 RSA-4096 传输密钥。阅后即焚。外部 DEK 导入无需明文传输。
-- **GDK（生成数据密钥）**：客户端信封加密。KMS 永不接触业务明文。
-- **冷存储备份**：Shamir 分片 Wrapped CMK 到 N 个 U 盘。每片 HMAC 完整性校验。
-- **紧急封印**：一个 API 调用擦除一切。深度冰冻直到手动重启 + Shamir 解封。
-- **HMAC API (v1.2)**：`GenerateMac` / `VerifyMac`，`hmac.Equal` 常量时间比较，仅对称密钥。
-- **信封加密 API (v1.2)**：`GenerateDataKeyWithoutPlaintext` 仅返回密文 DEK（更安全，无明文传输）。
-- **非对称密钥 API (v1.2)**：`Sign` / `Verify` / `GetPublicKey` / `ReEncrypt` 端点。
-- **CORS 支持**：可配置 `AllowedOrigins` + 预检处理 + `SetCORSConfig()` 供 Cluster 模式覆盖。
-- **MFA TOTP (v1.3)**：RFC 6238 TOTP 敏感操作二次确认（ShredKey/EmergencySeal）。X-MFA-Code header + 防重放。
-- **Quorum 审批 (v1.3)**：K-of-N 审批工作流。防自批准 + 幂等 + 过期清理 + 状态机。
-- **RFC 8998 国密 TLS (v1.3)**：SM2 双证书 + SM4/SM3 密码套件。gmsm 构建标签。
-- **OpenTelemetry 链路追踪 (v1.3)**：OTLP gRPC exporter + otelhttp 自动 instrumentation + TraceID 传播到审计日志。
-- **配置热更新 (v1.3)**：SIGHUP 无重启热配置（logging/audit/observability）。
-- **告警 Webhook (v1.3)**：Slack/钉钉/PagerDuty 自动检测格式。高危操作触发告警。
-- **多租户隔离 (v1.3.1)**：keyID 前缀隔离（`tenant-a:key1`）。对存储层透明。向后兼容。
-- **Web 控制台 (v1.3.1)**：Vue 3 SPA（仪表盘 + 密钥管理 + 密码运算 + 审计日志 + MFA/Quorum 管理）。go:embed 内嵌。Admin REST API。
-
-### 快速开始
+## 快速开始
 
 ```bash
-# 开发模式（零配置，内存存储）
-./bin/yvonne dev
-
-# 完整集群部署
-./bin/yvonne unseal-keygen --out /secure/unseal.pem
-./bin/yvonne init --config config.json --pub-key /tmp/pub.pem
-./bin/yvonne server --config config.json
+./bin/yvonne dev --demo       # 30秒：自动创建密钥，打印 curl 示例
+./bin/yvonne dev --dashboard  # 打开浏览器访问 Web 控制台（端口 8250）
 ```
 
-### 文档
+## 功能
 
-- [部署指南](docs/deployment.md)
-- [测试覆盖率报告](docs/coverage.md)
-- [安全策略](SECURITY.md)
-- [贡献指南](CONTRIBUTING.md)
+### 基础能力
+- AES-256-GCM / SM4-GCM 信封加密 + 版本化自路由密文
+- RSA-4096 / ECDSA P-256 / SM2 非对称密码（签名 / 验签 / 重加密）
+- HMAC 生成 / 验证（常量时间比较）
+- 创建 / 轮转 / 粉碎 / 软删除 / 恢复 密钥全生命周期
+- BYOK 自带密钥（阅后即焚传输密钥）
+- GDK 生成数据密钥（支持无明文模式）
+- JWT RBAC（RS/ES/HS/SM2）+ AppRole + K8s SA 认证
+- PostgreSQL 集群 + Advisory Lock 选主
+- Shamir 分片冷存储备份
+- 紧急封印（一个 API 擦除一切）
+- HTTP REST + gRPC + MCP（AI Agent）三协议
+- Web 控制台（仪表盘 / 密钥 / 密码运算 / 审计 / MFA & Quorum）
 
-### 合规免责声明
+### 安全工程
+- 多租户密钥隔离（前缀作用域，向后兼容）
+- MFA TOTP（RFC 6238）敏感操作二次确认
+- K-of-N Quorum 审批工作流（防自批准 + 幂等 + 过期清理）
+- 可插拔 KEK 抽象（软件 / HSM），PKCS#11 支持
+- 严格国密模式：禁用 AES/RSA/ECDSA
+- RFC 8998 国密 TLS（SM2 双证书 + SM4/SM3）
+- OpenTelemetry 链路追踪（TraceID 传播到审计日志）
+- 告警 Webhook（Slack / 钉钉 / PagerDuty 自动检测）
+- SIGHUP 配置热更新
+- gosec 0 issues + govulncheck 0 漏洞（12 项安全自检）
+- 300+ 测试：单元 / 集成（PG）/ gRPC / 浏览器 Selenium E2E（39/39 通过）
 
-> **⚠️ 重要：本项目未通过 FIPS 140-3 或 PCI-DSS 的正式审计认证。**
->
-> Yvonne 提供底层的密码学安全与合规审计机制，但其本身**不是** FIPS 验证的密码模块。它适合作为：
-> - 内部基础设施加固原型
-> - 非强监管场景的自托管 KMS
-> - 安全工程团队的参考实现
->
-> 对于强监管环境（金融支付、医疗、政府），您必须：
-> 1. 完成正式的第三方安全审计
-> 2. 通过 `CryptoBackend` 接口集成 FIPS 验证的 HSM（PKCS#11/TPM）
-> 3. 建立运维制度（密钥托管、应急访问、恢复演练）
-> 4. 在生产部署前取得相关合规认证
+### 独有能力
+- **MCP（AI Agent）集成** — Claude/GPT 原生调用 Yvonne（加密 + 受限解密）
+- **国密全栈（GM/T）** — SM2/SM3/SM4 + JWT SM2 + HMAC-SM3 审计链 + RFC 8998 TLS + 严格模式
+- **13MB 单二进制** — 无运行时依赖，可跑在树莓派和工业网关上
+- **三语言 SDK** — Go / Python / Java，含重试、熔断、trace_id 透传
 
-### 编译与测试
+## 文档
+
+- [产品演进路线图](docs/roadmap.md) | [交付物清单](docs/deliverables.md)
+- [国密合规指南](docs/gmsm-compliance.md) | [密评二级自评报告](docs/compliance/self-assessment-level2.md)
+- [v1.3 合规功能指南](docs/v1.3-compliance.md) | [覆盖率审计报告](docs/coverage-audit.md)
+- [部署指南](docs/deployment.md) | [升级指南](docs/upgrade-guide.md)
+- [gRPC API](docs/grpc-api.md) | [MCP API](docs/mcp-api.md) | [PKCS#11 HSM](docs/pkcs11-hsm.md)
+- [AES→SM4 迁移](docs/aes-to-sm4-migration.md) | [合规证据包](docs/compliance/README.md)
+- [Changelog](CHANGELOG.md) | [Security Policy](SECURITY.md)
+
+## 编译与测试
 
 ```bash
-make build          # 编译
-make ci             # 本地 CI（vet + fmt + 安全 + 测试）
-make coverage       # 覆盖率报告
-bash scripts/security-check.sh  # 12 项安全检查
+make build                     # 编译
+make ci                        # vet + fmt + 安全 + 测试
+go test -tags=integration ./...  # PG 集成测试
 ```
 
-### 路线图
+## 路线图
 
-- [x] mTLS 客户端证书认证 (v1.0)
-- [x] PKCS#11 HSM 集成 (v1.1, crypto11 + SoftHSM CI)
-- [x] OpenAPI spec + Go SDK + Python SDK (v1.0/v1.2)
-- [x] SM2/SM3/SM4 国密闭环 + JWT SM2 + HMAC-SM3 审计链 (v1.1)
-- [x] HMAC API + GenerateDataKeyWithoutPlaintext + GetPublicKey (v1.2)
-- [x] CORS 支持 + 安全加固 (gosec 0 issues, govulncheck 0 vulns) (v1.2.1)
-- [x] Sign / Verify 完整实现 + ReEncrypt + 非对称密钥创建 API (v1.2.2)
-- [x] MFA TOTP + Quorum 审批 + RFC 8998 国密 TLS + OpenTelemetry + 配置热更新 + 告警 (v1.3.0)
-- [x] 多租户隔离 + Web 控制台 (v1.3.1)
-- [ ] TPM 2.0 支持 — 硬件绑定 CMK 解封
-- [ ] Kubernetes KMS v2 插件（gRPC over Unix socket）
-- [ ] 多租户隔离 + Web 控制台 (v2.0)
-- [ ] KMIP 1.4/2.1 + Vault 兼容 (v2.0)
+- [x] mTLS + PKCS#11 HSM + 国密闭环 + Sign/Verify (v1.0-v1.2)
+- [x] MFA + Quorum + RFC 8998 + OTel + 多租户 + Web 控制台 (v1.3)
+- [ ] KMIP + Vault 兼容 + HSM 集群 + TPM 2.0 (v2.0)
 
 完整路线图：[docs/roadmap.md](docs/roadmap.md)
 
-### 许可证
+## 许可证
 
 Apache License 2.0。见 [LICENSE](LICENSE)。
+
+---
+
+> **⚠️ 合规免责声明：** 本项目未通过 FIPS 140-3 或 PCI-DSS 正式审计。对于强监管环境（金融、医疗、政府），需完成第三方审计 + FIPS HSM 集成 + 合规认证后方可生产部署。
