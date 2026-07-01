@@ -11,6 +11,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - v2.0: 企业级（KMIP + Vault 兼容 + 多区域）
 - 详见 [docs/roadmap.md](docs/roadmap.md)
 
+## [1.3.2] - 2026-07-01 (README 重构 + Release 流程立规)
+
+### Changed
+- **README 全面重构**（英中双语镜像）
+  - WHY 移到首屏：3 个尖锐承诺（明文不离开进程 / 可证明可审计 / 主权自托管）
+  - 46 个扁平 bullet 重组为 3 层：Foundation / Security Engineering / Things No One Else Has
+  - Quick Start 保持在首屏内
+  - 合规免责声明移到文档底部
+  - Roadmap 改为 Shipped / Next 分组
+  - API 端点表扩展到 26 个（含 v1.2/v1.3 新增 Sign/Verify/MAC/MFA/Quorum 等）
+- **Release 流程立规** — 每次 release 前必须运行 `scripts/release_gate_e2e.py`，全绿才能打 tag
+
+### Added
+- `scripts/release_gate_e2e.py` — 持久化的 release gate E2E 套件
+  - Part 1: HTTP API 17 项（Encrypt/Decrypt/Sign/Verify/MAC/GDK/Rotate/SoftDelete/Restore/ReEncrypt/GetPublicKey）
+  - Part 2: Admin API 5 项（Dashboard/Keys/Crypto encrypt+decrypt/Audit）
+  - Part 3: Selenium 浏览器 15 项（页面加载/CSS/JS/CSP/导航/加密/解密/审计/MFA）
+  - MFA/Quorum 3 项在 dev 模式跳过（需 cluster 模式 + authenticator）
+
+### Tests
+- v1.3.2 二进制包 E2E 全流程验证：37/37 通过（3 项 dev 模式跳过）
+  - HTTP API: 17/17 ✅
+  - Admin API: 5/5 ✅
+  - Selenium Browser: 15/15 ✅
+
 ## [1.3.1] - 2026-06-30 (多租户 + Web 控制台)
 
 ### Added
