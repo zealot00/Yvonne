@@ -1,3 +1,5 @@
+//go:build !gmsm
+
 // Package crypto - SM2 stub + Suite 补充覆盖测试。
 package crypto
 

@@ -1,3 +1,5 @@
+//go:build !hsm
+
 // Package seal - HSM stub + KEK + VaultState 补充覆盖测试。
 package seal
 
