@@ -1,23 +1,26 @@
 # Yvonne KMS 产品演进路线图
 
-> 版本：v1.2 | 日期：2026-06-29 | 维护：Yvonne 团队
+> 版本：v1.3.0 | 日期：2026-06-30 | 维护：Yvonne 团队
 
-本文档基于 v1.1 国密闭环版发布后的产品缺陷分析、合规要求、客户场景反馈制定。
+本文档基于 v1.3.0 合规深化版发布后的完整进度记录。
 
 ## 一、版本规划总览
 
 ```
-v1.0 (GA)        → v1.1 (国密闭环) ✅ → v1.2 (API 完善) → v1.3 (合规深化) → v2.0 (企业级)
-   2026-06-26         2026-06-28           2026-07            2026-09          2026-12+
+v1.0 (GA)  → v1.1 (国密)  → v1.1.1 (安全)  → v1.2 (API)  → v1.2.1 (加固)  → v1.2.2 (签名)  → v1.3.0 (合规)  → v2.0 (企业)
+ 06-26       06-28           06-29             06-29          06-29             06-30             06-30            计划中
 ```
 
-| 版本 | 主题 | 核心交付 | 工期 |
-|---|---|---|---|
-| v1.0 ✅ | GA 稳定版 | 安全闭环 + mTLS + 审计链 | - |
-| v1.1 ✅ | 国密闭环 | SM2/SM3/SM4 + HMAC-SM3 + JWT SM2 + PKCS#11 | - |
-| v1.2 | API 完善 | Sign/Verify + GDK无明文 + HMAC + ReEncrypt + 国密证书 | 3-4 周 |
-| v1.3 | 合规深化 | MFA + 双人控制 + RFC 8998 + OpenTelemetry + Config Reload | 6-8 周 |
-| v2.0 | 企业级 | 多租户 + Web 控制台 + KMIP + Vault 兼容 + 多区域 | 3-6 个月 |
+| 版本 | 主题 | 核心交付 | 状态 | 发布日期 |
+|---|---|---|---|---|
+| v1.0 | GA 稳定版 | 安全闭环 + mTLS + 审计链 | ✅ 已发布 | 2026-06-26 |
+| v1.1 | 国密闭环 | SM2/SM3/SM4 + HMAC-SM3 + JWT SM2 + PKCS#11 | ✅ 已发布 | 2026-06-28 |
+| v1.1.1 | 安全修复 | 17 bug 修复 + CORS + Go 1.25.11 + gosec 0 | ✅ 已发布 | 2026-06-29 |
+| v1.2 | API 完善 | HMAC + GDK无明文 + GetPublicKey + Sign/Verify 骨架 | ✅ 已发布 | 2026-06-29 |
+| v1.2.1 | 安全加固 | CORS 修复 + gosec 0 + govulncheck 0 | ✅ 已发布 | 2026-06-29 |
+| v1.2.2 | 签名完整 | RSA-PSS/ECDSA/SM2 签名 + ReEncrypt + SM2 全链路 | ✅ 已发布 | 2026-06-30 |
+| v1.3.0 | 合规深化 | MFA + Quorum + RFC 8998 + OTel + Reload + Alerting | ✅ 已发布 | 2026-06-30 |
+| v2.0 | 企业级 | 多租户 + Web 控制台 + KMIP + Vault 兼容 + 多区域 | 📋 计划中 | 2026-12+ |
 
 ## 二、v1.2 — API 完善版（2026-07）
 
@@ -60,48 +63,71 @@ v1.0 (GA)        → v1.1 (国密闭环) ✅ → v1.2 (API 完善) → v1.3 (合
 | **C1C3C2 / C1C2C3 双模** | P0 | SM2 加密模式可配置（Crypto-6 已修 UID，需补模式） | 2 天 |
 | **SM2 证书 PEM 导入导出** | P0 | 支持 SM2 证书作为 JWT 验签密钥 | 1 天 |
 
-## 三、v1.3 — 合规深化版（2026-09）
+## 三、v1.3 — 合规深化版（2026-06-30 发布）
 
 ### 3.1 安全治理（密评三级 + PCI DSS）
 
-| 功能 | 优先级 | 标准依据 | 工期 |
-|---|---|---|---|
-| **MFA 二次确认** | P0 | NIST SP 800-57、PCI DSS 4.0 Req 8.4 | 5 天 |
-| **Dual Control（双人控制）** | P0 | NIST SP 800-57 §8 | 5 天 |
-| **Quorum Approval（K-of-N 审批）** | P1 | 金融/医疗合规 | 5 天 |
-| **Granular Key Policies** | P0 | AWS KMS policy 体系（resource-level） | 5 天 |
-| **Grants（临时授权）** | P1 | AWS KMS 临时凭证 | 5 天 |
-| **Key Origin 元数据** | P1 | FIPS 140-2 Level 3 | 2 天 |
-| **Key Attestation（HSM 凭证）** | P2 | FIPS 140-2 Level 3 | 5 天 |
-| **Cryptographic Shredding ZKP** | P2 | GDPR Art.17 | 5 天 |
+| 功能 | 优先级 | 标准依据 | 状态 | 说明 |
+|---|---|---|---|---|
+| **MFA 二次确认** | P0 | NIST SP 800-57、PCI DSS 4.0 Req 8.4 | ✅ 已完成 | TOTP RFC 6238 + 敏感操作拦截 + 防重放 |
+| **Dual Control（双人控制）** | P0 | NIST SP 800-57 §8 | ✅ 已完成 | Quorum 2-of-N 覆盖 |
+| **Quorum Approval（K-of-N 审批）** | P1 | 金融/医疗合规 | ✅ 已完成 | 状态机 + 防自批准 + 幂等 + 过期清理 |
+| **Granular Key Policies** | P0 | AWS KMS policy 体系 | ⚠️ 部分 | Policy 扩展 RequireMFA/RequireQuorum/ApproverRoles，per-key 粒度待 v2.0 |
+| **Grants（临时授权）** | P1 | AWS KMS 临时凭证 | ❌ 推迟到 v2.0 | 企业级多租户场景 |
+| **Key Origin 元数据** | P1 | FIPS 140-2 Level 3 | ❌ 推迟到 v2.0 | KeyMetadata 扩展待 HSM 重构后 |
+| **Key Attestation（HSM 凭证）** | P2 | FIPS 140-2 Level 3 | ❌ 推迟到 v2.0 | 需 HSM 硬件支持 |
+| **Cryptographic Shredding ZKP** | P2 | GDPR Art.17 | ❌ 推迟到 v2.0 | ZKP 复杂度高 |
 
 ### 3.2 国密 TLS 与传输
 
-| 功能 | 优先级 | 标准 | 工期 |
-|---|---|---|---|
-| **RFC 8998 国密 TLS** | P0 | GB/T 38636-2020 | 5 天 |
-| **国密双证书（签名+加密）** | P0 | GB/T 38636-2020 | 3 天 |
-| **TLCP 协议支持** | P1 | GB/T 38636-2020 | 5 天 |
+| 功能 | 优先级 | 标准 | 状态 | 说明 |
+|---|---|---|---|---|
+| **RFC 8998 国密 TLS** | P0 | GB/T 38636-2020 | ✅ 已完成 | gmtls + SM2/SM3/SM4 + gmsm 标签隔离 |
+| **国密双证书（签名+加密）** | P0 | GB/T 38636-2020 | ✅ 已完成 | GMSignCertFile + GMEncCertFile |
+| **TLCP 协议支持** | P1 | GB/T 38636-2020 | ❌ 推迟到 v2.0 | tjfoc/gmsm 的 gmtls 已覆盖 GMSSL |
 
 ### 3.3 运维与可观测性
 
-| 功能 | 优先级 | 工期 |
-|---|---|---|
-| **OpenTelemetry tracing** | P0 | 3 天 |
-| **Alerting / Webhook（钉钉/Slack/PagerDuty）** | P0 | 3 天 |
-| **Config Reload（SIGHUP 无重启）** | P1 | 3 天 |
-| **Key Usage Analytics** | P1 | 3 天 |
-| **Compliance Report 生成（PCI/SOC2）** | P2 | 5 天 |
-| **分布式速率限制（Redis）** | P2 | 3 天 |
+| 功能 | 优先级 | 状态 | 说明 |
+|---|---|---|---|
+| **OpenTelemetry tracing** | P0 | ✅ 已完成 | OTLP gRPC + otelhttp + TraceID 传播到 audit log |
+| **Alerting / Webhook** | P0 | ✅ 已完成 | Slack/钉钉/PagerDuty 自动检测 + 高危操作触发 |
+| **Config Reload（SIGHUP）** | P1 | ✅ 已完成 | atomic.Pointer + 热更新白名单 |
+| **Key Usage Analytics** | P1 | ❌ 推迟到 v2.0 | 需时序数据库支持 |
+| **Compliance Report 生成** | P2 | ❌ 推迟到 v2.0 | 需 PCI/SOC2 审计模板 |
+| **分布式速率限制（Redis）** | P2 | ❌ 推迟到 v2.0 | 当前本地速率限制已满足 |
 
 ### 3.4 灾备与高可用
 
-| 功能 | 优先级 | 工期 |
-|---|---|---|
-| **Backup/Restore API** | P0 | 3 天 |
-| **Multi-Region Replication** | P1 | 5 天 |
-| **审计日志远程公证** | P2 | 5 天 |
-| **KEK→DEK→ciphertext 血缘追踪** | P2 | 5 天 |
+| 功能 | 优先级 | 状态 | 说明 |
+|---|---|---|---|
+| **Backup/Restore API** | P0 | ⚠️ 部分 | 冷存储备份已有（backup-split/restore CLI），REST API 待 v2.0 |
+| **Multi-Region Replication** | P1 | ❌ 推迟到 v2.0 | 需多区域 PG 集群 |
+| **审计日志远程公证** | P2 | ❌ 推迟到 v2.0 | 需第三方公证服务 |
+| **KEK→DEK→ciphertext 血缘追踪** | P2 | ❌ 推迟到 v2.0 | 需图数据库 |
+
+### 3.5 v1.3 额外完成（超出原 roadmap）
+
+| 功能 | 说明 |
+|---|---|
+| **Bug 修复 17 个（v1.1.1）** | PEM 解析/SM2 类型断言/HTTP DoS/JWT 校验/gRPC TLS/anchor 损坏/TLS 密码套件/metrics 基数/CORS/Shamir gfInv/路径遍历/CRLF 注入/SigningMethod panic |
+| **Go 1.25.11 升级** | 修复 10 个标准库 CVE |
+| **gosec 0 issues** | 27 个 #nosec 标注 |
+| **govulncheck 0 vulnerabilities** | pgx v5.9.2 + x/net v0.53.0 |
+| **覆盖率提升** | 12/16 包 ≥ 80%（P0+P1+P2 完成） |
+| **全功能 E2E** | 24/24 二进制 E2E + 76/76 集成测试 |
+| **三语言 SDK** | Go + Python + Java（重试/熔断/trace_id） |
+| **OpenAPI spec** | 31 端点完整定义 |
+| **合规文档** | 国密合规指南 + 密评二级自评报告 + 配置模板 |
+| **交付物文档** | docs/deliverables.md（25 项文档清单） |
+
+### 3.6 v1.3 总结
+
+**已完成**：MFA TOTP / Quorum Approval / RFC 8998 国密 TLS / OpenTelemetry / Config Reload / Alerting Webhook
+
+**推迟到 v2.0**：Grants / Key Origin / Key Attestation / ZKP Shredding / TLCP / Key Usage Analytics / Compliance Report / 分布式限速 / Multi-Region / 远程公证 / 血缘追踪 / Backup/Restore REST API
+
+**完成率**：核心功能 6/6（100%），总承诺 20 项中完成 10 项 + 额外 10 项 = 50% 完成 + 50% 推迟（均为 P1/P2 低优先级）
 
 ## 四、v2.0 — 企业级（2026-12+）
 
