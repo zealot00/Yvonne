@@ -11,6 +11,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - v2.0: 企业级（KMIP + Vault 兼容 + 多区域）
 - 详见 [docs/roadmap.md](docs/roadmap.md)
 
+## [1.3.3] - 2026-07-01 (LTS 稳定版 — 8 个 Bug 修复 + 用户手册)
+
+> **本版本为长期支持（LTS）版本，后续一段时间内不再迭代，作为生产部署基线。**
+
+### Fixed — 8 个安全/并发/可用性 Bug
+
+- **Bug-1 (HIGH) TOTP TOCTOU 并发漏洞** — `internal/auth/totp.go`
+  `ValidateTOTP` 改用 `markUsed func(time.Time, string) error` 原子回调，依赖 DB 唯一约束保证只有一个请求能成功写入，消除"检查与标记"分离导致的并发重放窗口。旧签名保留为 `ValidateTOTPLegacy` 向后兼容。
+  测试: `TestTOTP_ConcurrentReplayProtection`（10 goroutine 并发，仅 1 成功）
+
+- **Bug-2 (MEDIUM) 集群通知事务原子性** — `internal/lifecycle/manager.go`
+  `RotateKey`/`ShredKey`/`RestoreKey` 在 `WithTx` 闭包内调用 `TxNotifier.NotifyInvalidationInTx`，利用 PG NOTIFY 与事务同提交/回滚的原子性，消除"Commit 成功但通知丢失"窗口。新增 `storage.TxNotifier` 接口，`pgTx` 实现。未实现 TxNotifier 的 store 回退到外部 notifier。
+
+- **Bug-3 (HIGH) 限流器 X-Forwarded-For + 授信代理** — `internal/api/ratelimit.go` / `v1_router.go`
+  `ServeHTTP` 改用 `rateLimiter.clientIP()`，支持 `X-Forwarded-For` + 授信代理 IP 白名单，避免在 Nginx/K8s Ingress 后端所有请求共享同一令牌桶导致全局误杀。新增 `SetTrustedProxies` 方法，仅授信代理才信任 XFF 头（防伪造）。
+  测试: `TestRateLimiter_TrustedProxyXFF` / `UntrustedProxyIgnoresXFF` / `NoTrustedProxiesBackwardCompat`
+
+- **Bug-4 (HIGH) 空值缓存防穿透** — `internal/lifecycle/cache.go`
+  `dekCache` 增加 negative caching：DB 返回 `ErrNotFound` 时缓存 nil 标记 + 短 TTL（5s），防止攻击者用伪造的极大版本号砸穿缓存耗尽 DB 连接池。写正缓存时清除负缓存；`invalidate` 同步清除负缓存。
+  测试: `TestCache_NegativeCache` / `NegativeCachePutPositiveClears` / `InvalidateClearsNegative` / `TestManager_LoadMetadata_NegativeCache`
+
+- **Bug-5 (MEDIUM) 分页扫描防 OOM** — `internal/lifecycle/manager.go`
+  `reapExpiredSoftDeletes`/`countKeys`/`ListKeyIDs` 改用 `PagedPrefixScanner` 分页扫描（每页 1000 条），避免一次性加载百万级历史版本导致 OOM 尖刺。新增 `storage.PagedPrefixScanner` 接口，`MemoryStore` 和 `PostgresKVStore` 实现。旧版一次性扫描保留为 `*Legacy` 回退路径。
+
+- **Bug-6 (MEDIUM) KEK 解密失败告警** — `internal/service/core.go`
+  `Core` 注入 `Alerter`，`Encrypt`/`Decrypt` 中 `KEK.UnwrapDEK` 失败时触发 CRITICAL 告警（`KEKUnwrapFailure`），联动 `observability.Alerting`。新增 `service.Alerter` 接口 + `coreAlerterAdapter` 适配器。
+  测试: `TestCore_KEKFailureTriggersAlert` / `NoopAlerterDefault`
+
+- **Bug-7 (MEDIUM) GDK 明文 DEK 受控暴露** — `internal/service/core.go`
+  `GenerateDataKeyResult.plaintextDEK` 改为私有字段，调用方通过 `WriteBase64To(io.Writer)` 受控访问，Core 内部写入后立即 Wipe，从接口设计上消除 Handler 遗漏 `defer Wipe` 的风险。gRPC server 同步改用 `WriteBase64To`。
+  测试: `TestCore_GenerateDataKey_Success` 验证 WriteBase64To + 自动 Wipe
+
+- **Bug-8 (LOW) TOTP uint64 溢出陷阱** — `internal/auth/totp.go`
+  counter 计算从 `uint64(skew)` 改为 `int64` 计算，避免 `skew=-1` 时 `uint64` 环绕为 `18446744073709551615` 的不稳定行为。
+  测试: `TestTOTP_NoNegativeOverflow`
+
+### Added — 文档
+
+- **中英双语用户手册** — `docs/manual/`
+  - `user-manual.zh.md`（1633 行）/ `user-manual.en.md`（1632 行）/ `README.md` 索引
+  - 19 章覆盖全部功能 + 7 个使用场景（微服务统一加密 / 数据库字段加密 / AI Agent / 国密合规 / K8s 集成 / 多租户 SaaS / 双人审批）+ 选型矩阵
+  - 每个场景含架构图、配置示例、代码片段、收益分析
+
+### Changed
+
+- 主 README 添加用户手册链接（中英双语段落）
+
+### Tests
+
+- 新增 13 个测试覆盖 8 个 Bug 修复（详见各 Bug 描述）
+- 修复 stub 测试 build tag 隔离：`coverage_test.go` 加 `//go:build !gmsm` 和 `//go:build !hsm`，确保 stub 测试仅在无标签时运行
+
+### Verification
+
+- CI: 17 packages PASS
+- security-check.sh: 12 项全通过
+- release_gate_e2e.py: 37/37 通过（17 HTTP API + 5 Admin API + 15 Selenium 浏览器）
+- 集成测试: 15 packages PASS（按包顺序运行）
+
 ## [1.3.2] - 2026-07-01 (README 重构 + Release 流程立规)
 
 ### Changed

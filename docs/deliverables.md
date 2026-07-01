@@ -1,8 +1,8 @@
 # Yvonne KMS 交付物文档
 
-> 版本：v1.3.0 | 日期：2026-06-30 | 状态：GA
+> 版本：v1.3.3 (LTS) | 日期：2026-07-01 | 状态：GA
 
-本文档记录 Yvonne KMS 从 v1.0 GA 到 v1.3.0 的完整交付物清单。
+本文档记录 Yvonne KMS 从 v1.0 GA 到 v1.3.3 LTS 的完整交付物清单。
 
 ## 一、版本发布历史
 
@@ -15,6 +15,9 @@
 | v1.2.1 | 2026-06-29 | 安全加固版（CORS + gosec + Go 1.25.11） | `v1.2.1` | ✅ |
 | v1.2.2 | 2026-06-30 | Sign/Verify + ReEncrypt 完整实现 | `v1.2.2` | ✅ |
 | v1.3.0 | 2026-06-30 | 合规深化版（MFA + Quorum + 国密 TLS + OTel） | `v1.3.0` | ✅ |
+| v1.3.1 | 2026-06-30 | 多租户 + Web 控制台 | `v1.3.1` | ✅ |
+| v1.3.2 | 2026-07-01 | README 重构 + Release 流程立规 | `v1.3.2` | ✅ |
+| **v1.3.3** | **2026-07-01** | **LTS 稳定版（8 bugs + 用户手册）** | **`v1.3.3`** | **✅ LTS** |
 
 ## 二、各版本交付物清单
 
@@ -309,3 +312,37 @@ govulncheck: 0 vulnerabilities
 | PCI DSS 4.0 | ⚠️ 部分满足（MFA + Quorum + 审计链） |
 | GB/T 39786-2021 | ⚠️ 第二级可达（国密闭环） |
 | 等保 2.0 | ⚠️ 部分满足 |
+
+## v1.3.3 — LTS 稳定版
+
+**核心交付**：
+- 8 个 Bug 修复（并发/可用性/密码学边界）— 详见 CHANGELOG
+- 中英双语用户手册（19 章 + 7 个使用场景）
+- 测试隔离修复（stub build tag）
+
+**新增文档**：
+- `docs/manual/user-manual.zh.md`（1633 行）
+- `docs/manual/user-manual.en.md`（1632 行）
+- `docs/manual/README.md`（手册索引）
+
+**新增测试**（13 个）：
+- `TestTOTP_ConcurrentReplayProtection` / `TestTOTP_NoNegativeOverflow` / `TestTOTP_LegacyReplayProtection`
+- `TestRateLimiter_TrustedProxyXFF` / `UntrustedProxyIgnoresXFF` / `NoTrustedProxiesBackwardCompat`
+- `TestCache_NegativeCache` / `NegativeCachePutPositiveClears` / `InvalidateClearsNegative` / `TestManager_LoadMetadata_NegativeCache`
+- `TestCore_KEKFailureTriggersAlert` / `NoopAlerterDefault`
+- `TestCore_GenerateDataKey_Success`（WriteBase64To 验证）
+
+**新增接口/类型**：
+- `storage.TxNotifier` — 事务内 NOTIFY 接口
+- `storage.PagedPrefixScanner` — 分页扫描接口
+- `service.Alerter` — 服务层告警接口
+- `RateLimiter.SetTrustedProxies` — 授信代理白名单
+- `GenerateDataKeyResult.WriteBase64To` — GDK 受控暴露方法
+
+**验证**：
+- CI: 17 packages PASS
+- security-check.sh: 12 项全通过
+- release_gate_e2e.py: 37/37 通过
+- 集成测试: 15 packages PASS
+
+**LTS 状态**：作为生产部署基线，后续一段时间内不再迭代。

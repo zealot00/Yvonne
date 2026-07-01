@@ -108,7 +108,7 @@ make coverage       # coverage report
 bash scripts/security-check.sh  # 12 security checks
 ```
 
-**Latest E2E verification (v1.3.2 binary):**
+**Latest E2E verification (v1.3.3 binary, LTS):**
 
 | Suite | Result |
 |---|---|
@@ -150,6 +150,7 @@ Release gate script: `scripts/release_gate_e2e.py` (run before every tag)
 - v1.2.2 — Sign/Verify 完整实现 (RSA-PSS/ECDSA/SM2), asymmetric key creation API
 - v1.3.0 — MFA TOTP, Quorum Approval, RFC 8998 GM TLS, OpenTelemetry, Config Reload, Alerting
 - v1.3.1 — Multi-Tenant Isolation, Web Console (pure JS, strict CSP)
+- v1.3.3 (LTS) — 8 bug fixes (TOCTOU/atomicity/rate-limit/cache/OOM/alert/memory/overflow) + bilingual user manual
 
 **Next**
 
@@ -284,7 +285,7 @@ make coverage       # 覆盖率报告
 bash scripts/security-check.sh  # 12 项安全检查
 ```
 
-**最新 E2E 验证（v1.3.2 二进制包）：**
+**最新 E2E 验证（v1.3.3 二进制包，LTS）：**
 
 | 测试套件 | 结果 |
 |---|---|
@@ -324,6 +325,7 @@ Release gate 脚本：`scripts/release_gate_e2e.py`（每次打 tag 前运行）
 - v1.2.2 — Sign/Verify 完整实现（RSA-PSS/ECDSA/SM2）、非对称密钥创建 API
 - v1.3.0 — MFA TOTP、Quorum 审批、RFC 8998 国密 TLS、OpenTelemetry、配置热更新、告警
 - v1.3.1 — 多租户隔离、Web 控制台（纯 JS、严格 CSP）
+- v1.3.3 (LTS) — 8 个 Bug 修复（TOCTOU/事务原子性/限流/缓存/OOM/告警/内存/溢出）+ 中英双语用户手册
 
 **下一步**
 

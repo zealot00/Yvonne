@@ -1,6 +1,6 @@
 # Yvonne KMS 用户手册 / User Manual
 
-> 版本 / Version: v1.3.2 | 最后更新 / Last updated: 2026-07-01
+> 版本 / Version: v1.3.3 (LTS) | 最后更新 / Last updated: 2026-07-01
 
 本目录包含 Yvonne KMS 的完整用户手册，覆盖全部功能与产品特性。
 

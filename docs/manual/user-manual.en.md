@@ -1,6 +1,6 @@
 # Yvonne KMS User Manual
 
-> Version: v1.3.2 | Last updated: 2026-07-01
+> Version: v1.3.3 (LTS) | Last updated: 2026-07-01
 
 Welcome to Yvonne KMS. This manual covers all features and capabilities of the product, organized from basic to advanced, suitable for both DevOps engineers getting started and architects needing deep customization.
 
