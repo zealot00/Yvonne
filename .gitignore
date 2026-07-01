@@ -36,6 +36,10 @@ reports/
 *.swp
 .DS_Store
 
+# AI 工具目录（禁止入库）
+.reasonix/
+.sisyphus/
+
 # 环境变量
 .env
 .env.local
