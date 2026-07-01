@@ -121,6 +121,7 @@ Release gate script: `scripts/release_gate_e2e.py` (run before every tag)
 
 ### Documentation
 
+- **[用户手册 / User Manual](docs/manual/README.md)** — 19 章完整手册（中英双语），含 7 个使用场景
 - [HTTP API Guide](docs/api.md)
 - [gRPC API Guide](docs/grpc-api.md)
 - [MCP (AI Agent) Guide](docs/mcp-api.md)
@@ -296,6 +297,7 @@ Release gate 脚本：`scripts/release_gate_e2e.py`（每次打 tag 前运行）
 
 ### 文档
 
+- **[用户手册 / User Manual](docs/manual/README.md)** — 19 章完整手册（中英双语），含 7 个使用场景
 - [部署指南](docs/deployment.md)
 - [HTTP API 指南](docs/api.md)
 - [gRPC API 指南](docs/grpc-api.md)
