@@ -1,0 +1,99 @@
+{
+  "mode": "cluster",
+  "server": {
+    "bind_addr": "0.0.0.0",
+    "bind_port": 8200,
+    "tls": {
+      "enabled": true,
+      "gm_enabled": true,
+      "gm_sign_cert_file": "/etc/yvonne/certs/sm2-sign.pem",
+      "gm_sign_key_file": "/etc/yvonne/certs/sm2-sign-key.pem",
+      "gm_enc_cert_file": "/etc/yvonne/certs/sm2-enc.pem",
+      "gm_enc_key_file": "/etc/yvonne/certs/sm2-enc-key.pem",
+      "min_version": "TLS1.2"
+    },
+    "grpc": {
+      "enabled": true,
+      "bind_addr": "0.0.0.0",
+      "bind_port": 8201,
+      "tls": {
+        "enabled": true,
+        "gm_enabled": true,
+        "gm_sign_cert_file": "/etc/yvonne/certs/sm2-sign.pem",
+        "gm_sign_key_file": "/etc/yvonne/certs/sm2-sign-key.pem",
+        "gm_enc_cert_file": "/etc/yvonne/certs/sm2-enc.pem",
+        "gm_enc_key_file": "/etc/yvonne/certs/sm2-enc-key.pem"
+      }
+    },
+    "admin": {
+      "enabled": false
+    },
+    "mcp": {
+      "enabled": false
+    }
+  },
+  "storage": {
+    "type": "postgres",
+    "dsn": "postgresql://yvonne:password@db.internal:5432/yvonne"
+  },
+  "unseal": {
+    "type": "shamir",
+    "total_shares": 5,
+    "threshold": 3
+  },
+  "auth": {
+    "app_roles": [
+      {
+        "role_id": "admin",
+        "token": "REPLACE_WITH_SECURE_TOKEN",
+        "allowed_keys": ["*"],
+        "allowed_actions": ["*"]
+      },
+      {
+        "role_id": "order-service",
+        "token": "REPLACE_WITH_SERVICE_TOKEN",
+        "allowed_keys": ["order-*"],
+        "allowed_actions": ["encrypt", "decrypt"]
+      }
+    ],
+    "jwt": {
+      "signing_method": "SM2",
+      "verifying_key_path": "/etc/yvonne/keys/sm2-jwt-pub.pem",
+      "issuer": "yvonne-kms",
+      "audience": ["yvonne-clients"]
+    }
+  },
+  "audit": {
+    "dir": "/var/log/yvonne",
+    "filename": "audit.log",
+    "retention_days": 180,
+    "syslog_enabled": true,
+    "syslog_tag": "yvonne-kms"
+  },
+  "logging": {
+    "level": "info",
+    "redact_secrets": true
+  },
+  "crypto": {
+    "suite": "gmsm",
+    "strict": true
+  },
+  "mfa": {
+    "enabled": true,
+    "issuer": "Yvonne KMS",
+    "window_seconds": 30,
+    "sensitive_operations": ["ShredKey", "EmergencySeal", "ExportKey", "SoftDeleteKey"]
+  },
+  "observability": {
+    "tracing": {
+      "enabled": true,
+      "endpoint": "otel-collector:4317",
+      "service_name": "yvonne-kms"
+    },
+    "alerting": {
+      "enabled": true,
+      "webhook_url": "https://hooks.slack.com/services/REPLACE",
+      "high_risk_operations": ["ShredKey", "EmergencySeal", "QuorumReject"]
+    }
+  }
+}

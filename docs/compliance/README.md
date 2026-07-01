@@ -1,6 +1,6 @@
 # 合规证据包
 
-> Yvonne KMS v1.0 | 日期：2026-06-26 | 适用：等保二级/三级 + 密评二级
+> Yvonne KMS v1.3.0 | 日期：2026-06-30 | 适用：等保二级/三级 + 密评二级
 
 ## 目录
 
@@ -12,11 +12,20 @@
 | [审计日志样例与验证流程](audit-samples-and-verification.md) | 日志格式 + 样例 + 链验证 + 定期审查 |
 | [应急响应与演练手册](emergency-and-drill-handbook.md) | Emergency Seal + 解封恢复 + 销毁演练 + DB 故障 |
 | [等保/密评检查点映射表](compliance-checklist.md) | GB/T 39786-2021 逐项对照 |
+| [密评二级自评报告](self-assessment-level2.md) | 24 项逐项自评（23 合规 + 1 待改进） |
+
+## 外部参考文档
+
+| 文档 | 说明 |
+|---|---|
+| [国密合规指南](../gmsm-compliance.md) | 编译配置 + 算法清单 + 密评对照表 |
+| [v1.3 合规功能指南](../v1.3-compliance.md) | MFA + Quorum + 国密 TLS + OTel |
+| [国密配置示例](../../deploy/examples/config-gmsm.json) | 完全国密模式配置模板 |
 
 ## 使用说明
 
 1. **等保整改**：将本目录文档作为密码管理整改附件提交
-2. **密评准备**：对照检查点映射表逐项准备证据
+2. **密评准备**：对照检查点映射表逐项准备证据 + 自评报告
 3. **内部审计**：按角色职责矩阵分配权限 + 定期审查
 4. **应急演练**：按演练手册每年至少执行 1 次
 
@@ -26,4 +35,5 @@
 |---|---|---|
 | v1.0 (GA) | 等保二级基础 | SM4/SM3/SM2 已实现，审计链 HMAC-SHA256 |
 | v1.1 ✅ | 等保二级完整 | HMAC-SM3 + JWT SM2 + SM2 公钥密码 + 严格国密模式 + PKCS#11 HSM |
-| v1.2 (planned) | 等保三级 | 国密认证 RNG + 国产数据库适配 |
+| v1.2 ✅ | 等保二级增强 | Sign/Verify + ReEncrypt + 非对称密钥 API |
+| v1.3 ✅ | 等保二级完整 + 合规深化 | MFA + Quorum + RFC 8998 国密 TLS + OTel + 告警 |

@@ -265,7 +265,9 @@ govulncheck: 0 vulnerabilities
 | README.md | 项目简介 + 快速开始 |
 | CHANGELOG.md | 完整变更日志 |
 | docs/roadmap.md | 产品演进路线图 |
-| docs/v1.3-compliance.md | v1.3 合规功能指南 |
+| docs/deliverables.md | 交付物清单（本文档） |
+| docs/v1.3-compliance.md | v1.3 合规功能指南（MFA/Quorum/TLS/OTel） |
+| docs/gmsm-compliance.md | 国密合规指南（编译配置 + 算法清单 + 密评对照表） |
 | docs/gmsm-roadmap.md | 国密合规路线图 |
 | docs/deployment.md | 部署指南 |
 | docs/upgrade-guide.md | 升级指南 |
@@ -275,7 +277,15 @@ govulncheck: 0 vulnerabilities
 | docs/aes-to-sm4-migration.md | AES→SM4 迁移指南 |
 | docs/coverage-audit.md | 覆盖率审计报告 |
 | docs/coverage-report.html | HTML 覆盖率报告 |
-| docs/deliverables.md | 本文档 |
+| docs/compliance/README.md | 合规证据包目录 |
+| docs/compliance/crypto-application-scheme.md | 密码应用方案 |
+| docs/compliance/key-lifecycle-management.md | 密钥生命周期管理制度 |
+| docs/compliance/role-separation-matrix.md | 角色职责分离矩阵 |
+| docs/compliance/audit-samples-and-verification.md | 审计日志样例与验证流程 |
+| docs/compliance/emergency-and-drill-handbook.md | 应急响应与演练手册 |
+| docs/compliance/compliance-checklist.md | 等保/密评检查点映射表 |
+| docs/compliance/self-assessment-level2.md | 密评二级自评报告（24 项逐项评估） |
+| deploy/examples/config-gmsm.json | 国密模式配置模板 |
 | SECURITY.md | 安全策略 |
 | CONTRIBUTING.md | 贡献指南 |
 
