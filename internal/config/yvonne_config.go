@@ -42,6 +42,12 @@ type YvonneConfig struct {
 	Crypto        CryptoConfig        `json:"crypto"         yaml:"crypto"`       // 密码套件配置（v1.1 新增 Suite 字段）
 	MFA           MFAConfig           `json:"mfa"            yaml:"mfa"`          // v1.3: MFA TOTP 配置
 	Observability ObservabilityConfig `json:"observability" yaml:"observability"` // v1.3: OTel + Alerting
+	MultiTenant   MultiTenantConfig   `json:"multi_tenant"  yaml:"multi_tenant"`  // v1.3.1: 多租户配置
+}
+
+// MultiTenantConfig 是多租户配置（v1.3.1）。
+type MultiTenantConfig struct {
+	Enabled bool `json:"enabled" yaml:"enabled"` // 是否启用多租户隔离
 }
 
 // MFAConfig 是 MFA TOTP 配置（v1.3）。
@@ -114,6 +120,7 @@ type AppRoleEntry struct {
 	Token          string   `json:"token"            yaml:"token"`
 	AllowedKeys    []string `json:"allowed_keys"     yaml:"allowed_keys"`
 	AllowedActions []string `json:"allowed_actions"  yaml:"allowed_actions"`
+	TenantID       string   `json:"tenant_id"        yaml:"tenant_id"` // v1.3.1: 多租户 ID（空=非多租户）
 }
 
 // StorageModeConf 是模式相关的存储配置。

@@ -100,9 +100,12 @@ func (r *V1Router) RequireAuth(authenticator auth.Authenticator, action string, 
 			return
 		}
 
-		// 3. 注入 RoleID + 完整 Policy 到 context。
+		// 3. 注入 RoleID + 完整 Policy + TenantID 到 context。
 		ctx := auth.WithRoleID(req.Context(), policy.RoleID)
 		ctx = auth.WithPolicy(ctx, policy)
+		if policy.TenantID != "" {
+			ctx = auth.WithTenant(ctx, policy.TenantID)
+		}
 		req = req.WithContext(ctx)
 
 		// 4. RBAC 校验：Action 是否允许。

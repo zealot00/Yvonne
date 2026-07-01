@@ -30,6 +30,9 @@ type Policy struct {
 	RequireMFA    bool     `json:"require_mfa,omitempty"`    // 敏感操作需 TOTP 二次确认
 	RequireQuorum int      `json:"require_quorum,omitempty"` // 0=不需要，N=需 N 人审批
 	ApproverRoles []string `json:"approver_roles,omitempty"` // 有权审批的角色
+
+	// v1.3.1: 多租户
+	TenantID string `json:"tenant_id,omitempty"` // 租户 ID（空=非多租户模式）
 }
 
 // MFAState 存储角色的 MFA 绑定状态。
@@ -193,6 +196,8 @@ const (
 	RoleIDKey ContextKey = iota
 	// PolicyKey 存储完整 Policy 对象（资源级授权用）。
 	PolicyKey
+	// TenantIDKey 存储租户 ID（多租户隔离用）。
+	TenantIDKey
 )
 
 // RoleIDFromContext 从 context 提取 RoleID。
@@ -220,6 +225,40 @@ func PolicyFromContext(ctx context.Context) *Policy {
 // WithPolicy 将完整 Policy 注入 context。
 func WithPolicy(ctx context.Context, policy *Policy) context.Context {
 	return context.WithValue(ctx, PolicyKey, policy)
+}
+
+// TenantFromContext 从 context 提取 TenantID（多租户隔离用）。
+func TenantFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(TenantIDKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// WithTenant 将 TenantID 注入 context。
+func WithTenant(ctx context.Context, tenantID string) context.Context {
+	return context.WithValue(ctx, TenantIDKey, tenantID)
+}
+
+// ScopedKeyID 返回带租户前缀的 keyID（多租户模式）。
+// 非多租户模式（tenantID 为空）直接返回原 keyID。
+func ScopedKeyID(tenantID, keyID string) string {
+	if tenantID == "" {
+		return keyID
+	}
+	return tenantID + ":" + keyID
+}
+
+// UnscopedKeyID 从带租户前缀的 keyID 中提取原始 keyID。
+func UnscopedKeyID(tenantID, scopedKeyID string) string {
+	if tenantID == "" {
+		return scopedKeyID
+	}
+	prefix := tenantID + ":"
+	if len(scopedKeyID) > len(prefix) && scopedKeyID[:len(prefix)] == prefix {
+		return scopedKeyID[len(prefix):]
+	}
+	return scopedKeyID
 }
 
 // ExtractBearerToken 从 Authorization header 提取 Bearer token。

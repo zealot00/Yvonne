@@ -386,12 +386,23 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 				RoleID:         r.RoleID,
 				AllowedKeys:    r.AllowedKeys,
 				AllowedActions: r.AllowedActions,
+				TenantID:       r.TenantID,
 			}
 			appAuth.RegisterPolicy(r.RoleID, r.Token, policy)
 			policyStore.AddPolicy(policy)
 		}
 		authenticator = appAuth
-		log.Printf("CLUSTER MODE: AppRole authenticator loaded with %d role(s)", len(cfg.Auth.AppRoles))
+		tenantCount := 0
+		for _, r := range cfg.Auth.AppRoles {
+			if r.TenantID != "" {
+				tenantCount++
+			}
+		}
+		if tenantCount > 0 {
+			log.Printf("CLUSTER MODE: AppRole authenticator loaded with %d role(s) (%d tenant-scoped)", len(cfg.Auth.AppRoles), tenantCount)
+		} else {
+			log.Printf("CLUSTER MODE: AppRole authenticator loaded with %d role(s)", len(cfg.Auth.AppRoles))
+		}
 	}
 
 	// 2. 加载 JWT（如果配置）。

@@ -68,7 +68,9 @@ func (r *V1Router) handleV1Sign(w http.ResponseWriter, req *http.Request) {
 	}
 
 	policy := auth.PolicyFromContext(req.Context())
-	result, err := r.core.Sign(req.Context(), body.KeyID, body.Data, policy)
+	tenantID := auth.TenantFromContext(req.Context())
+	scopedKeyID := auth.ScopedKeyID(tenantID, body.KeyID)
+	result, err := r.core.Sign(req.Context(), scopedKeyID, body.Data, policy)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -114,7 +116,9 @@ func (r *V1Router) handleV1Verify(w http.ResponseWriter, req *http.Request) {
 	}
 
 	policy := auth.PolicyFromContext(req.Context())
-	result, err := r.core.Verify(req.Context(), body.KeyID, body.Data, body.Signature, policy)
+	tenantID := auth.TenantFromContext(req.Context())
+	scopedKeyID := auth.ScopedKeyID(tenantID, body.KeyID)
+	result, err := r.core.Verify(req.Context(), scopedKeyID, body.Data, body.Signature, policy)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -288,9 +292,11 @@ func (r *V1Router) handleV1GDKWithoutPlaintext(w http.ResponseWriter, req *http.
 		return
 	}
 
+	tenantID := auth.TenantFromContext(req.Context())
+	scopedKeyID := auth.ScopedKeyID(tenantID, keyID)
 	var ciphertext []byte
 	err := r.seal.KEKRef(func(kek seal.KEK) error {
-		_, ct, e := r.manager.GenerateDataKey(req.Context(), keyID, kek)
+		_, ct, e := r.manager.GenerateDataKey(req.Context(), scopedKeyID, kek)
 		if e != nil {
 			return e
 		}
@@ -339,7 +345,10 @@ func (r *V1Router) handleV1ReEncrypt(w http.ResponseWriter, req *http.Request) {
 
 	// ReEncrypt = Decrypt(source) + Encrypt(dest)，service 层已实现。
 	policy := auth.PolicyFromContext(req.Context())
-	result, err := r.core.ReEncrypt(req.Context(), body.SourceKeyID, body.Ciphertext, body.DestKeyID, policy)
+	tenantID := auth.TenantFromContext(req.Context())
+	result, err := r.core.ReEncrypt(req.Context(),
+		auth.ScopedKeyID(tenantID, body.SourceKeyID), body.Ciphertext,
+		auth.ScopedKeyID(tenantID, body.DestKeyID), policy)
 	if err != nil {
 		writeAPIError(w, err)
 		return

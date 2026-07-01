@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"runtime"
 
+	"yvonne/internal/auth"
 	"yvonne/internal/crypto"
 	"yvonne/internal/lifecycle"
 	"yvonne/internal/memguard"
@@ -88,10 +89,14 @@ func (r *V1Router) handleV1Encrypt(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// v1.3.1: 多租户 keyID 前缀。
+	tenantID := auth.TenantFromContext(req.Context())
+	scopedKeyID := auth.ScopedKeyID(tenantID, body.KeyID)
+
 	ctx := req.Context()
 
 	// 强制请求 Active 版本（状态机硬编码：只有 Active 能加密）。
-	meta, err := r.manager.GetActiveKey(ctx, body.KeyID)
+	meta, err := r.manager.GetActiveKey(ctx, scopedKeyID)
 	if err != nil {
 		if err == lifecycle.ErrKeyNotActive {
 			writeJSONError(w, http.StatusForbidden, "key is not active, encrypt refused")
@@ -190,6 +195,10 @@ func (r *V1Router) handleV1Decrypt(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// v1.3.1: 多租户 keyID 前缀。
+	tenantID := auth.TenantFromContext(req.Context())
+	scopedKeyID := auth.ScopedKeyID(tenantID, body.KeyID)
+
 	if len(body.Ciphertext) < crypto.MinCiphertextSize {
 		writeJSONError(w, http.StatusBadRequest, "ciphertext too short")
 		return
@@ -205,7 +214,7 @@ func (r *V1Router) handleV1Decrypt(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 
 	// 2. 精准请求对应版本（状态机强制：Destroyed 拒绝）。
-	meta, err := r.manager.GetKeyForDecrypt(ctx, body.KeyID, int(version))
+	meta, err := r.manager.GetKeyForDecrypt(ctx, scopedKeyID, int(version))
 	if err != nil {
 		if err == lifecycle.ErrKeyDestroyed {
 			writeJSONError(w, http.StatusBadRequest, "key version is destroyed, decrypt refused")

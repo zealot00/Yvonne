@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 
+	"yvonne/internal/auth"
 	"yvonne/internal/lifecycle"
 	"yvonne/internal/memguard"
 	"yvonne/internal/seal"
@@ -65,6 +66,10 @@ func (r *V1Router) handleCreateKey(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// v1.3.1: 多租户 keyID 前缀。
+	tenantID := auth.TenantFromContext(req.Context())
+	scopedKeyID := auth.ScopedKeyID(tenantID, body.KeyID)
+
 	// 通过 MasterKeyRef 获取 Master Key，调用 lifecycle.CreateKey。
 	var plaintextDEK *memguard.SecureBuffer
 	var meta *struct {
@@ -73,7 +78,7 @@ func (r *V1Router) handleCreateKey(w http.ResponseWriter, req *http.Request) {
 	}
 
 	err = r.seal.KEKRef(func(kek seal.KEK) error {
-		m, pdek, e := r.manager.CreateKey(req.Context(), body.KeyID, kek, 0)
+		m, pdek, e := r.manager.CreateKey(req.Context(), scopedKeyID, kek, 0)
 		if e != nil {
 			return e
 		}
