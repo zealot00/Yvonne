@@ -8,8 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
-- v2.0: 企业级（多租户 + Web 控制台 + KMIP + Vault 兼容）
+- v2.0: 企业级（KMIP + Vault 兼容 + 多区域）
 - 详见 [docs/roadmap.md](docs/roadmap.md)
+
+## [1.3.1] - 2026-06-30 (多租户 + Web 控制台)
+
+### Added
+- **多租户隔离** — keyID 前缀策略
+  - Policy 新增 `TenantID` 字段
+  - `WithTenant`/`TenantFromContext` context 函数
+  - `ScopedKeyID`/`UnscopedKeyID` 辅助函数
+  - AppRoleEntry 新增 `TenantID` 配置
+  - `MultiTenantConfig{Enabled bool}` 多租户开关
+  - 所有 API handler 支持 tenant scoping（Encrypt/Decrypt/Sign/Verify/Mac/ReEncrypt/CreateKey/CreateAsymmetricKey/GetPublicKey/GDK）
+  - 向后兼容：`multi_tenant.enabled=false`（默认）行为不变
+- **Web 控制台** — Vue 3 CDN SPA
+  - Dashboard（密钥数 + Vault 状态）
+  - 密钥管理（列表 + 刷新）
+  - 密码运算测试（加密/解密在线测试）
+  - 审计日志查看（查询/过滤）
+  - MFA + Quorum 管理页面
+  - Tailwind CSS + Vue Router
+  - go:embed 内嵌到二进制
+  - Admin REST API（dashboard/keys/audit/crypto/encrypt/decrypt）
+  - Bearer Token 认证 + CSP 安全头
+
+### Changed
+- bootstrap 注册 Policy 时传 TenantID
+- admin server 路由扩展（6 个新 API 端点）
+- admin server 新增 `handleSPAFile` 服务 Vue SPA 资源
+
+### Tests
+- 多租户隔离测试（6 个）：跨租户访问拒绝 + 同名密钥 + 向后兼容 + 辅助函数
 
 ## [1.3.0] - 2026-06-30 (合规深化版)
 

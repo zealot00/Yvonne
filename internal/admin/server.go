@@ -22,7 +22,7 @@ import (
 	"yvonne/internal/seal"
 )
 
-//go:embed web/static/*
+//go:embed web/static/* web/index.html web/app.js
 var staticFS embed.FS
 
 // 确保 context 包被引用。
@@ -72,6 +72,9 @@ func (s *Server) register() {
 	}
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticRoot))))
 
+	// v1.3.1: Vue SPA 资源。
+	s.mux.HandleFunc("/app.js", s.handleSPAFile("web/app.js", "application/javascript"))
+
 	// 页面路由：返回入口 HTML，由前端 JS 调用 /api/* 与 /sys/*。
 	s.mux.HandleFunc("/", s.handleIndex)
 
@@ -79,10 +82,28 @@ func (s *Server) register() {
 	// seal-status 不需认证（用于探活/概览）。
 	s.mux.HandleFunc("/admin/api/seal-status", s.handleSealStatus)
 	// keys 列表需认证（含密钥元数据）。
-	s.mux.HandleFunc("/admin/api/keys", s.requireAdminToken(s.handleListKeys))
+	s.mux.HandleFunc("/admin/api/keys", s.requireAdminToken(s.handleAPIKeys))
+	// v1.3.1: Web 控制台 API。
+	s.mux.HandleFunc("/admin/api/crypto/encrypt", s.requireAdminToken(s.handleAPIEncrypt))
+	s.mux.HandleFunc("/admin/api/crypto/decrypt", s.requireAdminToken(s.handleAPIDecrypt))
+	s.mux.HandleFunc("/admin/api/audit", s.requireAdminToken(s.handleAPIAudit))
+	s.mux.HandleFunc("/admin/api/dashboard", s.requireAdminToken(s.handleAPIDashboard))
 	// seal/unseal 需要认证（如果设置了 adminToken）。
 	s.mux.HandleFunc("/admin/api/seal", s.requireAdminToken(s.handleSeal))
 	s.mux.HandleFunc("/admin/api/unseal", s.requireAdminToken(s.handleUnseal))
+}
+
+// handleSPAFile 返回内嵌的 SPA 文件。
+func (s *Server) handleSPAFile(path, contentType string) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		data, err := staticFS.ReadFile(path)
+		if err != nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Write(data)
+	}
 }
 
 // requireAdminToken 包装 handler，要求 Bearer Token 认证。
