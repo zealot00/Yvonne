@@ -32,8 +32,8 @@ func TestNewSuite_KAE_Fallback(t *testing.T) {
 	t.Logf("✅ NewSuite(kae) correctly errors without kae tag: %v", err)
 }
 
-// TestNewSuite_Standard 仍可正常工作（KAE 不影响标准套件）。
-func TestNewSuite_Standard(t *testing.T) {
+// TestKAESuite_StandardStillWorks 标准套件仍可正常工作（KAE 不影响标准套件）。
+func TestKAESuite_StandardStillWorks(t *testing.T) {
 	suite, err := NewSuite(SuiteStandard)
 	if err != nil {
 		t.Fatalf("NewSuite(standard): %v", err)
