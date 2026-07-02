@@ -6,6 +6,7 @@ package service
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"fmt"
@@ -291,7 +292,18 @@ func (c *Core) RevokeCert(ctx context.Context, caKeyID, certID, reason string, p
 		return err
 	}
 
-	crlDER, err := crypto.CreateCRL(caCert, signer, revoked)
+	// SM2 走 tjfoc CRL 路径（标准库无法处理 SM2 证书的 CRL 签发）。
+	var crlDER []byte
+	if subtle.ConstantTimeCompare([]byte(caMeta.KeyType), []byte(crypto.KeyTypeSM2)) == 1 {
+		caCertPEM, err := c.getCACertPEM(ctx, caKeyID)
+		if err != nil {
+			c.recordAudit(ctx, "RevokeCert", caKeyID, 0, "error", err.Error())
+			return err
+		}
+		crlDER, err = crypto.CreateSM2CRL(caCertPEM, signer, revoked)
+	} else {
+		crlDER, err = crypto.CreateCRL(caCert, signer, revoked)
+	}
 	if err != nil {
 		c.recordAudit(ctx, "RevokeCert", caKeyID, 0, "error", err.Error())
 		return fmt.Errorf("service: create CRL: %w", err)
@@ -383,7 +395,36 @@ func (c *Core) getCACertificate(ctx context.Context, caKeyID string) (*x509.Cert
 	}
 	for _, cm := range certs {
 		if cm.CertType == string(crypto.CertTypeCA) || cm.CertType == "ca" {
-			return crypto.ParseCertificatePEM(cm.PEM)
+			// 先尝试标准库解析（RSA/ECDSA）。
+			cert, err := crypto.ParseCertificatePEM(cm.PEM)
+			if err == nil {
+				return cert, nil
+			}
+			// 标准库解析失败（SM2 证书），用 DER 构造最小 x509.Certificate。
+			// issueSM2Certificate 只需要 caCert.Raw 字段。
+			// CRL 签发需要 KeyUsageCertSign|CRLSign 位设置。
+			if len(cm.DER) > 0 {
+				return &x509.Certificate{
+					Raw:      cm.DER,
+					KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+					IsCA:     true,
+				}, nil
+			}
+			return nil, fmt.Errorf("service: parse CA cert: %w", err)
+		}
+	}
+	return nil, fmt.Errorf("service: CA certificate not found for key %s", caKeyID)
+}
+
+// getCACertPEM 返回 CA 证书的 PEM 原文（用于 SM2 CRL 签发）。
+func (c *Core) getCACertPEM(ctx context.Context, caKeyID string) ([]byte, error) {
+	certs, err := c.certManager.ListByCA(ctx, caKeyID)
+	if err != nil {
+		return nil, err
+	}
+	for _, cm := range certs {
+		if cm.CertType == string(crypto.CertTypeCA) || cm.CertType == "ca" {
+			return cm.PEM, nil
 		}
 	}
 	return nil, fmt.Errorf("service: CA certificate not found for key %s", caKeyID)
