@@ -38,6 +38,7 @@ import (
 	"yvonne/internal/observability"
 	"yvonne/internal/seal"
 	"yvonne/internal/service"
+	"yvonne/internal/sdf"
 	"yvonne/internal/storage"
 
 	"google.golang.org/grpc"
@@ -501,6 +502,19 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 	// v1.4: PKI 证书管理器装配。
 	certMgr := lifecycle.NewCertManager(pgStore)
 	core.SetCertManager(certMgr)
+
+	// v1.5: SDF 软件密码机装配。
+	var sdfServer *sdf.Server
+	if cfg.SDF.Enabled {
+		sdfDev, err := sdf.NewSoftwareDevice()
+		if err != nil {
+			log.Printf("WARNING: SDF device init failed (non-fatal): %v", err)
+		} else {
+			sdfServer = sdf.NewServer(sdfDev, cfg.SDF.Token)
+			v1Router.SetSDFHandler(sdfServer)
+			log.Printf("SDF software device enabled (GM/T 0018-2023)")
+		}
+	}
 
 	// Bug-6 修复: 注入 Alerter 到 Core，KEK 解密失败触发 CRITICAL 告警。
 	alertCfg := observability.AlertConfig{

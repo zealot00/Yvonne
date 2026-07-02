@@ -43,6 +43,13 @@ type YvonneConfig struct {
 	MFA           MFAConfig           `json:"mfa"            yaml:"mfa"`          // v1.3: MFA TOTP 配置
 	Observability ObservabilityConfig `json:"observability" yaml:"observability"` // v1.3: OTel + Alerting
 	MultiTenant   MultiTenantConfig   `json:"multi_tenant"  yaml:"multi_tenant"`  // v1.3.1: 多租户配置
+	SDF           SDFConfig           `json:"sdf"           yaml:"sdf"`           // v1.5: SDF 软件密码机配置
+}
+
+// SDFConfig 是 SDF 软件密码机配置（v1.5）。
+type SDFConfig struct {
+	Enabled bool   `json:"enabled" yaml:"enabled"` // 是否启用 SDF 接口
+	Token   string `json:"token"   yaml:"token"`   // SDF 专用认证 token
 }
 
 // MultiTenantConfig 是多租户配置（v1.3.1）。

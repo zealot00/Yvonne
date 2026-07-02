@@ -43,6 +43,7 @@ type V1Router struct {
 	mfaStore       auth.MFAStore      // v1.3: MFA TOTP 存储
 	approvalStore  auth.ApprovalStore // v1.3: Quorum 审批存储
 	tracingEnabled bool               // v1.3: OTel tracing 开关
+	sdfHandler     http.Handler       // v1.5: SDF HTTP handler（nil=未启用）
 }
 
 // NewV1Router 创建 v1 路由。
@@ -101,6 +102,11 @@ func (r *V1Router) SetTracingEnabled(enabled bool) {
 	r.tracingEnabled = enabled
 }
 
+// SetSDFHandler 注入 SDF HTTP handler（v1.5）。
+func (r *V1Router) SetSDFHandler(h http.Handler) {
+	r.sdfHandler = h
+}
+
 func (r *V1Router) register() {
 	// 系统管理（health 不走 auditMiddleware，避免探活流量污染审计日志）。
 	r.mux.HandleFunc("/api/v1/sys/health", r.handleHealth)
@@ -149,6 +155,11 @@ func (r *V1Router) register() {
 	r.mux.HandleFunc("/api/v1/pki/cert/", r.auditMiddleware("GetCert", r.authAndSeal("GetCert", r.handlePKIGetCert)))
 	r.mux.HandleFunc("/api/v1/pki/revoke", r.auditMiddleware("RevokeCert", r.authAndSeal("RevokeCert", r.handlePKIRevoke)))
 	r.mux.HandleFunc("/api/v1/pki/ca/", r.auditMiddleware("GetCRL", r.authAndSeal("GetCRL", r.handlePKIGetCRL)))
+
+	// v1.5 新增：SDF 软件密码机接口（独立 handler，SDF 自带 token 认证）。
+	if r.sdfHandler != nil {
+		r.mux.Handle("/api/v1/sdf/", r.sdfHandler)
+	}
 
 	// 可观测性。
 	// metrics 含内部状态（请求量/延迟/失败率），生产应认证保护。
