@@ -7,6 +7,7 @@
 package sdf
 
 import (
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"

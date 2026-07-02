@@ -19,6 +19,7 @@ type Suite string
 const (
 	SuiteStandard Suite = "standard" // AES-256-GCM + SHA-256 + ECDSA P-256
 	SuiteGMSM     Suite = "gmsm"     // SM4-GCM + SM3 + SM2（需 -tags gmsm）
+	SuiteKAE      Suite = "kae"      // KAE 硬件加速（需 -tags kae + 鲲鹏 920）
 )
 
 // Cipher 是对称加密抽象（DEK 加解密）。
@@ -62,12 +63,20 @@ type CryptoSuite interface {
 // NewSuite 根据套件名创建 CryptoSuite。
 // "standard" → AES-256-GCM + SHA-256（默认，无 build tag）
 // "gmsm" → SM4-GCM + SM3（需 -tags gmsm 编译）
+// "kae" → KAE 硬件加速（需 -tags kae + 鲲鹏 920 + /dev/uacce*）
+//
+// KAE 套件需要额外配置 crypto.kae_base 指定基础算法（"gmsm" 或 "standard"），
+// 默认 "gmsm"（SM4-GCM + SM3 硬件加速）。
 func NewSuite(suite Suite) (CryptoSuite, error) {
 	switch suite {
 	case SuiteStandard, "":
 		return NewStandardSuite(), nil
 	case SuiteGMSM:
 		return NewGMSMSuite()
+	case SuiteKAE:
+		// KAE 套件需要 -tags kae 编译，且依赖鲲鹏硬件。
+		// 基础算法默认 gmsm（SM4-GCM + SM3），可配置。
+		return NewKAESuite(SuiteGMSM)
 	default:
 		return nil, errors.New("crypto: unsupported suite " + string(suite))
 	}
