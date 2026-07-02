@@ -32,9 +32,9 @@ import (
 //
 // Dispose 后 Signer 不可再用。
 type SecureSigner struct {
-	priv    interface{} // *rsa.PrivateKey / *ecdsa.PrivateKey / SM2 私钥（gmsm 标签下）
-	sb      *memguard.SecureBuffer
-	wiped   bool
+	priv  interface{} // *rsa.PrivateKey / *ecdsa.PrivateKey / SM2 私钥（gmsm 标签下）
+	sb    *memguard.SecureBuffer
+	wiped bool
 }
 
 // NewSecureSigner 从私钥字节（DER 或 PEM，取决于 keyType）创建 crypto.Signer。
@@ -92,10 +92,25 @@ func (s *SecureSigner) Sign(randReader io.Reader, digest []byte, opts crypto.Sig
 
 	switch k := s.priv.(type) {
 	case *rsa.PrivateKey:
-		// 证书签名用 PSS（与现有 Sign 一致）。
-		sig, err := rsa.SignPSS(rand.Reader, k, crypto.SHA256, digest, nil)
+		// 证书签名：x509.CreateCertificate 默认用 PKCS#1v1.5。
+		// 只有 opts 是 *rsa.PSSOptions 时才用 PSS。
+		hash := crypto.SHA256
+		if opts != nil {
+			if h := opts.HashFunc(); h != 0 {
+				hash = h
+			}
+		}
+		if _, isPSS := opts.(*rsa.PSSOptions); isPSS {
+			sig, err := rsa.SignPSS(rand.Reader, k, hash, digest, opts.(*rsa.PSSOptions))
+			if err != nil {
+				return nil, fmt.Errorf("crypto: signer RSA-PSS sign: %w", err)
+			}
+			return sig, nil
+		}
+		// 默认 PKCS#1v1.5（x509 证书签名标准）。
+		sig, err := rsa.SignPKCS1v15(rand.Reader, k, hash, digest)
 		if err != nil {
-			return nil, fmt.Errorf("crypto: signer RSA-PSS sign: %w", err)
+			return nil, fmt.Errorf("crypto: signer RSA-PKCS1v15 sign: %w", err)
 		}
 		return sig, nil
 

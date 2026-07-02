@@ -36,9 +36,9 @@ import (
 	"yvonne/internal/memguard"
 	"yvonne/internal/metrics"
 	"yvonne/internal/observability"
+	"yvonne/internal/sdf"
 	"yvonne/internal/seal"
 	"yvonne/internal/service"
-	"yvonne/internal/sdf"
 	"yvonne/internal/storage"
 
 	"google.golang.org/grpc"

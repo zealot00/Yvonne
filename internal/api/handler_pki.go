@@ -1,12 +1,13 @@
 // Package api - PKI HTTP handlers（v1.4.x 新增）。
 //
 // 端点：
-//   POST /api/v1/pki/ca           创建 CA（自签根证书）
-//   POST /api/v1/pki/issue        签发终端证书
-//   POST /api/v1/pki/verify       验证证书链
-//   GET  /api/v1/pki/cert/{id}    获取证书 PEM
-//   POST /api/v1/pki/revoke       吊销证书
-//   GET  /api/v1/pki/ca/{id}/crl  获取 CRL
+//
+//	POST /api/v1/pki/ca           创建 CA（自签根证书）
+//	POST /api/v1/pki/issue        签发终端证书
+//	POST /api/v1/pki/verify       验证证书链
+//	GET  /api/v1/pki/cert/{id}    获取证书 PEM
+//	POST /api/v1/pki/revoke       吊销证书
+//	GET  /api/v1/pki/ca/{id}/crl  获取 CRL
 package api
 
 import (
@@ -31,7 +32,7 @@ type createCARequest struct {
 type issueCertRequest struct {
 	CAKeyID      string `json:"ca_key_id"`
 	Subject      string `json:"subject"`
-	Algo         string `json:"algo"`          // rsa / ecdsa / sm2
+	Algo         string `json:"algo"`           // rsa / ecdsa / sm2
 	PublicKeyPEM []byte `json:"public_key_pem"` // 请求方公钥 PEM
 	CertType     string `json:"cert_type"`      // sign / encrypt / dual
 	TTLDays      int    `json:"ttl_days"`       // 有效期（天），默认 90
@@ -204,16 +205,16 @@ func (r *V1Router) handlePKIGetCert(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	writeJSONOK(w, map[string]interface{}{
-		"cert_id":       meta.CertID,
-		"ca_key_id":     meta.CAKeyID,
-		"serial_number": meta.SerialNumber,
-		"subject":       meta.Subject,
-		"pem":           meta.PEM,
-		"state":         meta.State,
-		"cert_type":     meta.CertType,
-		"issued_at":     meta.IssuedAt,
-		"expires_at":    meta.ExpiresAt,
-		"revoked_at":    meta.RevokedAt,
+		"cert_id":        meta.CertID,
+		"ca_key_id":      meta.CAKeyID,
+		"serial_number":  meta.SerialNumber,
+		"subject":        meta.Subject,
+		"pem":            meta.PEM,
+		"state":          meta.State,
+		"cert_type":      meta.CertType,
+		"issued_at":      meta.IssuedAt,
+		"expires_at":     meta.ExpiresAt,
+		"revoked_at":     meta.RevokedAt,
 		"revoked_reason": meta.RevokedReason,
 	})
 }

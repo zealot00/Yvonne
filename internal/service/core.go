@@ -33,8 +33,8 @@ type Core struct {
 	manager     *lifecycle.Manager
 	seal        seal.Unsealer
 	auditLog    audit.Auditor
-	adminToken  string               // EmergencySeal 校验用
-	alerter     Alerter              // Bug-6: KEK 解密失败告警（nil = NoopAlerter）
+	adminToken  string                 // EmergencySeal 校验用
+	alerter     Alerter                // Bug-6: KEK 解密失败告警（nil = NoopAlerter）
 	certManager *lifecycle.CertManager // v1.4: PKI 证书元数据管理
 }
 

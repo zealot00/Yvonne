@@ -85,17 +85,28 @@ func issueSM2Certificate(req CertRequest, caCert *x509.Certificate, caSigner std
 
 	// 自签根 CA：parent=template；签发终端证书：parent=caCert。
 	var parent *gmx509.Certificate
-	if caCert == nil {
+	if caCert == nil && len(req.CACertPEM) == 0 {
 		parent = template
 	} else {
-		// 将标准库 CA 证书 PEM 解析为 tjfoc 格式。
-		caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caCert.Raw})
-		parsedParent, err := parseSM2CertPEM(caPEM)
-		if err != nil {
-			return nil, fmt.Errorf("crypto: parse CA cert for SM2 issue: %w", err)
+		// 优先用 CACertPEM（SM2 证书无法被标准库解析）。
+		var caPEM []byte
+		if len(req.CACertPEM) > 0 {
+			caPEM = req.CACertPEM
+		} else if len(caCert.Raw) > 0 {
+			caPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caCert.Raw})
 		}
-		parent = parsedParent
-		template.Issuer = caCert.Subject
+		if len(caPEM) > 0 {
+			parsedParent, err := parseSM2CertPEM(caPEM)
+			if err != nil {
+				return nil, fmt.Errorf("crypto: parse CA cert for SM2 issue: %w", err)
+			}
+			parent = parsedParent
+			if caCert != nil {
+				template.Issuer = caCert.Subject
+			}
+		} else {
+			parent = template
+		}
 	}
 
 	// 调用 tjfoc CreateCertificateToPem（直接输出 PEM）。

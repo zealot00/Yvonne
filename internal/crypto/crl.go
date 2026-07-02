@@ -10,10 +10,10 @@
 package crypto
 
 import (
+	stdcrypto "crypto"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	stdcrypto "crypto"
 	"encoding/pem"
 	"errors"
 	"fmt"

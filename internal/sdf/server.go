@@ -1,16 +1,17 @@
 // Package sdf — SDF HTTP 服务（把 Device 暴露为 HTTP API）。
 //
 // 端点：
-//   POST /api/v1/sdf/device/info     — 设备信息
-//   POST /api/v1/sdf/random          — 生成随机数
-//   POST /api/v1/sdf/sm2/generate    — 生成 SM2 密钥对
-//   POST /api/v1/sdf/sm2/sign        — SM2 签名
-//   POST /api/v1/sdf/sm2/verify      — SM2 验签
-//   POST /api/v1/sdf/sm2/encrypt     — SM2 加密
-//   POST /api/v1/sdf/sm2/decrypt     — SM2 解密
-//   POST /api/v1/sdf/sm3/hash        — SM3 哈希
-//   POST /api/v1/sdf/sm4/encrypt     — SM4 加密
-//   POST /api/v1/sdf/sm4/decrypt     — SM4 解密
+//
+//	POST /api/v1/sdf/device/info     — 设备信息
+//	POST /api/v1/sdf/random          — 生成随机数
+//	POST /api/v1/sdf/sm2/generate    — 生成 SM2 密钥对
+//	POST /api/v1/sdf/sm2/sign        — SM2 签名
+//	POST /api/v1/sdf/sm2/verify      — SM2 验签
+//	POST /api/v1/sdf/sm2/encrypt     — SM2 加密
+//	POST /api/v1/sdf/sm2/decrypt     — SM2 解密
+//	POST /api/v1/sdf/sm3/hash        — SM3 哈希
+//	POST /api/v1/sdf/sm4/encrypt     — SM4 加密
+//	POST /api/v1/sdf/sm4/decrypt     — SM4 解密
 //
 // 认证：Bearer Token（独立 SDF token，ConstantTimeCompare）。
 // 二进制数据（密钥/密文/签名）用 hex 编码传输。
@@ -93,7 +94,9 @@ func (s *Server) handleDeviceInfo(w http.ResponseWriter, req *http.Request) {
 }
 
 func (s *Server) handleRandom(w http.ResponseWriter, req *http.Request) {
-	var body struct{ Length int `json:"length"` }
+	var body struct {
+		Length int `json:"length"`
+	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		writeSDFError(w, http.StatusBadRequest, "invalid JSON")
 		return
@@ -217,7 +220,9 @@ func (s *Server) handleSM2Decrypt(w http.ResponseWriter, req *http.Request) {
 }
 
 func (s *Server) handleSM3Hash(w http.ResponseWriter, req *http.Request) {
-	var body struct{ Data string `json:"data"` }
+	var body struct {
+		Data string `json:"data"`
+	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		writeSDFError(w, http.StatusBadRequest, "invalid JSON")
 		return
@@ -264,7 +269,7 @@ func (s *Server) handleSM4Encrypt(w http.ResponseWriter, req *http.Request) {
 
 func (s *Server) handleSM4Decrypt(w http.ResponseWriter, req *http.Request) {
 	var body struct {
-		Key       string `json:"key"`
+		Key        string `json:"key"`
 		Ciphertext string `json:"ciphertext"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {

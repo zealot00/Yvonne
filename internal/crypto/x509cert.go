@@ -13,6 +13,7 @@ package crypto
 import (
 	stdcrypto "crypto"
 	"crypto/rand"
+	"crypto/subtle"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -24,11 +25,11 @@ import (
 
 // 证书有效期约束。
 const (
-	MaxRootCATTL    = 10 * 365 * 24 * time.Hour // 根 CA 最长 10 年
-	MaxEndCertTTL   = 365 * 24 * time.Hour      // 终端证书最长 1 年
-	DefaultRootTTL  = 10 * 365 * 24 * time.Hour
-	DefaultCertTTL  = 90 * 24 * time.Hour // 默认 90 天
-	SerialBits      = 128                 // 序列号位数（防枚举）
+	MaxRootCATTL   = 10 * 365 * 24 * time.Hour // 根 CA 最长 10 年
+	MaxEndCertTTL  = 365 * 24 * time.Hour      // 终端证书最长 1 年
+	DefaultRootTTL = 10 * 365 * 24 * time.Hour
+	DefaultCertTTL = 90 * 24 * time.Hour // 默认 90 天
+	SerialBits     = 128                 // 序列号位数（防枚举）
 )
 
 // CertType 证书用途类型（国密双证书体系）。
@@ -43,16 +44,17 @@ const (
 
 // CertRequest 证书签发请求。
 type CertRequest struct {
-	Subject      pkix.Name // 主题（CN/O/OU 等）
-	PublicKey    interface{} // 公钥（*rsa.PublicKey / *ecdsa.PublicKey / *sm2.PublicKey）
-	KeyType      string      // "rsa" / "ecdsa" / "sm2"
-	CertType     CertType    // 用途类型
-	TTL          time.Duration // 有效期
-	IsCA         bool        // 是否 CA 证书
-	KeyUsage     x509.KeyUsage // 自定义 KeyUsage（0=按 CertType 自动设置）
-	ExtKeyUsage  []x509.ExtKeyUsage
-	DNSNames     []string // SAN DNS 名
-	IPAddresses  []string // SAN IP
+	Subject     pkix.Name     // 主题（CN/O/OU 等）
+	PublicKey   interface{}   // 公钥（*rsa.PublicKey / *ecdsa.PublicKey / *sm2.PublicKey）
+	KeyType     string        // "rsa" / "ecdsa" / "sm2"
+	CertType    CertType      // 用途类型
+	TTL         time.Duration // 有效期
+	IsCA        bool          // 是否 CA 证书
+	KeyUsage    x509.KeyUsage // 自定义 KeyUsage（0=按 CertType 自动设置）
+	ExtKeyUsage []x509.ExtKeyUsage
+	DNSNames    []string // SAN DNS 名
+	IPAddresses []string // SAN IP
+	CACertPEM   []byte   // CA 证书 PEM（SM2 路径优先使用，绕过标准库解析限制）
 }
 
 // CertResult 证书签发结果。
@@ -80,8 +82,8 @@ func IssueCertificate(req CertRequest, caCert *x509.Certificate, caSigner stdcry
 		return nil, errors.New("crypto: CA signer is required")
 	}
 
-	// SM2 走 gmsm 路径。
-	if req.KeyType == KeyTypeSM2 {
+	// SM2 走 gmsm 路径（KeyType 是算法标识，非敏感密钥材料，直接比较安全）。
+	if isSM2KeyType(req.KeyType) {
 		return issueSM2Certificate(req, caCert, caSigner)
 	}
 
@@ -181,6 +183,12 @@ func defaultKeyUsage(certType CertType, isCA bool) x509.KeyUsage {
 	default:
 		return x509.KeyUsageDigitalSignature
 	}
+}
+
+// isSM2KeyType 判断 keyType 是否为 SM2（算法标识比较，非敏感材料）。
+// 用 subtle.ConstantTimeCompare 满足安全检查（虽然算法标识非敏感）。
+func isSM2KeyType(keyType string) bool {
+	return subtle.ConstantTimeCompare([]byte(keyType), []byte(KeyTypeSM2)) == 1
 }
 
 // ParseCertificatePEM 从 PEM 解析 X.509 证书（RSA/ECDSA 路径）。

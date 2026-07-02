@@ -7,12 +7,13 @@
 package sdf
 
 import (
-	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
 	"sync"
+
+	"yvonne/internal/memguard"
 
 	"github.com/tjfoc/gmsm/sm2"
 	"github.com/tjfoc/gmsm/sm3"
@@ -75,8 +76,8 @@ func (d *softwareDevice) GenerateRandom(length int) ([]byte, error) {
 	if length <= 0 || length > 65536 {
 		return nil, fmt.Errorf("sdf: invalid random length %d (1-65536)", length)
 	}
-	buf := make([]byte, length)
-	if _, err := rand.Read(buf); err != nil {
+	buf, err := memguard.GenerateSecureRandom(length)
+	if err != nil {
 		return nil, fmt.Errorf("sdf: generate random: %w", err)
 	}
 	return buf, nil
