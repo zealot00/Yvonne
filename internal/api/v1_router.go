@@ -142,6 +142,14 @@ func (r *V1Router) register() {
 	r.mux.HandleFunc("/api/v1/approvals/approve", r.auditMiddleware("ApprovalApprove", r.RequireAuth(r.authenticator, "ApprovalApprove", r.handleApprove)))
 	r.mux.HandleFunc("/api/v1/approvals/reject", r.auditMiddleware("ApprovalReject", r.RequireAuth(r.authenticator, "ApprovalReject", r.handleReject)))
 
+	// v1.4 新增：PKI 证书管理。
+	r.mux.HandleFunc("/api/v1/pki/ca", r.auditMiddleware("CreateCA", r.authAndSeal("CreateCA", r.handlePKICA)))
+	r.mux.HandleFunc("/api/v1/pki/issue", r.auditMiddleware("IssueCert", r.authAndSeal("IssueCert", r.handlePKIIssue)))
+	r.mux.HandleFunc("/api/v1/pki/verify", r.auditMiddleware("VerifyCert", r.authAndSeal("VerifyCert", r.handlePKIVerify)))
+	r.mux.HandleFunc("/api/v1/pki/cert/", r.auditMiddleware("GetCert", r.authAndSeal("GetCert", r.handlePKIGetCert)))
+	r.mux.HandleFunc("/api/v1/pki/revoke", r.auditMiddleware("RevokeCert", r.authAndSeal("RevokeCert", r.handlePKIRevoke)))
+	r.mux.HandleFunc("/api/v1/pki/ca/", r.auditMiddleware("GetCRL", r.authAndSeal("GetCRL", r.handlePKIGetCRL)))
+
 	// 可观测性。
 	// metrics 含内部状态（请求量/延迟/失败率），生产应认证保护。
 	// Cluster 模式有 authenticator → 包裹 RequireAuth("Metrics")。

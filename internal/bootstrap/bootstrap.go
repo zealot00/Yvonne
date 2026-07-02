@@ -241,6 +241,10 @@ func buildDevMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, metrics
 	core := service.NewManager(lifecycleMgr, vault, auditLog)
 	core.SetAdminToken(cfg.Server.Admin.AdminToken)
 
+	// v1.4: PKI 证书管理器装配（Dev 模式用 MemoryStore）。
+	certMgrDev := lifecycle.NewCertManager(store)
+	core.SetCertManager(certMgrDev)
+
 	// gRPC server（Dev 模式可选，默认启用）。
 	var grpcSrv *grpc.Server
 	if cfg.Server.GRPC.Enabled {
@@ -493,6 +497,10 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 	// Core service 层。
 	core := service.NewManager(lifecycleMgr, unsealer, auditLog)
 	core.SetAdminToken(cfg.Server.Admin.AdminToken)
+
+	// v1.4: PKI 证书管理器装配。
+	certMgr := lifecycle.NewCertManager(pgStore)
+	core.SetCertManager(certMgr)
 
 	// Bug-6 修复: 注入 Alerter 到 Core，KEK 解密失败触发 CRITICAL 告警。
 	alertCfg := observability.AlertConfig{

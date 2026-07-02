@@ -30,11 +30,12 @@ import (
 //
 // Bug-6 修复: KEK 解密失败（HSM 离线/MasterKey 损坏）触发 CRITICAL 告警。
 type Core struct {
-	manager    *lifecycle.Manager
-	seal       seal.Unsealer
-	auditLog   audit.Auditor
-	adminToken string  // EmergencySeal 校验用
-	alerter    Alerter // Bug-6: KEK 解密失败告警（nil = NoopAlerter）
+	manager     *lifecycle.Manager
+	seal        seal.Unsealer
+	auditLog    audit.Auditor
+	adminToken  string               // EmergencySeal 校验用
+	alerter     Alerter              // Bug-6: KEK 解密失败告警（nil = NoopAlerter）
+	certManager *lifecycle.CertManager // v1.4: PKI 证书元数据管理
 }
 
 // Alerter 是 service 层的告警接口（避免直接 import observability 包循环依赖）。
@@ -74,6 +75,11 @@ func (c *Core) SetAlerter(a Alerter) {
 		return
 	}
 	c.alerter = a
+}
+
+// SetCertManager 注入 PKI 证书管理器（v1.4 新增）。
+func (c *Core) SetCertManager(cm *lifecycle.CertManager) {
+	c.certManager = cm
 }
 
 // === 系统管理 ===
