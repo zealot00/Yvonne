@@ -15,11 +15,7 @@ A self-hosted cryptography platform with first-class GM (国密) compliance.
 1. **Your plaintext keys never leave the process.** Pinned in `memguard.SecureBuffer`, wiped with `clear()` + `runtime.KeepAlive()`. Not the network, not the database, not even Go's GC can leak them.
 2. **Every key operation is provably auditable.** HMAC-SHA256/SM3 hash chain + file rotation + async syslog dual-write. Tamper and the chain breaks loudly.
 3. **Your keys, your hardware, your sovereignty.** Shamir-split master key, HSM-backed CMK, self-hosted end to end. No vendor lock-in, no cloud call-home.
-4. **GM PKI + SDF.** SM2 X.509 certificate issuance (CA + end-entity + dual-cert for GB/T 38636) + GM/T 0018-2023 SDF interface (software cryptographic device).
-
-### Why not Vault?
-
-Vault is great. But it doesn't support GM (SM2/SM3/SM4), which is mandatory for China's 密评/等保 compliance. Yvonne is the only open-source platform combining KMS + PKI + SDF + audit with full GM support.
+4. **GM PKI + SDF + OCSP.** SM2 X.509 certificate issuance (CA + end-entity + dual-cert for GB/T 38636) + GM/T 0018-2023 SDF interface (software cryptographic device) + RFC 6960 OCSP responder for real-time cert status.
 
 ### Quick Start
 
@@ -79,7 +75,10 @@ Vault is great. But it doesn't support GM (SM2/SM3/SM4), which is mandatory for 
 - **HSM KEK Abstraction**: `softwareKEK` / `hsmKEK` unified interface. CMK never leaves chip. PKCS#11 via crypto11 + SoftHSM CI.
 - **Auto Key Rotation**: PostgreSQL Advisory Lock elects cluster leader. Hourly scan. Actor=`SYSTEM_DAEMON`.
 - **Anti-Algorithm-Confusion JWT**: strict per-algorithm key type allowlist. RS/ES/HS/SM2 cross-use rejected at parse time.
-- **Browser-Verified E2E**: 37/37 tests passed — 17 HTTP API + 5 Admin API + 15 Selenium browser (headless Chrome, full UX flow). Release gate script: `scripts/release_gate_e2e.py`.
+- **Browser-Verified E2E**: 44/44 tests passed — 19 HTTP API + 5 Admin API + 15 Selenium browser + 5 Cluster mode (PG + local_pki unseal + AppRole). Release gate script: `scripts/release_gate_e2e.py`.
+- **OCSP Responder (RFC 6960)**: SM2 / RSA / ECDSA three-state status (good / revoked / unknown). Public endpoint, optional Bearer token. `application/ocsp-response` content-type. Compatible with `openssl ocsp`.
+- **Cluster Mode Production-Grade**: PostgreSQL storage, local_pki auto-unseal, AppRole authentication, MFA TOTP for sensitive ops, Quorum K-of-N approvals. Validated against fresh PG databases on every E2E run.
+- **Compliance Evidence Pack** (v1.4.0): 7 self-assessment + control-mapping docs covering 密评三级 (GM/T 0054, 95 controls, 94.5% pass), 等保三级 (GB/T 22239, 72 controls, 93.1% pass), audit-chain proof, gosec baseline, govulncheck baseline, penetration-test template (94 cases), HSM integration evidence. See `docs/compliance/README.md`.
 
 ### API Endpoints
 
@@ -116,6 +115,7 @@ Vault is great. But it doesn't support GM (SM2/SM3/SM4), which is mandatory for 
 | GET | `/api/v1/pki/cert/{id}` | Get certificate PEM |
 | POST | `/api/v1/pki/revoke` | Revoke certificate (CRL) |
 | GET | `/api/v1/pki/ca/{id}/crl` | Get CRL |
+| POST \| GET | `/api/v1/ocsp` | OCSP request (RFC 6960) — raw DER / base64 |
 | POST | `/api/v1/sdf/device/info` | SDF device info |
 | POST | `/api/v1/sdf/random` | Generate random |
 | POST | `/api/v1/sdf/sm2/generate-keypair` | SM2 keypair generation |
@@ -137,16 +137,17 @@ make coverage       # coverage report
 bash scripts/security-check.sh  # 12 security checks
 ```
 
-**Latest E2E verification (v1.3.3 binary, LTS):**
+**Latest E2E verification (v1.4.0 binary, OCSP + Cluster):**
 
 | Suite | Result |
 |---|---|
-| HTTP API (Encrypt/Decrypt/Sign/Verify/MAC/GDK/Rotate/SoftDelete/Restore/ReEncrypt/GetPublicKey) | 17/17 ✅ |
+| HTTP API (Encrypt/Decrypt/Sign/Verify/MAC/GDK/Rotate/SoftDelete/Restore/ReEncrypt/GetPublicKey/**PKI**/**SDF**/**OCSP**) | 19/19 ✅ |
 | Admin API (Dashboard/Keys/Crypto/Audit) | 5/5 ✅ |
-| Selenium Browser (Page load/CSS/JS/CSP/Nav/Encrypt/Decrypt/Audit/MFA) | 15/15 ✅ |
-| **Total** | **37/37 ✅** (3 skipped: MFA/Quorum need cluster mode) |
+| Selenium Browser (Page load/CSS/JS/CSP/Nav/Encrypt/Decrypt/Audit/MFA/**Cluster Admin login**) | 15/15 ✅ |
+| **Cluster Mode** (PG + local_pki unseal + AppRole + MFA + Quorum + OCSP via binary) | **5/5 ✅** |
+| **Total** | **44/44 ✅** |
 
-Release gate script: `scripts/release_gate_e2e.py` (run before every tag)
+Release gate script: `scripts/release_gate_e2e.py` (run before every tag). Cluster tests use a fresh `yvonne_e2e_$(date +%s)` Postgres database each run; DSN goes through `YVONNE_STORAGE_DSN` env var (never in code or repo).
 
 ### Documentation
 
@@ -158,8 +159,15 @@ Release gate script: `scripts/release_gate_e2e.py` (run before every tag)
 - [国密合规路线图](docs/gmsm-roadmap.md)
 - [产品演进路线图](docs/roadmap.md)
 - [v1.3 合规功能指南](docs/v1.3-compliance.md)
+- [v1.4 OCSP 集成指南](docs/v1.4-ocsp.md)
 - [AES→SM4 迁移指南](docs/aes-to-sm4-migration.md)
 - [合规证据包](docs/compliance/README.md)
+  - [密评三级自评](docs/compliance/miansi-level3-self-assessment.md) — GM/T 0054, 95 controls
+  - [等保三级密码应用](docs/compliance/dengbao-level3-crypto.md) — GB/T 22239 + 39786, 72 controls
+  - [审计哈希链完整性证明](docs/compliance/audit-chain-evidence.md)
+  - [gosec 扫描基线](docs/compliance/gosec-baseline.md) · [govulncheck 漏洞基线](docs/compliance/govulncheck-baseline.md)
+  - [渗透测试报告模板](docs/compliance/penetration-test-template.md)
+  - [HSM 集成证据](docs/compliance/hsm-integration-evidence.md)
 - [升级指南](docs/upgrade-guide.md)
 - [Benchmark Report](docs/benchmark-report.html)
 - [Deployment Guide](docs/deployment.md)
@@ -180,6 +188,7 @@ Release gate script: `scripts/release_gate_e2e.py` (run before every tag)
 - v1.3.0 — MFA TOTP, Quorum Approval, RFC 8998 GM TLS, OpenTelemetry, Config Reload, Alerting
 - v1.3.1 — Multi-Tenant Isolation, Web Console (pure JS, strict CSP)
 - v1.3.3 (LTS) — 8 bug fixes (TOCTOU/atomicity/rate-limit/cache/OOM/alert/memory/overflow) + bilingual user manual
+- **v1.4.0** — GM PKI (X.509 SM2/RSA/ECDSA + CRL + chain verify) · SDF software cryptographic device (GM/T 0018-2023) · KAE/Kunpeng 920 UADK acceleration · **OCSP Responder (RFC 6960, SM2/RSA/ECDSA)** · **Cluster mode E2E (PG + local_pki unseal, 44/44 tests)** · **Compliance evidence pack (7 docs: 密评三级/等保三级/audit-chain/gosec/govulncheck/pentest/HSM)**
 
 **Next**
 
@@ -221,11 +230,7 @@ Apache License 2.0. See [LICENSE](LICENSE).
 1. **明文密钥永不离开进程。** 锁定在 `memguard.SecureBuffer` 中，用 `clear()` + `runtime.KeepAlive()` 擦除。网络、数据库、甚至 Go 的 GC 都无法泄露。
 2. **每次操作可证明可审计。** HMAC-SHA256/SM3 哈希链 + 文件轮转 + 异步 Syslog 双写。篡改即断链，且响亮报警。
 3. **你的密钥、你的硬件、你的主权。** Shamir 分片主密钥，HSM 托管 CMK，全链路自托管。无厂商锁定，无云回调。
-4. **国密 PKI + SDF。** SM2 X.509 证书签发（CA + 终端证书 + GB/T 38636 双证书）+ GM/T 0018-2023 SDF 接口（软件密码机）。
-
-### 为什么不用 Vault？
-
-Vault 是伟大的工具，但它不支持国密（SM2/SM3/SM4），中国密评/等保无法通过，且搭建需 1-3 周。Yvonne 为国密合规而生，13MB 单二进制 30 秒启动。如果你不需要国密，Vault 是更好的选择。
+4. **国密 PKI + SDF + OCSP。** SM2 X.509 证书签发（CA + 终端证书 + GB/T 38636 双证书）+ GM/T 0018-2023 SDF 接口（软件密码机）+ RFC 6960 OCSP 响应器（实时证书状态查询）。
 
 ### 快速开始
 
@@ -277,7 +282,10 @@ Vault 是伟大的工具，但它不支持国密（SM2/SM3/SM4），中国密评
 - **HSM KEK 抽象**：`softwareKEK` / `hsmKEK` 统一接口。CMK 永不离开芯片。PKCS#11 via crypto11 + SoftHSM CI。
 - **自动密钥轮转**：PostgreSQL Advisory Lock 集群选主。每小时扫描。Actor=`SYSTEM_DAEMON`。
 - **防算法混淆 JWT**：严格的 per-algorithm 密钥类型白名单。RS/ES/HS/SM2 跨用例在 parse 阶段被拒。
-- **浏览器级 E2E 验证**：37/37 测试通过 — 17 HTTP API + 5 Admin API + 15 Selenium 浏览器（无头 Chrome，完整 UX 流程）。Release gate 脚本：`scripts/release_gate_e2e.py`。
+- **浏览器级 E2E 验证**：44/44 测试通过 — 19 HTTP API + 5 Admin API + 15 Selenium 浏览器 + 5 Cluster 模式（PG + local_pki unseal + AppRole）。Release gate 脚本：`scripts/release_gate_e2e.py`。
+- **OCSP 响应器（RFC 6960）**：SM2 / RSA / ECDSA 三态查询（good / revoked / unknown）。公开端点，可选 Bearer Token。`application/ocsp-response` content-type。`openssl ocsp` 原生兼容。
+- **Cluster 模式生产级**：PostgreSQL 存储、local_pki 自动解封、AppRole 认证、敏感操作 MFA TOTP、K-of-N Quorum 审批。每次 E2E 运行都用全新 PG 数据库验证。
+- **合规证据包**（v1.4.0）：7 份自评 + 控制点映射文档，覆盖密评三级（GM/T 0054，95 控制点，94.5% 通过）、等保三级（GB/T 22239，72 控制点，93.1% 通过）、审计链证明、gosec / govulncheck 基线、渗透测试模板（94 用例）、HSM 集成证据。见 `docs/compliance/README.md`。
 
 ### API 端点
 
@@ -308,6 +316,7 @@ Vault 是伟大的工具，但它不支持国密（SM2/SM3/SM4），中国密评
 | POST | `/api/v1/approvals/{id}/approve` | 批准工单 |
 | POST | `/api/v1/approvals/{id}/reject` | 拒绝工单 |
 | POST | `/api/v1/audit/query` | 查询审计日志 |
+| POST \| GET | `/api/v1/ocsp` | OCSP 查询（RFC 6960）— raw DER / base64 |
 | GET | `/metrics` | Prometheus 指标 |
 
 ### 编译与测试
@@ -319,16 +328,17 @@ make coverage       # 覆盖率报告
 bash scripts/security-check.sh  # 12 项安全检查
 ```
 
-**最新 E2E 验证（v1.3.3 二进制包，LTS）：**
+**最新 E2E 验证（v1.4.0 二进制包，OCSP + Cluster）：**
 
 | 测试套件 | 结果 |
 |---|---|
-| HTTP API（Encrypt/Decrypt/Sign/Verify/MAC/GDK/Rotate/SoftDelete/Restore/ReEncrypt/GetPublicKey） | 17/17 ✅ |
+| HTTP API（Encrypt/Decrypt/Sign/Verify/MAC/GDK/Rotate/SoftDelete/Restore/ReEncrypt/GetPublicKey/**PKI**/**SDF**/**OCSP**） | 19/19 ✅ |
 | Admin API（Dashboard/Keys/Crypto/Audit） | 5/5 ✅ |
-| Selenium 浏览器（页面加载/CSS/JS/CSP/导航/加密/解密/审计/MFA） | 15/15 ✅ |
-| **合计** | **37/37 ✅**（3 跳过：MFA/Quorum 需 cluster 模式） |
+| Selenium 浏览器（页面加载/CSS/JS/CSP/导航/加密/解密/审计/MFA/**Cluster Admin 登录**） | 15/15 ✅ |
+| **Cluster 模式**（PG + local_pki unseal + AppRole + MFA + Quorum + 二进制 OCSP） | **5/5 ✅** |
+| **合计** | **44/44 ✅** |
 
-Release gate 脚本：`scripts/release_gate_e2e.py`（每次打 tag 前运行）
+Release gate 脚本：`scripts/release_gate_e2e.py`（每次打 tag 前运行）。Cluster 测试每次使用新建的 `yvonne_e2e_$(date +%s)` Postgres 数据库；DSN 通过 `YVONNE_STORAGE_DSN` 环境变量传入（绝不写入代码或仓库）。
 
 ### 文档
 
@@ -341,8 +351,15 @@ Release gate 脚本：`scripts/release_gate_e2e.py`（每次打 tag 前运行）
 - [国密合规路线图](docs/gmsm-roadmap.md)
 - [产品演进路线图](docs/roadmap.md)
 - [v1.3 合规功能指南](docs/v1.3-compliance.md)
+- [v1.4 OCSP 集成指南](docs/v1.4-ocsp.md)
 - [AES→SM4 迁移指南](docs/aes-to-sm4-migration.md)
 - [合规证据包](docs/compliance/README.md)
+  - [密评三级自评](docs/compliance/miansi-level3-self-assessment.md) — GM/T 0054，95 控制点
+  - [等保三级密码应用](docs/compliance/dengbao-level3-crypto.md) — GB/T 22239 + 39786，72 控制点
+  - [审计哈希链完整性证明](docs/compliance/audit-chain-evidence.md)
+  - [gosec 扫描基线](docs/compliance/gosec-baseline.md) · [govulncheck 漏洞基线](docs/compliance/govulncheck-baseline.md)
+  - [渗透测试报告模板](docs/compliance/penetration-test-template.md)
+  - [HSM 集成证据](docs/compliance/hsm-integration-evidence.md)
 - [升级指南](docs/upgrade-guide.md)
 - [测试覆盖率报告](docs/coverage.md)
 - [安全策略](SECURITY.md)
@@ -360,6 +377,7 @@ Release gate 脚本：`scripts/release_gate_e2e.py`（每次打 tag 前运行）
 - v1.3.0 — MFA TOTP、Quorum 审批、RFC 8998 国密 TLS、OpenTelemetry、配置热更新、告警
 - v1.3.1 — 多租户隔离、Web 控制台（纯 JS、严格 CSP）
 - v1.3.3 (LTS) — 8 个 Bug 修复（TOCTOU/事务原子性/限流/缓存/OOM/告警/内存/溢出）+ 中英双语用户手册
+- **v1.4.0** — 国密 PKI（X.509 SM2/RSA/ECDSA + CRL + 链验证）· SDF 软件密码机（GM/T 0018-2023）· KAE 鲲鹏 920 UADK 加速 · **OCSP 响应器（RFC 6960，SM2/RSA/ECDSA）** · **Cluster 模式 E2E（PG + local_pki unseal，44/44 测试）** · **合规证据包（7 文档：密评三级 / 等保三级 / 审计链 / gosec / govulncheck / 渗透测试 / HSM 集成）**
 
 **下一步**
 

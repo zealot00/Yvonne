@@ -44,6 +44,22 @@ type YvonneConfig struct {
 	Observability ObservabilityConfig `json:"observability" yaml:"observability"` // v1.3: OTel + Alerting
 	MultiTenant   MultiTenantConfig   `json:"multi_tenant"  yaml:"multi_tenant"`  // v1.3.1: 多租户配置
 	SDF           SDFConfig           `json:"sdf"           yaml:"sdf"`           // v1.5: SDF 软件密码机配置
+	PKI           PKIConfig           `json:"pki"           yaml:"pki"`           // v1.4.x: PKI（CA / 证书 / OCSP）配置
+}
+
+// PKIConfig 是 PKI 子系统配置（v1.4.x 新增）。
+//
+// 包含 CA 管理、证书签发、OCSP Responder 等子模块的开关。
+type PKIConfig struct {
+	// Enabled 启用 PKI 子系统（CA 创建 + 证书签发 + 验证 + 吊销 + CRL）。
+	// 默认 false（向后兼容）。
+	Enabled bool `json:"enabled" yaml:"enabled"`
+	// OCSPEnabled 启用 OCSP Responder（/api/v1/ocsp）。需要 PKI.Enabled = true。
+	// 默认 false。
+	OCSPEnabled bool `json:"ocsp_enabled" yaml:"ocsp_enabled"`
+	// OCSPToken OCSP 可选 Bearer token；空 = 无认证（公网部署由前置网关负责访问控制）。
+	// 设置后 OCSP 请求需带 Authorization: Bearer {token}。
+	OCSPToken string `json:"ocsp_token" yaml:"ocsp_token"`
 }
 
 // SDFConfig 是 SDF 软件密码机配置（v1.5）。

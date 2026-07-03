@@ -44,6 +44,7 @@ type V1Router struct {
 	approvalStore  auth.ApprovalStore // v1.3: Quorum 审批存储
 	tracingEnabled bool               // v1.3: OTel tracing 开关
 	sdfHandler     http.Handler       // v1.5: SDF HTTP handler（nil=未启用）
+	ocspHandler    http.Handler       // v1.4: OCSP HTTP handler（nil=未启用）
 }
 
 // NewV1Router 创建 v1 路由。
@@ -107,6 +108,38 @@ func (r *V1Router) SetSDFHandler(h http.Handler) {
 	r.sdfHandler = h
 }
 
+// SetOCSPHandler 注入 OCSP HTTP handler（v1.4.x）。
+//
+// OCSP 是公开查询协议（RFC 6960），不需要 authAndSeal。
+// 调用方负责传入包装好的 handler（通常用 handler_ocsp.handleOCSPQuery）。
+//
+// 实现：在调用时立即把 handler 注册到 mux（覆盖 /api/v1/ocsp 与 /api/v1/ocsp/{base64}）。
+// 这样调用方可以在 NewV1Router 之后再注入 handler。
+func (r *V1Router) SetOCSPHandler(h http.Handler) {
+	r.ocspHandler = h
+	if h == nil {
+		return
+	}
+	// OCSP 路径有两条：精确 /api/v1/ocsp（POST raw DER）和前缀 /api/v1/ocsp/（GET base64）。
+	// 注意：必须同时注册精确路径和前缀路径，因为 http.ServeMux 不会自动把
+	// /api/v1/ocsp 匹配到 /api/v1/ocsp/ prefix。
+	r.mux.Handle("/api/v1/ocsp", h)
+	r.mux.Handle("/api/v1/ocsp/", h)
+}
+
+// SetCertManager 把 PKI 证书管理器注入 router 内部的 core（v1.4.x）。
+//
+// 必要性：V1Router 在 NewV1Router 内自行构造 *service.Core 实例，与 bootstrap
+// 层装配的 core 是两个独立对象。PKI/OCSP 路径走 router 内部的 core（v1Router.core），
+// 必须显式调用此方法把 CertManager 注入到正确实例，否则 handler 调用 Core.OCSP /
+// Core.XXX 时会得到 "service: PKI not configured"。
+//
+// 这是 Router 唯一的 PKI 注入入口；cluster 模式下也走相同入口（避免 bootstrap 持有
+// router 的未导出字段）。
+func (r *V1Router) SetCertManager(m *lifecycle.CertManager) {
+	r.core.SetCertManager(m)
+}
+
 func (r *V1Router) register() {
 	// 系统管理（health 不走 auditMiddleware，避免探活流量污染审计日志）。
 	r.mux.HandleFunc("/api/v1/sys/health", r.handleHealth)
@@ -160,6 +193,9 @@ func (r *V1Router) register() {
 	if r.sdfHandler != nil {
 		r.mux.Handle("/api/v1/sdf/", r.sdfHandler)
 	}
+
+	// v1.4.x 新增：OCSP 路由不在此处注册（动态注入见 SetOCSPHandler）。
+	// 原因：register() 在 NewV1Router 内一次性调用，无法接收后续注入的 handler。
 
 	// 可观测性。
 	// metrics 含内部状态（请求量/延迟/失败率），生产应认证保护。

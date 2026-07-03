@@ -30,6 +30,9 @@ const (
 	CertStateActive  CertState = "Active"
 	CertStateRevoked CertState = "Revoked"
 	CertStateExpired CertState = "Expired"
+	// CertStateUnknown 是 OCSP 协议层的"未签发过该 serial"语义。
+	// 注意：与 Revoked 不同（Revoked = 签发过但被吊销）。
+	CertStateUnknown CertState = "Unknown"
 )
 
 // CertMetadata 是证书的元数据（不含私钥）。

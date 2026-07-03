@@ -90,9 +90,156 @@ def http_request(method: str, url: str, body: Any = None, token: str | None = No
             return e.code, {"error": str(e)}
 
 
+def http_request_raw(method: str, url: str, body: bytes | None, content_type: str,
+                     token: str | None = None) -> tuple[int, bytes, dict]:
+    """发送二进制请求（OCSP raw DER / 其他 application/*）。返回 (status, body_bytes, headers_dict)。"""
+    headers = {"Content-Type": content_type}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT) as resp:
+            return resp.status, resp.read(), dict(resp.headers)
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, e.read(), dict(e.headers)
+        except Exception:
+            return e.code, b"", {}
+
+
 def b64(s: str) -> str:
     """字符串 → base64 编码字符串（用于 JSON 请求体中的 []byte 字段）。"""
     return base64.b64encode(s.encode()).decode()
+
+
+# ---------------------------------------------------------------------------
+# OCSP 测试辅助（v1.4.x）
+# ---------------------------------------------------------------------------
+
+def _openssl_or_pycrypto_imports():
+    """尽量导入 cryptography 库（OCSP 请求构造需要 ASN.1 编码）。失败则抛错。"""
+    try:
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.hazmat.backends import default_backend
+        return {
+            "x509": x509, "NameOID": NameOID,
+            "hashes": hashes, "serialization": serialization,
+            "rsa": rsa, "default_backend": default_backend,
+        }
+    except ImportError as e:
+        raise RuntimeError(
+            "OCSP E2E requires 'cryptography' package: pip install cryptography"
+        ) from e
+
+
+def generate_test_rsa_priv_pem() -> str:
+    """生成测试用 RSA-2048 私钥 PEM（PKCS#8）。"""
+    c = _openssl_or_pycrypto_imports()
+    priv = c["rsa"].generate_private_key(
+        public_exponent=65537, key_size=2048, backend=c["default_backend"]())
+    return priv.private_bytes(
+        encoding=c["serialization"].Encoding.PEM,
+        format=c["serialization"].PrivateFormat.PKCS8,
+        encryption_algorithm=c["serialization"].NoEncryption(),
+    ).decode()
+
+
+def derive_pub_pem_from_priv_pem(priv_pem: str) -> str:
+    """从 PKCS#8 私钥 PEM 推导对应公钥 PEM。"""
+    c = _openssl_or_pycrypto_imports()
+    priv = c["serialization"].load_pem_private_key(priv_pem.encode(), password=None,
+                                                   backend=c["default_backend"]())
+    pub = priv.public_key()
+    return pub.public_bytes(
+        encoding=c["serialization"].Encoding.PEM,
+        format=c["serialization"].PublicFormat.SubjectPublicKeyInfo,
+    ).decode()
+
+
+def build_ocsp_request_der(ca_pem_b64_or_pem: str, serial_decimal: str) -> bytes:
+    """构造 OCSP Request DER（RFC 6960 §4.1.1）。
+
+    参数:
+      ca_pem_b64_or_pem: CA 证书 PEM 文本（CreateCA 返回的 data.pem 已是 PEM 文本字符串，
+                         不需要再 base64 解码）
+      serial_decimal:    待查询证书序列号（十进制字符串）
+    """
+    c = _openssl_or_pycrypto_imports()
+    import hashlib
+    import struct
+
+    # 1. 解析 CA 证书 → 提取 RawSubject (DER-encoded issuer DN) + RawSubjectPublicKeyInfo
+    ca_cert = c["x509"].load_pem_x509_certificate(ca_pem_b64_or_pem.encode(),
+                                                  backend=c["default_backend"]())
+    issuer_name_der = ca_cert.subject.public_bytes(c["serialization"].Encoding.DER)
+    issuer_key_der = ca_cert.public_key().public_bytes(
+        encoding=c["serialization"].Encoding.DER,
+        format=c["serialization"].PublicFormat.SubjectPublicKeyInfo,
+    )
+    issuer_name_hash = hashlib.sha1(issuer_name_der).digest()
+    issuer_key_hash = hashlib.sha1(issuer_key_der).digest()
+
+    # 2. serial → ASN.1 INTEGER DER
+    serial_int = int(serial_decimal)
+    if serial_int == 0:
+        serial_der = b"\x02\x01\x00"
+    else:
+        # 转无符号字节（大端）。
+        n_bytes = (serial_int.bit_length() + 7) // 8
+        serial_bytes = serial_int.to_bytes(n_bytes, "big")
+        # 如果最高位是 1，前面补 0x00 避免被解析为负数。
+        if serial_bytes[0] & 0x80:
+            serial_bytes = b"\x00" + serial_bytes
+        serial_der = b"\x02" + bytes([len(serial_bytes)]) + serial_bytes
+
+    # 3. 手工组装 OCSP Request DER：
+    #   SEQUENCE {                            -- OCSPRequest
+    #     SEQUENCE {                          -- TBSRequest
+    #       [0] EXPLICIT INTEGER 0            -- version (optional, default v1)
+    #       SEQUENCE {                        -- requestList
+    #         SEQUENCE {                      -- Request
+    #           SEQUENCE {                    -- CertID
+    #             SEQUENCE { OID, NULL }      -- AlgorithmIdentifier (SHA-1)
+    #             OCTET STRING (20B)          -- issuerNameHash
+    #             OCTET STRING (20B)          -- issuerKeyHash
+    #             INTEGER                     -- serialNumber
+    #           }
+    #         }
+    #       }
+    #     }
+    #   }
+
+    def tlv(tag: int, value: bytes) -> bytes:
+        """Tag-Length-Value 编码。tag 单字节。"""
+        l = len(value)
+        if l < 0x80:
+            return bytes([tag, l]) + value
+        elif l < 0x100:
+            return bytes([tag, 0x81, l]) + value
+        elif l < 0x10000:
+            return bytes([tag, 0x82, (l >> 8) & 0xff, l & 0xff]) + value
+        else:
+            raise ValueError(f"TLV too long: {l}")
+
+    # SHA-1 OID = 1.3.14.3.2.26
+    sha1_oid = bytes([0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a])
+    # AlgorithmIdentifier = SEQUENCE { OID, NULL }
+    alg_id = tlv(0x30, sha1_oid + b"\x05\x00")
+    # CertID = SEQUENCE { alg_id, issuerNameHash, issuerKeyHash, serial }
+    cert_id = tlv(0x30, alg_id + tlv(0x04, issuer_name_hash) + tlv(0x04, issuer_key_hash) + serial_der)
+    # Request = SEQUENCE { CertID }
+    request = tlv(0x30, cert_id)
+    # requestList = SEQUENCE { Request }
+    request_list = tlv(0x30, request)
+    # version = [0] EXPLICIT INTEGER 0
+    version = bytes([0xa0, 0x03, 0x02, 0x01, 0x00])
+    # TBSRequest = SEQUENCE { version, requestList }
+    tbs_request = tlv(0x30, version + request_list)
+    # OCSPRequest = SEQUENCE { TBSRequest }
+    return tlv(0x30, tbs_request)
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +389,7 @@ def test_http_api(api_base: str, token: str | None) -> None:
     # 18. MFA setup — 需要 authenticator
     if has_auth:
         code, resp = http_request("POST", f"{api_base}/api/v1/auth/mfa/setup",
-                                  {"user_id": "rel-user"}, token)
+                                  {"role_id": "e2e-role"}, token)
         record("18.1 MFA TOTP setup",
                code in (200, 201) and (resp.get("data", {}).get("secret") or resp.get("data", {}).get("uri")),
                f"code={code} resp={resp}")
@@ -266,32 +413,108 @@ def test_http_api(api_base: str, token: str | None) -> None:
     else:
         skip("20.1 Quorum list", "dev 模式无 authenticator")
 
+    # === v1.4.x: OCSP Responder (RFC 6960) ===
+    # 端点：POST /api/v1/ocsp (raw DER) / GET /api/v1/ocsp/{base64}
+    # 响应 Content-Type: application/ocsp-response
+    # 注意：dev 模式默认未启用 PKI/OCSP → 跳过（需要 cfg.pki.enabled + cfg.pki.ocsp_enabled）
+
+    # 21. PKI/CA 创建（OCSP 前置：需要先有 CA 才能查）
+    code, ca_resp = http_request("POST", f"{api_base}/api/v1/pki/ca",
+                                 {"key_id": "rel-ocsp-ca", "algo": "rsa",
+                                  "subject": "CN=Release OCSP CA", "ttl_years": 10}, token)
+    ca_ok = code == 200 and ca_resp.get("data", {}).get("key_id")
+    if not ca_ok:
+        skip("21.x OCSP 测试套件", f"PKI/OCSP 未启用或 CreateCA 失败 (code={code})")
+    else:
+        ca_key_id = ca_resp["data"]["key_id"]
+        # data.pem 是 []byte 字段（x509 PEM 文本），JSON 自动 base64 编码；客户端需 base64 解码。
+        ca_pem_bytes = base64.b64decode(ca_resp["data"]["pem"])
+        ca_pem_text = ca_pem_bytes.decode("utf-8", errors="replace")
+
+        # 22. 签发 leaf 证书（OCSP 查询目标）
+        # 生成 leaf RSA 密钥对 → 公钥 PEM → base64 编码（因为 handler 字段类型是 []byte，
+        # JSON 反序列化时会按 base64 解码）。
+        leaf_priv_pem = generate_test_rsa_priv_pem()
+        leaf_pub_pem = derive_pub_pem_from_priv_pem(leaf_priv_pem)
+        leaf_pub_b64 = base64.b64encode(leaf_pub_pem.encode()).decode()
+        code, leaf_resp = http_request("POST", f"{api_base}/api/v1/pki/issue",
+                                        {"ca_key_id": ca_key_id, "subject": "CN=rel-ocsp-leaf",
+                                         "algo": "rsa", "public_key_pem": leaf_pub_b64,
+                                         "cert_type": "sign", "ttl_days": 30}, token)
+        leaf_serial = leaf_resp.get("data", {}).get("serial", "") if code == 200 else ""
+        record("21.1 PKI 签发 leaf 证书", code == 200 and leaf_serial,
+               f"code={code} resp={leaf_resp}")
+
+        # 23. OCSP POST (raw DER) — 用 Python 内置构造 OCSP Request DER
+        if leaf_serial:
+            ocsp_req_der = build_ocsp_request_der(ca_pem_text, leaf_serial)
+            code, body, hdrs = http_request_raw(
+                "POST", f"{api_base}/api/v1/ocsp",
+                body=ocsp_req_der,
+                content_type="application/ocsp-request",
+                token=token)
+            ct = hdrs.get("Content-Type", "") or hdrs.get("content-type", "")
+            # 检查响应是合法 OCSP DER（首字节 0x30 = SEQUENCE）。
+            ok_post = (code == 200 and
+                       "application/ocsp-response" in ct.lower() and
+                       len(body) > 0 and body[0] == 0x30)
+            record("22.1 OCSP POST raw DER (RFC 6960 §A.2)",
+                   ok_post,
+                   f"code={code} ct={ct} body={len(body)}B")
+        else:
+            skip("22.1 OCSP POST raw DER", "leaf 签发失败，前置缺失")
+
+        # 24. OCSP GET base64 — URL-safe base64 编码后作为 path 段
+        if leaf_serial:
+            ocsp_req_der = build_ocsp_request_der(ca_pem_text, leaf_serial)
+            encoded = base64.urlsafe_b64encode(ocsp_req_der).rstrip(b"=").decode()
+            code, body, hdrs = http_request_raw(
+                "GET", f"{api_base}/api/v1/ocsp/{encoded}",
+                body=None,
+                content_type="application/ocsp-request",
+                token=token)
+            ct = hdrs.get("Content-Type", "") or hdrs.get("content-type", "")
+            ok_get = (code == 200 and
+                      "application/ocsp-response" in ct.lower() and
+                      len(body) > 0 and body[0] == 0x30)
+            record("23.1 OCSP GET base64 (RFC 6960 §A.1)",
+                   ok_get,
+                   f"code={code} ct={ct} body={len(body)}B")
+        else:
+            skip("23.1 OCSP GET base64", "leaf 签发失败，前置缺失")
+
 
 # ---------------------------------------------------------------------------
 # Part 2: Admin API 测试
 # ---------------------------------------------------------------------------
 
-def test_admin_api(admin_base: str) -> None:
+def test_admin_api(admin_base: str, api_base: str = "", token: str | None = None) -> None:
     print("\n[Part 2] Admin API 测试")
 
-    code, resp = http_request("GET", f"{admin_base}/admin/api/dashboard")
+    code, resp = http_request("GET", f"{admin_base}/admin/api/dashboard", token=token)
     record("A1 Dashboard",
            code == 200 and resp.get("ok") is True and "key_count" in resp.get("data", {}),
            f"code={code} resp={resp}")
 
-    code, resp = http_request("GET", f"{admin_base}/admin/api/keys")
+    code, resp = http_request("GET", f"{admin_base}/admin/api/keys", token=token)
     keys = resp.get("data", {}).get("keys", [])
     record("A2 Keys list",
            code == 200 and isinstance(keys, list) and len(keys) > 0, f"keys={len(keys)}")
 
+    # demo-order-key 由 --demo 标志自动创建；用 --config 启动时不会自动创建。
+    # 自愈：缺失时通过 API 端口建一次（忽略 409 已存在错误）。
+    if api_base:
+        http_request("POST", f"{api_base}/api/v1/keys",
+                     {"key_id": "demo-order-key", "algorithm": "AES-256-GCM"}, token)
+
     code, resp = http_request("POST", f"{admin_base}/admin/api/crypto/encrypt",
-                              {"key_id": "demo-order-key", "plaintext": b64("admin-api-test")})
+                              {"key_id": "demo-order-key", "plaintext": b64("admin-api-test")}, token)
     ct = resp.get("data", {}).get("ciphertext", "")
     record("A3 Admin crypto encrypt",
            code == 200 and ct and ct.startswith("AAAA"), f"code={code}")
 
     code, resp = http_request("POST", f"{admin_base}/admin/api/crypto/decrypt",
-                              {"key_id": "demo-order-key", "ciphertext": ct})
+                              {"key_id": "demo-order-key", "ciphertext": ct}, token)
     try:
         pt = base64.b64decode(resp.get("data", {}).get("plaintext", "")).decode()
     except Exception:
@@ -299,7 +522,7 @@ def test_admin_api(admin_base: str) -> None:
     record("A4 Admin crypto decrypt round-trip",
            code == 200 and pt == "admin-api-test", f"pt={pt!r}")
 
-    code, resp = http_request("GET", f"{admin_base}/admin/api/audit?limit=5")
+    code, resp = http_request("GET", f"{admin_base}/admin/api/audit?limit=5", token=token)
     record("A5 Audit log",
            code == 200 and resp.get("ok") is True, f"code={code}")
 
@@ -308,7 +531,7 @@ def test_admin_api(admin_base: str) -> None:
 # Part 3: Selenium 浏览器测试
 # ---------------------------------------------------------------------------
 
-def test_browser(admin_base: str) -> None:
+def test_browser(admin_base: str, admin_token: str | None = None) -> None:
     print("\n[Part 3] Selenium 浏览器测试")
     try:
         from selenium import webdriver
@@ -343,6 +566,42 @@ def test_browser(admin_base: str) -> None:
         except Exception as e:
             record(name, False, f"异常: {type(e).__name__}: {e}")
 
+    # B0. Cluster 模式下预先注入 admin bearer token。
+    #   Dev 模式 admin_token 为空，跳过此步。
+    #   关键：headless Chrome 不会弹出 Basic Auth 对话框，所以页面 GET / 返回 401
+    #   会导致 chrome-error 页面（无 #tokenInput 元素）。
+    #   解法：先用 Chrome DevTools Protocol（CDP）注入 Authorization 头到所有请求，
+    #   这样后续 driver.get() 自动带认证。
+    def b0_login():
+        if not admin_token:
+            return
+        # CDP 注入全局 Authorization header（Selenium 4+）
+        try:
+            driver.execute_cdp_cmd("Network.enable", {})
+            driver.execute_cdp_cmd("Network.setExtraHTTPHeaders", {
+                "headers": {"Authorization": f"Bearer {admin_token}"}
+            })
+        except Exception as e:
+            record("B0 Cluster Admin 登录", False, f"CDP 注入失败: {e}")
+            return
+        # 加载页面 → admin_token 已带 → 渲染 dashboard
+        driver.get(admin_base + "/")
+        WebDriverWait(driver, PAGE_LOAD_TIMEOUT).until(
+            EC.presence_of_element_located((By.ID, "nav-dashboard"))
+        )
+        # 同时把 token 写入 #tokenInput + localStorage（页面后续 reload 不依赖 CDP）
+        try:
+            token_input = driver.find_element(By.ID, "tokenInput")
+            driver.execute_script(
+                "document.getElementById('tokenInput').value = arguments[0];"
+                " localStorage.setItem('yvonne_token', arguments[0]);",
+                admin_token,
+            )
+        except Exception:
+            pass
+        record("B0 Cluster Admin 登录（Bearer Token 注入）", True)
+    safe_test("B0 Cluster Admin 登录", b0_login)
+
     # B1. 页面加载
     def b1():
         driver.get(admin_base + "/")
@@ -374,6 +633,9 @@ def test_browser(admin_base: str) -> None:
     def b4():
         import urllib.request as ur
         req = ur.Request(admin_base + "/")
+        # Cluster 模式下页面需 Bearer 认证
+        if admin_token:
+            req.add_header("Authorization", f"Bearer {admin_token}")
         with ur.urlopen(req, timeout=DEFAULT_TIMEOUT) as resp:
             csp_header = resp.headers.get("Content-Security-Policy", "")
         record("B4 CSP 头存在 + script-src 'self'",
@@ -513,6 +775,7 @@ def main() -> int:
     parser.add_argument("--admin-port", type=int, default=DEFAULT_ADMIN_PORT)
     parser.add_argument("--no-browser", action="store_true", help="跳过 Selenium 浏览器测试")
     parser.add_argument("--token", default=None, help="Bearer Token（启用 MFA/Quorum 测试，需 cluster 模式）")
+    parser.add_argument("--admin-token", default=None, help="Admin UI Bearer Token（cluster 模式启用全站认证时需要）")
     args = parser.parse_args()
 
     api_base = f"http://127.0.0.1:{args.api_port}"
@@ -542,9 +805,9 @@ def main() -> int:
         return 2
 
     test_http_api(api_base, args.token)
-    test_admin_api(admin_base)
+    test_admin_api(admin_base, api_base, args.token)
     if not args.no_browser:
-        test_browser(admin_base)
+        test_browser(admin_base, args.admin_token)
 
     print("\n" + "=" * 70)
     total = len(passed) + len(failed) + len(skipped)

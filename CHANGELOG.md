@@ -66,6 +66,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - security-check.sh: 12 项全通过
 - 双标签编译：`go build` + `go build -tags gmsm` + `go build -tags 'kae,gmsm'`
 
+### Added — OCSP Responder（RFC 6960）
+
+- **OCSP 请求构造与解析**：`internal/crypto/ocsp.go`（`BuildOCSPRequest` / `ParseOCSPRequest` / `CreateOCSPResponse` / `ParseOCSPResponse`）
+- **SM2 OCSP**：`internal/crypto/ocsp_gmsm.go`（`//go:build gmsm`）手工 ASN.1 + SM3 摘要
+- **SM2 OCSP stub**：`internal/crypto/ocsp_gmsm_stub.go`（`//go:build !gmsm`）返回 `-tags gmsm` 错误提示
+- **OCSP 服务层**：`internal/service/core_ocsp.go` — `Core.OCSP()` 复用 `CertManager.FindBySerial` + `extractSigner` 模式
+- **OCSP Handler**：`internal/api/handler_ocsp.go` 支持 GET `/api/v1/ocsp/{base64req}` + POST raw DER，返回 `application/ocsp-response`
+- **CertStateUnknown 字段**：`internal/lifecycle/cert_manager.go` 新增 `CertState = "Unknown"` OCSP 状态
+- **路由注入**：`V1Router.SetOCSPHandler` + 直接 `mux.Handle` 绕过 `register()` 顺序问题
+- **配置**：`pki.ocsp_enabled` + `pki.ocsp_token`（空 = 无认证）
+
+### Added — Cluster 模式 E2E + 浏览器测试
+
+- **Cluster 模式 E2E**（`scripts/release_gate_e2e.py`）：
+  - PG 存储 DSN 走 `YVONNE_STORAGE_DSN` 环境变量（**永不进代码/仓库**）
+  - local_pki unseal 自动解封（无 Shamir 阈值仪式）
+  - `--admin-token` 参数支持 cluster 模式 admin API + Admin UI
+  - 测试数据库每次自动新建 `yvonne_e2e_$(date +%s)`（无需 psql CLI）
+  - 二进制 OCSP DER 提交（无 psql，纯 Go `pgx`）
+- **浏览器测试**（Selenium + Chrome DevTools Protocol）：
+  - `Network.setExtraHTTPHeaders` 注入 `Authorization: Bearer <admin_token>`
+  - 绕过 Basic Auth 弹窗
+  - Cluster mode Admin UI 登录 / Token 注入 / Dashboard 渲染
+
+### Added — 合规证据包（7 份文档）
+
+| 文档 | 框架 | 控制点数 |
+|---|---|---|
+| `docs/compliance/miansi-level3-self-assessment.md` | 密评三级（GM/T 0054） | 95 项 |
+| `docs/compliance/dengbao-level3-crypto.md` | 等保三级（GB/T 22239 + 39786） | 72 项 |
+| `docs/compliance/audit-chain-evidence.md` | 审计链证据 | HMAC 链 |
+| `docs/compliance/gosec-baseline.md` | 静态扫描基线 | 23 告警分类 |
+| `docs/compliance/govulncheck-baseline.md` | 漏洞扫描基线 | 0 vuln |
+| `docs/compliance/penetration-test-template.md` | 渗透测试模板 | 94 用例 |
+| `docs/compliance/hsm-integration-evidence.md` | HSM 集成证据 | SoftHSM 验证 |
+
+`docs/compliance/README.md` 索引更新，合规率 93-94%。
+
+### Fixed
+
+- **v1Router.core 未导出**：Bootstrap 包无法直接访问 → 新增 `SetCertManager` + `SetOCSPHandler` 方法暴露
+- **PKI public_key_pem JSON 类型不匹配**：`[]byte` vs PEM 字符串 → E2E 层 base64 编解码
+- **Headless Chrome 无法显示 Basic Auth 弹窗** → 使用 Chrome DevTools Protocol `Network.setExtraHTTPHeaders`
+- **OCSP 路由注入时序**：`register()` 在 `NewV1Router` 已冻结 → 直接 `mux.Handle` 而非 `register()` 末尾
+
+### Tests (OCSP + 合规 + Cluster)
+
+- **OCSP 单元测试**（≥ 25 用例）：
+  - `crypto/ocsp_test.go`：RSA-2048/ECDSA-P256 BuildOCSPRequest/ParseOCSPRequest 往返 + CreateOCSPResponse 三态 + nonce 透传
+  - `crypto/ocsp_gmsm_test.go`：SM2 + SecureSigner + SM3 摘要
+  - `crypto/ocsp_stub_test.go`：验证 stub 错误信息含 `-tags gmsm`
+  - `crypto/coverage_ocsp_test.go`：错误路径（nil signer / nil CA / 空 serial）
+  - `service/core_ocsp_test.go`：good/revoked/unknown 三态查找
+  - `api/handler_ocsp_test.go`：GET base64 + POST raw DER + content-type + 错误码
+  - `api/v1_router_ocsp_test.go`：路由注册
+- **E2E Cluster 测试**（44/44 通过）：
+  - HTTP API 套件：19 项（含 2 项 OCSP）
+  - Admin API 套件：5 项
+  - 浏览器 Selenium 套件：15 项
+  - Cluster 模式全套：44 项，包括 PG/Token/Admin UI
+
+### Verification
+
+- `make ci` 全绿（vet + fmt + 12 红线 + race + 集成）
+- 两种编译模式全过：`go build ./...` + `go build -tags gmsm ./...`
+- `bash scripts/security-check.sh` 12 项全过
+- Cluster mode E2E：44/44 通过（含 OCSP + 浏览器）
+- gosec：23 告警（0 真实可利用 + 6 RFC 强制保留）
+- govulncheck：0 漏洞 + 13 间接依赖 CVE 文档化
+
 ## [1.3.3] - 2026-07-01 (LTS 稳定版 — 8 个 Bug 修复 + 用户手册)
 
 > **本版本为长期支持（LTS）版本，后续一段时间内不再迭代，作为生产部署基线。**

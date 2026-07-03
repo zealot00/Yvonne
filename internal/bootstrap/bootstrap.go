@@ -243,8 +243,22 @@ func buildDevMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, metrics
 	core.SetAdminToken(cfg.Server.Admin.AdminToken)
 
 	// v1.4: PKI 证书管理器装配（Dev 模式用 MemoryStore）。
+	// 注意：v1Router 内部的 core 实例独立于本函数的 core，必须通过 SetCertManager
+	// 注入到 router 内部 core（API handler 用的是 router 的 core）。
 	certMgrDev := lifecycle.NewCertManager(store)
 	core.SetCertManager(certMgrDev)
+	v1Router.SetCertManager(certMgrDev)
+
+	// v1.4.x: Dev 模式 OCSP 装配（与 cluster 模式走相同路径）。
+	if cfg.PKI.Enabled && cfg.PKI.OCSPEnabled {
+		ocspHandler := http.HandlerFunc(v1Router.HandleOCSPQuery)
+		v1Router.SetOCSPHandler(ocspHandler)
+		mode := "unauthenticated"
+		if cfg.PKI.OCSPToken != "" {
+			mode = "token-protected"
+		}
+		log.Printf("DEV MODE: OCSP responder enabled at /api/v1/ocsp (RFC 6960, %s)", mode)
+	}
 
 	// gRPC server（Dev 模式可选，默认启用）。
 	var grpcSrv *grpc.Server
@@ -500,8 +514,10 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 	core.SetAdminToken(cfg.Server.Admin.AdminToken)
 
 	// v1.4: PKI 证书管理器装配。
+	// 注意：v1Router 内部的 core 实例独立于本函数的 core，必须同步注入到两个。
 	certMgr := lifecycle.NewCertManager(pgStore)
 	core.SetCertManager(certMgr)
+	v1Router.SetCertManager(certMgr)
 
 	// v1.5: SDF 软件密码机装配。
 	var sdfServer *sdf.Server
@@ -514,6 +530,19 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 			v1Router.SetSDFHandler(sdfServer)
 			log.Printf("SDF software device enabled (GM/T 0018-2023)")
 		}
+	}
+
+	// v1.4.x: OCSP Responder 装配（RFC 6960，PKI 子系统的在线证书状态查询接口）。
+	if cfg.PKI.Enabled && cfg.PKI.OCSPEnabled {
+		// 使用 router 自身的 OCSP handler（Core.OCSP 已实现业务层逻辑）。
+		// 复用 v1Router 路由（无需单独 http.Server）。
+		ocspHandler := http.HandlerFunc(v1Router.HandleOCSPQuery)
+		v1Router.SetOCSPHandler(ocspHandler)
+		mode := "unauthenticated"
+		if cfg.PKI.OCSPToken != "" {
+			mode = "token-protected"
+		}
+		log.Printf("OCSP responder enabled at /api/v1/ocsp (RFC 6960, %s)", mode)
 	}
 
 	// Bug-6 修复: 注入 Alerter 到 Core，KEK 解密失败触发 CRITICAL 告警。
