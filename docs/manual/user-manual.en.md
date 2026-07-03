@@ -1106,6 +1106,33 @@ Tamper with any record — all subsequent signatures fail verification.
 - **File rotation**: daily rotation, retain `retention_days` (default 180)
 - **Syslog dual-write**: async to syslog (tag=`yvonne-kms`), for SIEM ingestion
 
+### 11.2.1 Audit Timezone Configuration (v1.4.1)
+
+For non-UTC deployments, audit filenames and retention cutoffs need to align with the local calendar date.
+
+```yaml
+audit:
+  dir: /var/log/yvonne
+  retention_days: 180
+  timezone_enabled: true          # switch; false = UTC (backward-compat with v1.4.0)
+  timezone: "Asia/Shanghai"       # IANA timezone name
+```
+
+Or via environment variables (container-friendly):
+
+```bash
+YVONNE_AUDIT_TIMEZONE_ENABLED=true
+YVONNE_AUDIT_TIMEZONE=Asia/Shanghai
+```
+
+**Default behavior**:
+- `crypto.strict=true` (GM mode): auto-enabled with `timezone="Asia/Shanghai"`
+- Other modes: defaults to UTC (v1.4.0 behavior preserved)
+
+**The envelope `timestamp` field is always UTC** (wire-format canonical, externally verifiable across timezones) — only filenames + retention cutoff honor the configured timezone.
+
+**Why this matters for compliance**: In CN, audit filenames now align with calendar dates. Reviewers no longer need to mentally add +8h when reading daily logs.
+
 ### 11.3 Audit Record Fields
 
 ```json

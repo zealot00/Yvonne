@@ -1106,6 +1106,33 @@ entry_2.signature = HMAC(key, entry_2.payload || entry_1.signature)
 - **文件轮转**：按天切分，保留 `retention_days`（默认 180 天）
 - **Syslog 双写**：异步发送到 syslog（tag=`yvonne-kms`），适合 SIEM 接入
 
+### 11.2.1 审计时区配置（v1.4.1）
+
+CN 部署下，凌晨 0:00-7:59 写入的日志文件名要与日历日期对齐。
+
+```yaml
+audit:
+  dir: /var/log/yvonne
+  retention_days: 180
+  timezone_enabled: true          # 开关；false = UTC（向后兼容）
+  timezone: "Asia/Shanghai"       # IANA 时区名
+```
+
+或者环境变量：
+
+```bash
+YVONNE_AUDIT_TIMEZONE_ENABLED=true
+YVONNE_AUDIT_TIMEZONE=Asia/Shanghai
+```
+
+**默认行为**：
+- `crypto.strict=true`（国密模式）：自动 `timezone_enabled=true, timezone="Asia/Shanghai"`
+- 其他模式：默认 UTC（v1.4.0 行为）
+
+**envelope `timestamp` 字段始终 UTC**（wire-format 规范，跨时区一致可外部验证），只有文件命名 + 留存 cutoff 受时区影响。
+
+合规场景下，CN 时区让"昨晚 / 今早"的文件名与日历一致，审计员不再需要做 +8h 心算。
+
 ### 11.3 审计记录字段
 
 ```json

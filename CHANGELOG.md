@@ -136,6 +136,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - gosec：23 告警（0 真实可利用 + 6 RFC 强制保留）
 - govulncheck：0 漏洞 + 13 间接依赖 CVE 文档化
 
+## [1.4.1] - 2026-07-03 (Hotfix — 审计日志时区可配置)
+
+### Fixed — Bug-TZ (审计日志时区)
+
+- **审计文件命名按部署时区切分**：`internal/audit/file_rotator.go` 全文件 `time.Now().UTC().Format("20060102")` 改为按 `*time.Location` 切日期
+- **留存 cutoff 同步按本地日期**：避免国密部署下文件名/清理时点与日历日期差 8 小时
+- **影响范围**：CN 时区下凌晨 0:00-7:59 的本地日期日志，旧版文件名是"昨天"，新版与日历对齐
+
+### Added — 审计时区配置项
+
+- **`audit.timezone_enabled`** (bool)：开关；`false` = UTC（v1.4.0 行为，向后兼容）
+- **`audit.timezone`** (IANA 字符串, 如 `Asia/Shanghai` / `UTC` / `America/New_York`)：时区名
+- **国密模式自动开**：`crypto.strict=true` → 自动 `timezone_enabled=true, timezone="Asia/Shanghai"`
+- **环境变量覆盖**：`YVONNE_AUDIT_TIMEZONE_ENABLED` + `YVONNE_AUDIT_TIMEZONE`
+- **IANA 验证**：`time.LoadLocation(tz)` 校验，非法名立即启动失败
+
+### 关键设计
+
+- **JSON envelope timestamp 仍 UTC**：保留 wire-format 规范（跨时区一致）
+- **只影响文件名 + 留存 cutoff**：避免双时区语义引入歧义
+- **向后兼容**：未配置 → UTC fallback（v1.4.0 行为不破坏）
+
+### Tests
+
+- `internal/audit/file_rotator_test.go`：5 个测试 — UTC fallback / Asia/Shanghai / nil fallback / 留存 cutoff 跨时区一致 / 跨天轮转生成 archive
+- `internal/config/timezone_test.go`：5 个测试 — strict 自动填 / 非 strict 默认关 / 显式 TZ 强制 / 非法 TZ 拒绝 / 合法 TZ 通过
+
+### 文档同步
+
+- `docs/compliance/audit-chain-evidence.md`：新增"时区可配置"章节
+- `docs/compliance/miansi-level3-self-assessment.md`：控制点 7.2.2 双写容灾增加时区说明
+- `docs/compliance/dengbao-level3-crypto.md`：控制点 AU-7.5.1 增加时区备注
+- `docs/manual/user-manual.zh.md`：审计章节增加配置示例
+- `docs/manual/user-manual.en.md`：同上
+
 ## [1.3.3] - 2026-07-01 (LTS 稳定版 — 8 个 Bug 修复 + 用户手册)
 
 > **本版本为长期支持（LTS）版本，后续一段时间内不再迭代，作为生产部署基线。**

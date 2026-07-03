@@ -5,6 +5,7 @@
 //   - 按天滚动：audit.log → audit-YYYYMMDD.log
 //   - 180 天留存清理（后台 goroutine）
 //   - 高危操作（Rotate/Shred/SysUnseal）file.Sync() 强刷盘
+//   - v1.4.1: 文件名 + 留存 cutoff 按可配置时区（IANA）切分，默认 UTC，crypto.strict=true 自动 Asia/Shanghai
 //
 // 纯 Go 标准库实现，无第三方依赖。
 package audit
@@ -18,12 +19,19 @@ import (
 )
 
 // FileRotator 是带轮转与清理的文件审计日志写入器。
+//
+// v1.4.1 时区字段：
+//   - loc == nil → UTC（v1.4.0 行为，向后兼容）
+//   - loc != nil → 文件名 + 留存 cutoff 按该时区计算
+//
+// envelope JSON 时间戳在 logger 层保持 UTC（wire-format 规范），本 rotator 只管文件。
 type FileRotator struct {
 	mu       sync.Mutex
 	dir      string
 	filename string // 当前日志文件名（如 audit.log）
 	file     *os.File
-	today    string // YYYYMMDD，用于检测跨天轮转
+	today    string // YYYYMMDD，用于检测跨天轮转（按 loc 计算）
+	loc      *time.Location
 
 	pruneStop chan struct{} // 停止清理 goroutine
 }
@@ -37,13 +45,27 @@ var highRiskActions = map[string]bool{
 	"AUDIT_LOG_PRUNE": true,
 }
 
-// NewFileRotator 创建文件轮转器。
+// NewFileRotator 创建文件轮转器（默认 UTC，向后兼容）。
 //
 // dir: 日志目录（如 /var/log/yvonne）。
 // filename: 当前日志文件名（如 audit.log）。
 //
 // 创建目录（0700）与初始文件（0600）。
 func NewFileRotator(dir, filename string) (*FileRotator, error) {
+	return NewFileRotatorWithZone(dir, filename, nil)
+}
+
+// NewFileRotatorWithZone 创建文件轮转器（v1.4.1）。
+//
+// loc: IANA 时区（如 Asia/Shanghai），nil 表示 UTC（v1.4.0 行为）。
+//
+// 文件名（如 audit-20260704.log）+ 留存 cutoff 都按 loc 的"日期"切分。
+// JSON envelope 时间戳仍在 logger 层保持 UTC（wire-format 一致）。
+func NewFileRotatorWithZone(dir, filename string, loc *time.Location) (*FileRotator, error) {
+	if loc == nil {
+		loc = time.UTC
+	}
+
 	// 创建目录（0700）。
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("audit: create log dir: %w", err)
@@ -52,7 +74,8 @@ func NewFileRotator(dir, filename string) (*FileRotator, error) {
 	r := &FileRotator{
 		dir:       dir,
 		filename:  filename,
-		today:     time.Now().UTC().Format("20060102"),
+		loc:       loc,
+		today:     time.Now().In(loc).Format("20060102"),
 		pruneStop: make(chan struct{}),
 	}
 
@@ -64,6 +87,11 @@ func NewFileRotator(dir, filename string) (*FileRotator, error) {
 	return r, nil
 }
 
+// todayInZone 返回 loc 时区下的"今天"日期（YYYYMMDD）。
+func (r *FileRotator) todayInZone() string {
+	return time.Now().In(r.loc).Format("20060102")
+}
+
 // openCurrent 打开当前日志文件（0600）。
 func (r *FileRotator) openCurrent() error {
 	path := filepath.Join(r.dir, r.filename)
@@ -72,7 +100,7 @@ func (r *FileRotator) openCurrent() error {
 		return fmt.Errorf("audit: open log file: %w", err)
 	}
 	r.file = f
-	r.today = time.Now().UTC().Format("20060102")
+	r.today = r.todayInZone()
 	return nil
 }
 
@@ -86,8 +114,7 @@ func (r *FileRotator) Write(data []byte, action string) error {
 	defer r.mu.Unlock()
 
 	// 检测跨天轮转。
-	today := time.Now().UTC().Format("20060102")
-	if today != r.today {
+	if r.todayInZone() != r.today {
 		if err := r.rotateLocked(); err != nil {
 			return err
 		}
@@ -158,9 +185,9 @@ func (r *FileRotator) pruneLoop(retentionDays int, onPrune func(deletedCount int
 	}
 }
 
-// pruneOldFiles 删除超过 retentionDays 天的归档日志。
+// pruneOldFiles 删除超过 retentionDays 天的归档日志（按 r.loc 时区切日期）。
 func (r *FileRotator) pruneOldFiles(retentionDays int) int {
-	cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays)
+	cutoff := time.Now().In(r.loc).AddDate(0, 0, -retentionDays)
 
 	entries, err := os.ReadDir(r.dir)
 	if err != nil {

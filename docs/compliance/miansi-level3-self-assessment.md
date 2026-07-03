@@ -674,7 +674,8 @@ Root KEK (Memory 中 memguard)
 
 - **要求**：审计日志双副本
 - **Yvonne 实现**：本地 audit.log + syslog 异步双写
-- **证据**：`internal/audit/syslog_writer.go`
+- **v1.4.1 增量**：文件命名 + 留存 cutoff 按可配置时区切分（`audit.timezone_enabled` + `audit.timezone`）；JSON envelope `timestamp` 仍 UTC（wire-format 规范）。`crypto.strict=true` 自动开 Asia/Shanghai。
+- **证据**：`internal/audit/syslog_writer.go` + `internal/audit/file_rotator.go:46-87` (`NewFileRotatorWithZone`) + `docs/compliance/audit-chain-evidence.md §12`
 - **结论**：✅ **完全合规**
 
 ### 7.3 审计日志访问

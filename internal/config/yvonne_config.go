@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 // Mode 是运行模式。
@@ -103,12 +104,24 @@ type AlertingConfig struct {
 }
 
 // AuditModeConf 是审计配置（Cluster 模式必填）。
+//
+// 时区开关（v1.4.1）：
+//
+//	TimezoneEnabled=false（默认，国际部署）：文件名 + 留存 cutoff 用 UTC（v1.4.0 行为，向后兼容）。
+//	TimezoneEnabled=true（国密/crypto.strict=true 自动启用）：
+//	  文件名 + 留存 cutoff 切换至 Timezone 字段指定的 IANA 时区；
+//	  envelope JSON 的 timestamp 字段**仍保持 UTC**（wire-format 规范，跨时区一致）。
+//
+// 国密部署默认 TimezoneEnabled=true, Timezone="Asia/Shanghai"，
+// 运维/合规审查员在 CN 时区下文件名与日历日期对齐。
 type AuditModeConf struct {
-	Dir           string `json:"dir"             yaml:"dir"`            // 日志目录（如 /var/log/yvonne）
-	Filename      string `json:"filename"        yaml:"filename"`       // 当前日志文件名（默认 audit.log）
-	RetentionDays int    `json:"retention_days"  yaml:"retention_days"` // 留存天数（默认 180）
-	SyslogEnabled bool   `json:"syslog_enabled"  yaml:"syslog_enabled"` // 是否启用 Syslog 双写
-	SyslogTag     string `json:"syslog_tag"      yaml:"syslog_tag"`     // Syslog tag（默认 yvonne-kms）
+	Dir             string `json:"dir"               yaml:"dir"`                // 日志目录（如 /var/log/yvonne）
+	Filename        string `json:"filename"          yaml:"filename"`           // 当前日志文件名（默认 audit.log）
+	RetentionDays   int    `json:"retention_days"    yaml:"retention_days"`     // 留存天数（默认 180）
+	SyslogEnabled   bool   `json:"syslog_enabled"    yaml:"syslog_enabled"`     // 是否启用 Syslog 双写
+	SyslogTag       string `json:"syslog_tag"        yaml:"syslog_tag"`         // Syslog tag（默认 yvonne-kms）
+	TimezoneEnabled bool   `json:"timezone_enabled"  yaml:"timezone_enabled"`   // 是否按本地时区切文件 + 留存
+	Timezone        string `json:"timezone"          yaml:"timezone"`           // IANA 时区名（如 Asia/Shanghai），TimezoneEnabled=true 时必填
 }
 
 // AuthModeConf 是认证配置（Cluster 模式必填，Dev 模式忽略）。
@@ -233,6 +246,7 @@ func LoadYvonneConfig(path string) (*YvonneConfig, error) {
 	}
 
 	applyYvonneEnvOverrides(cfg)
+	applyAuditTimezoneDefaults(cfg)
 
 	if err := ValidateYvonneConfig(cfg); err != nil {
 		return nil, err
@@ -261,6 +275,35 @@ func applyYvonneEnvOverrides(cfg *YvonneConfig) {
 			cfg.Unseal.Threshold = n
 		}
 	}
+	if v := os.Getenv("YVONNE_AUDIT_TIMEZONE_ENABLED"); v != "" {
+		cfg.Audit.TimezoneEnabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("YVONNE_AUDIT_TIMEZONE"); v != "" {
+		cfg.Audit.Timezone = v
+	}
+}
+
+// applyAuditTimezoneDefaults 自动填充审计时区默认值（v1.4.1）。
+//
+// 规则（最小惊讶）：
+//   - cfg.Audit.Timezone != "" → 用户配置了时区名 → 强制启用开关（信任用户）。
+//   - cfg.Audit.Timezone == "" + cfg.Crypto.Strict == true（国密模式） → 自动开启 Asia/Shanghai。
+//   - 其他 → 保持默认 UTC（开 = false / 名称 = "" → 运行期 fallback UTC，向后兼容 v1.4.0）。
+//
+// 简化为：开关只在"填了时区名"或"国密模式"两种情况下为 true。
+func applyAuditTimezoneDefaults(cfg *YvonneConfig) {
+	if cfg.Audit.Timezone != "" {
+		// 用户填了时区名（含显式 "UTC" 也算填了）→ 视为开启。
+		cfg.Audit.TimezoneEnabled = true
+		return
+	}
+	if cfg.Crypto.Strict {
+		// 国密模式默认开 CN 时区。
+		cfg.Audit.TimezoneEnabled = true
+		cfg.Audit.Timezone = "Asia/Shanghai"
+		return
+	}
+	// 其余：留空（运行期 fallback UTC，向后兼容 v1.4.0）。
 }
 
 // ValidateYvonneConfig 校验配置。
@@ -322,6 +365,15 @@ func validateClusterConfig(cfg *YvonneConfig) error {
 	// Cluster 模式必须配置审计落盘目录。
 	if cfg.Audit.Dir == "" {
 		errs = append(errs, "cluster mode requires audit.dir (e.g. /var/log/yvonne)")
+	}
+
+	// v1.4.1: 审计时区 IANA 名必须合法（用 Go time.LoadLocation 验证）。
+	// 校验失败立即失败 → 防止启动后才发现文件名错乱。
+	if cfg.Audit.TimezoneEnabled && cfg.Audit.Timezone != "" {
+		if _, err := time.LoadLocation(cfg.Audit.Timezone); err != nil {
+			errs = append(errs, fmt.Sprintf("audit.timezone %q is not a valid IANA name: %v (try 'UTC', 'Asia/Shanghai', 'America/New_York', etc.)",
+				cfg.Audit.Timezone, err))
+		}
 	}
 
 	// Cluster 模式必须配置至少一个 AppRole。

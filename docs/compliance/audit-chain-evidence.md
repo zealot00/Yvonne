@@ -253,3 +253,41 @@ echo "exit code: $?" >> reports/audit-verify-$(date +%Y%m%d).txt
 ```
 
 归档至 `reports/audit-verify-{date}.txt`，合规审计员可直接读取断点定位结果。
+
+---
+
+## 12. 时区可配置（v1.4.1）
+
+v1.4.0 之前所有审计文件命名 + 留存 cutoff 都按 UTC 日期切分，对非 UTC 部署有两个副作用：
+
+1. CN 时区下凌晨 0:00-7:59（日历上已经是新一天）写入的文件名仍是"昨天"
+2. 留存清理触发时机与运维日历日期不一致（差 8 小时）
+
+v1.4.1 引入两段配置：
+
+```yaml
+audit:
+  timezone_enabled: true          # 开关；false = UTC（v1.4.0 行为）
+  timezone: "Asia/Shanghai"       # IANA 时区名
+```
+
+| 配置 | 文件命名 | 留存 cutoff | envelope timestamp |
+|---|---|---|---|
+| `timezone_enabled: false` | UTC 日期（向后兼容）| UTC 日期 | UTC（不变）|
+| `timezone_enabled: true, timezone: "Asia/Shanghai"` | CN 日期 | CN 日期 | UTC（不变）|
+| `timezone_enabled: true, timezone: "UTC"` | UTC 日期 | UTC 日期 | UTC（不变）|
+| `crypto.strict: true`（国密模式自动开）| CN 日期 | CN 日期 | UTC（不变）|
+
+**关键约束**：envelope JSON `timestamp` 字段**仍为 UTC**（wire-format 规范，跨时区一致，可外部独立验证），只有文件命名 + 留存切换按部署时区。
+
+环境变量覆盖（容器化部署友好）：
+
+```bash
+YVONNE_AUDIT_TIMEZONE_ENABLED=true \
+YVONNE_AUDIT_TIMEZONE=Asia/Shanghai \
+./bin/yvonne server --config config.json
+```
+
+合规价值：CN 部署下审计文件的"昨天/今天"概念与日历日期对齐，合规审查员无需做 +8h 心算。
+
+

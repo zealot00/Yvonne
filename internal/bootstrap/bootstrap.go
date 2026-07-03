@@ -168,6 +168,18 @@ func buildClusterAuditLogger(cfg *config.YvonneConfig) *audit.AuditLogger {
 		retention = 180
 	}
 
+	// v1.4.1: 解析审计时区（IANA 名，由 config validator 保证合法）。
+	// 默认 UTC → 文件名 + 留存 cutoff 用 UTC，与 v1.4.0 行为一致。
+	// crypto.strict=true → config 自动填充 Asia/Shanghai（国密 CN 默认）。
+	var loc *time.Location = time.UTC
+	if cfg.Audit.TimezoneEnabled && cfg.Audit.Timezone != "" {
+		l, err := time.LoadLocation(cfg.Audit.Timezone)
+		if err != nil {
+			panic("FATAL: audit.timezone '" + cfg.Audit.Timezone + "' 加载失败（IANA 名非法，validator 已放过？请检查 tzdata 系统包）: " + err.Error())
+		}
+		loc = l
+	}
+
 	// 可选 Syslog。
 	var sw *audit.SyslogWriter
 	if cfg.Audit.SyslogEnabled {
@@ -182,11 +194,12 @@ func buildClusterAuditLogger(cfg *config.YvonneConfig) *audit.AuditLogger {
 		}
 	}
 
-	logger, err := audit.NewDualWriteLogger(dir, filename, retention, sw)
+	logger, err := audit.NewDualWriteLoggerWithZone(dir, filename, retention, sw, loc)
 	if err != nil {
 		panic("FATAL: Failed to initialize compliant audit logger (file rotation failed): " + err.Error())
 	}
-	log.Printf("CLUSTER MODE: dual-write audit logger initialized (dir=%s, retention=%dd, syslog=%v)", dir, retention, cfg.Audit.SyslogEnabled)
+	log.Printf("CLUSTER MODE: dual-write audit logger initialized (dir=%s, retention=%dd, syslog=%v, timezone=%s)",
+		dir, retention, cfg.Audit.SyslogEnabled, loc.String())
 	return logger
 }
 

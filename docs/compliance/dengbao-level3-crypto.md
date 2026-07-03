@@ -677,6 +677,7 @@
   - `observability.Alerting` 已实现（v1.3.0）
   - **告警规则**部分覆盖（仅 SEAL_FAILURE 等关键事件）
   - **配置化告警规则**需要业务侧细化
+- **v1.4.1 增量**：审计时区可配置（`audit.timezone_enabled` + `audit.timezone`）；`crypto.strict=true` 自动开 Asia/Shanghai。CN 部署下审计文件 + 日历日期对齐，告警链路时点显示与本地运维视角一致。
 - **当前状态**：**部分合规**
 - **改进计划**：v1.4.1 引入可配置告警规则 DSL
 - **结论**：⚠️ **部分合规**

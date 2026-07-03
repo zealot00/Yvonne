@@ -151,6 +151,13 @@ func NewAuditLoggerWithHash(writer io.Writer, newHash func() hash.Hash, anchorHa
 //
 // syslogWriter 为 nil 时仅写文件。
 func NewDualWriteLogger(dir, filename string, retentionDays int, sw *SyslogWriter) (*AuditLogger, error) {
+	return NewDualWriteLoggerWithZone(dir, filename, retentionDays, sw, nil)
+}
+
+// NewDualWriteLoggerWithZone v1.4.1 增加：loc 为 nil 时 fallback UTC（向后兼容）。
+//
+// envelope JSON timestamp 仍然存 UTC（wire-format 规范），loc 仅影响文件命名 + 留存 cutoff。
+func NewDualWriteLoggerWithZone(dir, filename string, retentionDays int, sw *SyslogWriter, loc *time.Location) (*AuditLogger, error) {
 	key, err := memguard.NewSecureBufferFromRandom(32)
 	if err != nil {
 		return nil, fmt.Errorf("audit: generate audit key: %w", err)
@@ -164,8 +171,8 @@ func NewDualWriteLogger(dir, filename string, retentionDays int, sw *SyslogWrite
 		return nil
 	})
 
-	// 创建文件轮转器。
-	rotator, err := NewFileRotator(dir, filename)
+	// 创建文件轮转器（v1.4.1 支持时区）。
+	rotator, err := NewFileRotatorWithZone(dir, filename, loc)
 	if err != nil {
 		key.Wipe()
 		return nil, err
