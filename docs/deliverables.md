@@ -1,8 +1,8 @@
 # Yvonne KMS 交付物文档
 
-> 版本：v1.3.3 (LTS) | 日期：2026-07-01 | 状态：GA
+> 版本：v1.4.0 | 日期：2026-07-02 | 状态：GA
 
-本文档记录 Yvonne KMS 从 v1.0 GA 到 v1.3.3 LTS 的完整交付物清单。
+本文档记录 Yvonne KMS 从 v1.0 GA 到 v1.4.0 的完整交付物清单。
 
 ## 一、版本发布历史
 
@@ -17,7 +17,8 @@
 | v1.3.0 | 2026-06-30 | 合规深化版（MFA + Quorum + 国密 TLS + OTel） | `v1.3.0` | ✅ |
 | v1.3.1 | 2026-06-30 | 多租户 + Web 控制台 | `v1.3.1` | ✅ |
 | v1.3.2 | 2026-07-01 | README 重构 + Release 流程立规 | `v1.3.2` | ✅ |
-| **v1.3.3** | **2026-07-01** | **LTS 稳定版（8 bugs + 用户手册）** | **`v1.3.3`** | **✅ LTS** |
+| v1.3.3 | 2026-07-01 | LTS 稳定版（8 bugs + 用户手册） | `v1.3.3` | ✅ LTS |
+| **v1.4.0** | **2026-07-02** | **国密 PKI + 软件密码机 + KAE 加速** | **`v1.4.0`** | **✅** |
 
 ## 二、各版本交付物清单
 
@@ -346,3 +347,42 @@ govulncheck: 0 vulnerabilities
 - 集成测试: 15 packages PASS
 
 **LTS 状态**：作为生产部署基线，后续一段时间内不再迭代。
+
+## v1.4.0 — 国密 PKI + 软件密码机 + KAE 加速
+
+**核心交付**：
+- PKI 证书签发（SM2/RSA/ECDSA X.509 + CRL + 双证书）
+- SDF 软件密码机（GM/T 0018-2023 接口）
+- KAE 硬件加速（鲲鹏 920 UADK）
+
+**新增文件**：
+- `internal/crypto/signer_adapter.go` + `signer_sm2*.go` — crypto.Signer 适配器
+- `internal/crypto/x509cert*.go` — X.509 证书签发（SM2 + RSA/ECDSA）
+- `internal/crypto/x509verify*.go` — 证书链验证
+- `internal/crypto/crl*.go` — CRL 吊销列表
+- `internal/crypto/publickey_parse.go` + `sm2_publickey*.go` — 公钥解析
+- `internal/crypto/suite_kae*.go` — KAE 硬件加速套件
+- `internal/lifecycle/cert_manager.go` — 证书元数据 CRUD
+- `internal/service/core_pki.go` — PKI service 层
+- `internal/api/handler_pki.go` — PKI HTTP handler（6 端点）
+- `internal/sdf/` — SDF 软件密码机（sdf.go + software_device*.go + server.go）
+
+**新增 API 端点**：
+- PKI（6 个）：`/api/v1/pki/ca` | `issue` | `verify` | `cert/{id}` | `revoke` | `ca/{id}/crl`
+- SDF（10 个）：`/api/v1/sdf/device/info` | `random` | `sm2/*` | `sm3/hash` | `sm4/*`
+
+**新增配置**：
+- `crypto.suite = "kae"` — KAE 硬件加速开关
+- `crypto.kae_base = "gmsm" | "standard"` — KAE 基础算法
+- `sdf.enabled` + `sdf.token` — SDF 配置
+
+**新增测试**（43+ 个）：
+- PKI：18 个（crypto 8 + service 11 + handler 7）
+- SDF：13 个（基础 8 + HTTP 5）
+- KAE：4 个 stub
+- 覆盖率补充：9 个
+
+**验证**：
+- CI: 17 packages PASS
+- security-check.sh: 12 项全通过
+- 覆盖率：SDF gmsm 51.4%→69.9%，service 68.8%→73.3%

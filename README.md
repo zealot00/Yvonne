@@ -1,4 +1,4 @@
-# 🧊 Yvonne KMS
+# 🧊 Yvonne
 
 [English](#english) | [中文](#中文)
 
@@ -8,13 +8,18 @@
 
 ## English
 
-A self-hosted KMS built for teams who refuse to surrender key control to cloud vendors.
+A self-hosted cryptography platform with first-class GM (国密) compliance.
 
-### Three Promises
+### Four Pillars
 
 1. **Your plaintext keys never leave the process.** Pinned in `memguard.SecureBuffer`, wiped with `clear()` + `runtime.KeepAlive()`. Not the network, not the database, not even Go's GC can leak them.
 2. **Every key operation is provably auditable.** HMAC-SHA256/SM3 hash chain + file rotation + async syslog dual-write. Tamper and the chain breaks loudly.
 3. **Your keys, your hardware, your sovereignty.** Shamir-split master key, HSM-backed CMK, self-hosted end to end. No vendor lock-in, no cloud call-home.
+4. **GM PKI + SDF.** SM2 X.509 certificate issuance (CA + end-entity + dual-cert for GB/T 38636) + GM/T 0018-2023 SDF interface (software cryptographic device).
+
+### Why not Vault?
+
+Vault is great. But it doesn't support GM (SM2/SM3/SM4), which is mandatory for China's 密评/等保 compliance. Yvonne is the only open-source platform combining KMS + PKI + SDF + audit with full GM support.
 
 ### Quick Start
 
@@ -59,6 +64,14 @@ A self-hosted KMS built for teams who refuse to surrender key control to cloud v
 - **Alerting Webhook**: Slack / DingTalk / PagerDuty auto-detection. High-risk operation alerts.
 - **Security Hygiene**: gosec 0 issues, govulncheck 0 vulns, 12-check `scripts/security-check.sh` enforced on every commit.
 
+#### PKI & SDF — v1.4.0 new pillars
+
+- **X.509 Certificate Issuance**: SM2 (GM/T 0015) + RSA/ECDSA (RFC 5280). CA self-signed root + end-entity + dual-cert (GB/T 38636).
+- **Certificate Chain Verification**: SM2 (tjfoc/gmsm) + RSA/ECDSA (standard library).
+- **CRL Revocation**: sign + parse + check revoked status.
+- **SDF Software Cryptographic Device** (GM/T 0018-2023): SM2 sign/verify/encrypt/decrypt + SM3 hash + SM4 symmetric + random + key wrap. HTTP API.
+- **KAE Hardware Acceleration**: Kunpeng 920 UADK via `crypto.suite = "kae"`. Runtime fallback to software.
+
 #### Things No One Else Has — Yvonne's differentiators
 
 - **Strict GM Mode**: `crypto.strict: true` enforces SM2/SM3/SM4 only, disables AES/RSA/ECDSA. End-to-end 国密 compliance.
@@ -97,6 +110,22 @@ A self-hosted KMS built for teams who refuse to surrender key control to cloud v
 | POST | `/api/v1/approvals/{id}/approve` | Approve ticket |
 | POST | `/api/v1/approvals/{id}/reject` | Reject ticket |
 | POST | `/api/v1/audit/query` | Query audit log |
+| POST | `/api/v1/pki/ca` | Create CA (self-signed root) |
+| POST | `/api/v1/pki/issue` | Issue end-entity certificate |
+| POST | `/api/v1/pki/verify` | Verify certificate chain |
+| GET | `/api/v1/pki/cert/{id}` | Get certificate PEM |
+| POST | `/api/v1/pki/revoke` | Revoke certificate (CRL) |
+| GET | `/api/v1/pki/ca/{id}/crl` | Get CRL |
+| POST | `/api/v1/sdf/device/info` | SDF device info |
+| POST | `/api/v1/sdf/random` | Generate random |
+| POST | `/api/v1/sdf/sm2/generate-keypair` | SM2 keypair generation |
+| POST | `/api/v1/sdf/sm2/sign` | SM2 sign |
+| POST | `/api/v1/sdf/sm2/verify` | SM2 verify |
+| POST | `/api/v1/sdf/sm2/encrypt` | SM2 encrypt |
+| POST | `/api/v1/sdf/sm2/decrypt` | SM2 decrypt |
+| POST | `/api/v1/sdf/sm3/hash` | SM3 hash |
+| POST | `/api/v1/sdf/sm4/encrypt` | SM4 encrypt |
+| POST | `/api/v1/sdf/sm4/decrypt` | SM4 decrypt |
 | GET | `/metrics` | Prometheus metrics |
 
 ### Build & Test
@@ -185,13 +214,18 @@ Apache License 2.0. See [LICENSE](LICENSE).
 
 ## 中文
 
-一个为不愿向云厂商交出密钥控制权的团队而构建的自托管 KMS。
+国密合规的自托管密码学平台。
 
-### 三个承诺
+### 四大支柱
 
-1. **明文密钥绝不离开进程。** 锁定在 `memguard.SecureBuffer` 中，用 `clear()` + `runtime.KeepAlive()` 擦除。网络、数据库、甚至 Go 的 GC 都无法泄露。
-2. **每次密钥操作都可证明可审计。** HMAC-SHA256/SM3 哈希链 + 文件轮转 + 异步 Syslog 双写。篡改即断链，且响亮报警。
+1. **明文密钥永不离开进程。** 锁定在 `memguard.SecureBuffer` 中，用 `clear()` + `runtime.KeepAlive()` 擦除。网络、数据库、甚至 Go 的 GC 都无法泄露。
+2. **每次操作可证明可审计。** HMAC-SHA256/SM3 哈希链 + 文件轮转 + 异步 Syslog 双写。篡改即断链，且响亮报警。
 3. **你的密钥、你的硬件、你的主权。** Shamir 分片主密钥，HSM 托管 CMK，全链路自托管。无厂商锁定，无云回调。
+4. **国密 PKI + SDF。** SM2 X.509 证书签发（CA + 终端证书 + GB/T 38636 双证书）+ GM/T 0018-2023 SDF 接口（软件密码机）。
+
+### 为什么不用 Vault？
+
+Vault 是伟大的工具，但它不支持国密（SM2/SM3/SM4），中国密评/等保无法通过，且搭建需 1-3 周。Yvonne 为国密合规而生，13MB 单二进制 30 秒启动。如果你不需要国密，Vault 是更好的选择。
 
 ### 快速开始
 

@@ -1,16 +1,16 @@
 # Yvonne KMS 产品演进路线图
 
-> 版本：v1.3.3 (LTS) | 日期：2026-07-01 | 维护：Yvonne 团队
+> 版本：v1.4.0 | 日期：2026-07-02 | 维护：Yvonne 团队
 
-本文档基于 v1.3.3 LTS 稳定版发布后的完整进度记录。
+本文档基于 v1.4.0 发布后的完整进度记录。
 
-> **v1.3.3 为长期支持（LTS）版本**，作为生产部署基线，后续一段时间内不再迭代。v2.0 企业级功能规划见第六章。
+> **v1.4.0** 为国密 PKI + 软件密码机 + KAE 加速版本，v1.3.3 仍为 LTS 基线。
 
 ## 一、版本规划总览
 
 ```
-v1.0(GA) → v1.1(国密) → v1.1.1(安全) → v1.2(API) → v1.2.1(加固) → v1.2.2(签名) → v1.3.0(合规) → v1.3.1(多租户+Web) → v1.3.2(README+立规) → v1.3.3(LTS) → v2.0(企业)
- 06-26     06-28       06-29          06-29       06-29          06-30         06-30         06-30              07-01            07-01        计划中
+v1.0(GA) → v1.1(国密) → v1.1.1(安全) → v1.2(API) → v1.2.1(加固) → v1.2.2(签名) → v1.3.0(合规) → v1.3.1(多租户+Web) → v1.3.2(README+立规) → v1.3.3(LTS) → v1.4.0(PKI+SDF+KAE) → v2.0(企业)
+ 06-26     06-28       06-29          06-29       06-29          06-30         06-30         06-30              07-01            07-01        07-02              计划中
 ```
 
 | 版本 | 主题 | 核心交付 | 状态 | 发布日期 |
@@ -24,8 +24,9 @@ v1.0(GA) → v1.1(国密) → v1.1.1(安全) → v1.2(API) → v1.2.1(加固) �
 | v1.3.0 | 合规深化 | MFA + Quorum + RFC 8998 + OTel + Reload + Alerting | ✅ 已发布 | 2026-06-30 |
 | v1.3.1 | 多租户 + Web 控制台 | 多租户隔离 + 纯 JS Web 控制台 + Admin REST API | ✅ 已发布 | 2026-06-30 |
 | v1.3.2 | README 重构 + Release 立规 | README 重组 + release_gate_e2e.py + WebUI 测试立规 | ✅ 已发布 | 2026-07-01 |
-| **v1.3.3** | **LTS 稳定版** | **8 个 Bug 修复 + 中英双语用户手册 + 测试隔离修复** | ✅ **已发布 (LTS)** | **2026-07-01** |
-| v2.0 | 企业级 | KMIP + Vault 兼容 + HSM 集群 + Grants + 多区域 | 📋 计划中 | 2026-12+ |
+| v1.3.3 | LTS 稳定版 | 8 个 Bug 修复 + 中英双语用户手册 + 测试隔离修复 | ✅ 已发布 (LTS) | 2026-07-01 |
+| **v1.4.0** | **国密 PKI + 软件密码机 + KAE 加速** | **X.509 证书签发 + CRL + GM/T 0018 SDF + 鲲鹏 UADK 加速** | ✅ **已发布** | **2026-07-02** |
+| v2.0 | 企业级 | 生态建设（Terraform/Action/Helm）+ KMIP/Vault 兼容（可选） | 📋 计划中 | 2026-12+ |
 
 ## 二、v1.2 — API 完善版（2026-07）
 
@@ -187,6 +188,57 @@ v1.0(GA) → v1.1(国密) → v1.1.1(安全) → v1.2(API) → v1.2.1(加固) �
 - security-check.sh: 12 项全通过
 - release_gate_e2e.py: 37/37 通过（17 HTTP API + 5 Admin API + 15 Selenium 浏览器）
 - 集成测试: 15 packages PASS（按包顺序运行）
+
+## 三-quater、v1.4.0 — 国密 PKI + 软件密码机 + KAE 加速（2026-07-02 发布）
+
+> 定位升级：从"自托管 KMS"→"国密合规的自托管密码学平台"。四大支柱：KMS + PKI + 审计 + SDF。
+
+### 3.4.1 PKI 证书签发
+
+| 功能 | 标准 | 说明 |
+|---|---|---|
+| X.509 SM2 证书签发 | GM/T 0015 + GB/T 38636 | CA 自签根证书 + 终端证书 + 双证书体系 |
+| X.509 RSA/ECDSA 证书签发 | RFC 5280 | 复用 SM2 框架，标准库路径 |
+| 证书链验证 | GM/T 0015 | SM2（tjfoc）+ RSA/ECDSA（标准库） |
+| CRL 吊销列表 | GM/T 0015 | 签发 + 解析 + 吊销检查 |
+| crypto.Signer 适配器 | - | SecureSigner，KEK 解密后签名，签名后 Wipe |
+| CertManager | - | 证书元数据 CRUD（cert:{certID} + cert:crl:{caKeyID}） |
+
+**6 个 HTTP API 端点**：`/api/v1/pki/ca` | `issue` | `verify` | `cert/{id}` | `revoke` | `ca/{id}/crl`
+
+### 3.4.2 SDF 软件密码机（GM/T 0018-2023）
+
+| 功能 | 说明 |
+|---|---|
+| SDF Device Go 接口 | 设备管理 + SM2/SM3/SM4 运算 + 随机数 + 密钥包装 |
+| 软件实现 | tjfoc/gmsm（`//go:build gmsm`） |
+| 10 个 HTTP API 端点 | `/api/v1/sdf/device/info` | `random` | `sm2/*` | `sm3/hash` | `sm4/*` |
+| SDFConfig 配置 | `sdf.enabled` + `sdf.token` |
+| hex 编码传输 | 二进制数据（密钥/密文/签名）用 hex 编码 |
+
+### 3.4.3 KAE 硬件加速
+
+| 功能 | 说明 |
+|---|---|
+| 鲲鹏 920 UADK 加速开关 | `crypto.suite = "kae"` |
+| KAESuite | 实现 CryptoSuite 接口（SM4-GCM/SM3 + AES-256-GCM/SHA-256） |
+| 运行时检测 | `/dev/uacce*` 设备，不可用回退软件套件 |
+| 配置 | `crypto.kae_base = "gmsm" | "standard"`（默认 gmsm） |
+| 编译 | `go build -tags 'kae,gmsm'`（需鲲鹏 920 + openEuler + libwd） |
+
+### 3.4.4 竞品分析与定位
+
+- **与 Tongsuo/GmSSL 互补**：它们是密码库，Yvonne 是服务层
+- **与 Vault 差异化**：Vault 不支持国密，Yvonne 为国密合规而生
+- **SDF 护城河**：开源市场无生产可用的软件国密密码机（0018-sdf-mock 明确"严禁生产"）
+- **DTLS 不纳入**：Yvonne 是服务层不是传输层，国密 DTLS 在 Go 生态无基础
+
+### 3.4.5 验证
+
+- CI: 17 packages PASS
+- security-check.sh: 12 项全通过
+- 新增 43+ 测试（PKI 18 + SDF 13 + KAE 4 + 覆盖率补充 9）
+- 覆盖率：SDF gmsm 51.4%→69.9%，service 68.8%→73.3%
 
 ## 四、v2.0 — 企业级（2026-12+）
 

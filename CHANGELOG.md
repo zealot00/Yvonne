@@ -11,6 +11,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - v2.0: 企业级（KMIP + Vault 兼容 + 多区域）
 - 详见 [docs/roadmap.md](docs/roadmap.md)
 
+## [1.4.0] - 2026-07-02 (国密 PKI + 软件密码机 + KAE 加速)
+
+### Added — PKI 证书签发
+
+- **X.509 SM2 证书签发**：CA 自签根证书 + 终端证书 + 双证书体系（GB/T 38636-2020）
+- **X.509 RSA/ECDSA 证书签发**：复用 SM2 框架，标准库路径（RFC 5280）
+- **证书链验证**：SM2（tjfoc/gmsm/x509）+ RSA/ECDSA（标准库）
+- **CRL 吊销列表**：签发 + 解析 + 吊销检查（SM2 CRL + 标准 CRL）
+- **6 个 HTTP API 端点**：`/api/v1/pki/ca` | `issue` | `verify` | `cert/{id}` | `revoke` | `ca/{id}/crl`
+- **crypto.Signer 适配器**（`SecureSigner`）：KEK 解密后签名，签名后 Wipe
+- **CertManager**：证书元数据 CRUD（`cert:{certID}` + `cert:crl:{caKeyID}`）
+- **国密双证书**：`cert_type: "sign" | "encrypt" | "dual"`，支持国密 TLS 双证书签发
+
+### Added — SDF 软件密码机（GM/T 0018-2023）
+
+- **SDF Device Go 接口**：设备管理 + SM2/SM3/SM4 运算 + 随机数 + 密钥包装
+- **软件实现**（tjfoc/gmsm，`//go:build gmsm`）：纯软件 SDF 设备
+- **10 个 HTTP API 端点**：`/api/v1/sdf/device/info` | `random` | `sm2/*` | `sm3/hash` | `sm4/*`
+- **SDFConfig 配置**：`sdf.enabled` + `sdf.token`
+- ** hex 编码传输**：二进制数据（密钥/密文/签名）用 hex 编码
+
+### Added — KAE 硬件加速
+
+- **鲲鹏 920 UADK 加速开关**：`crypto.suite = "kae"`
+- **KAESuite** 实现 `CryptoSuite` 接口（SM4-GCM/SM3 + AES-256-GCM/SHA-256）
+- **运行时检测** `/dev/uacce*` 设备，不可用回退软件套件
+- **配置**：`crypto.kae_base = "gmsm" | "standard"`（默认 gmsm）
+- **编译**：`go build -tags 'kae,gmsm'`（需鲲鹏 920 + openEuler + libwd）
+
+### Changed
+
+- **定位调整**：从"自托管 KMS"→"国密合规的自托管密码学平台"
+- **四大支柱**：KMS + PKI + 审计 + SDF（新增 PKI + SDF 作为核心能力）
+- `CryptoConfig` 新增 `KAEBase` 字段
+- `Core` 新增 `SetCertManager` 方法
+- `V1Router` 新增 `SetSDFHandler` 方法
+
+### Tests
+
+- 新增 43+ 测试：
+  - PKI：18 个（7 RSA/ECDSA service + 4 SM2 service + 7 handler）
+  - SDF：13 个（8 基础 + 5 HTTP）
+  - KAE：4 个 stub
+  - 覆盖率补充：9 个（crypto/sdf/service 错误路径）
+- 覆盖率提升：
+  - SDF gmsm：51.4% → 69.9% (+18.5%)
+  - service：68.8% → 73.3% (+4.5%)
+  - crypto gmsm：64.2% → 68.4% (+4.2%)
+
+### Verification
+
+- CI: 17 packages PASS
+- security-check.sh: 12 项全通过
+- 双标签编译：`go build` + `go build -tags gmsm` + `go build -tags 'kae,gmsm'`
+
 ## [1.3.3] - 2026-07-01 (LTS 稳定版 — 8 个 Bug 修复 + 用户手册)
 
 > **本版本为长期支持（LTS）版本，后续一段时间内不再迭代，作为生产部署基线。**

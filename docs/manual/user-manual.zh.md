@@ -1,6 +1,6 @@
 # Yvonne KMS 用户手册
 
-> 版本：v1.3.3 (LTS) | 最后更新：2026-07-01
+> 版本：v1.4.0 | 最后更新：2026-07-02
 
 欢迎使用 Yvonne KMS。本手册覆盖产品的全部功能与特性，按由浅入深的顺序组织，既适合初次接触的运维工程师，也适合需要深度定制的架构师。
 
@@ -22,9 +22,12 @@
 14. [SDK 使用指南](#14-sdk-使用指南)
 15. [部署指南](#15-部署指南)
 16. [国密合规](#16-国密合规)
-17. [HSM 集成](#17-hsm-集成)
-18. [故障排查](#18-故障排查)
-19. [附录](#19-附录)
+17. [PKI 证书签发](#17-pki-证书签发)
+18. [SDF 软件密码机](#18-sdf-软件密码机)
+19. [KAE 硬件加速](#19-kae-硬件加速)
+20. [HSM 集成](#20-hsm-集成)
+21. [故障排查](#21-故障排查)
+22. [附录](#22-附录)
 
 ---
 
@@ -1424,7 +1427,205 @@ server {
 
 ---
 
-## 17. HSM 集成
+## 17. PKI 证书签发
+
+v1.4.0 新增 PKI 证书签发能力，支持 SM2/RSA/ECDSA X.509 证书的全生命周期管理：CA 自签、终端证书签发、链验证、CRL 吊销。
+
+### 17.1 概述
+
+Yvonne PKI 提供以下能力：
+- **CA 创建**：自签根证书（SM2/RSA/ECDSA）
+- **终端证书签发**：CA 签发终端证书，支持单证书和国密双证书
+- **证书链验证**：验证证书链 + CRL 吊销检查
+- **证书吊销**：标记吊销 + 重新签发 CRL
+
+### 17.2 创建 CA
+
+```bash
+curl -X POST http://kms:8200/api/v1/pki/ca \
+  -H 'Authorization: Bearer admin-token' \
+  -d '{
+    "key_id": "my-ca",
+    "algo": "sm2",
+    "subject": {"CN": "My Root CA", "O": "MyOrg"},
+    "ttl_years": 10
+  }'
+```
+
+返回 `cert_id` + 证书 PEM。SM2 CA 需 `-tags gmsm` 编译。
+
+### 17.3 签发终端证书
+
+```bash
+curl -X POST http://kms:8200/api/v1/pki/issue \
+  -H 'Authorization: Bearer admin-token' \
+  -d '{
+    "ca_key_id": "my-ca",
+    "subject": {"CN": "server.example.com"},
+    "algo": "sm2",
+    "public_key_pem": "...",
+    "cert_type": "sign",
+    "ttl_days": 90
+  }'
+```
+
+### 17.4 证书链验证
+
+```bash
+curl -X POST http://kms:8200/api/v1/pki/verify \
+  -H 'Authorization: Bearer token' \
+  -d '{
+    "cert_pem": "...",
+    "ca_cert_pem": "..."
+  }'
+```
+
+### 17.5 证书吊销与 CRL
+
+```bash
+# 吊销
+curl -X POST http://kms:8200/api/v1/pki/revoke \
+  -H 'Authorization: Bearer admin-token' \
+  -d '{"ca_key_id":"my-ca","serial_number":"123","reason":"key_compromise"}'
+
+# 获取 CRL
+curl http://kms:8200/api/v1/pki/ca/my-ca/crl \
+  -H 'Authorization: Bearer token'
+```
+
+### 17.6 API 参考
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/v1/pki/ca` | 创建 CA |
+| POST | `/api/v1/pki/issue` | 签发证书 |
+| POST | `/api/v1/pki/verify` | 验证证书链 |
+| GET | `/api/v1/pki/cert/{certID}` | 获取证书 |
+| POST | `/api/v1/pki/revoke` | 吊销证书 |
+| GET | `/api/v1/pki/ca/{caKeyID}/crl` | 获取 CRL |
+
+### 17.7 国密双证书
+
+国密 TLS（GB/T 38636）要求双证书：签名证书 + 加密证书。`cert_type` 参数：
+- `"sign"` — 签名证书（KeyUsage: DigitalSignature）
+- `"encrypt"` — 加密证书（KeyUsage: KeyEncipherment + DataEncipherment）
+- `"dual"` — 同时签发两张
+
+---
+
+## 18. SDF 软件密码机
+
+v1.4.0 新增 SDF（GM/T 0018-2023）软件密码机接口，使 Yvonne 可作为软件国密密码机使用。
+
+### 18.1 GM/T 0018 概述
+
+SDF 是中国密码行业的密码设备标准接口，定义了设备管理、密钥管理、SM2/SM3/SM4 运算等 API。Yvonne 的软件实现使应用无需硬件密码机即可调用标准 SDF 接口。
+
+### 18.2 设备管理
+
+```bash
+# 设备信息
+curl -X POST http://kms:8200/api/v1/sdf/device/info \
+  -H 'Authorization: Bearer sdf-token' -d '{}'
+
+# 随机数
+curl -X POST http://kms:8200/api/v1/sdf/random \
+  -H 'Authorization: Bearer sdf-token' -d '{"length":32}'
+```
+
+### 18.3 SM2 运算
+
+```bash
+# 生成密钥对
+curl -X POST http://kms:8200/api/v1/sdf/sm2/generate-keypair \
+  -H 'Authorization: Bearer sdf-token' -d '{}'
+
+# 签名
+curl -X POST http://kms:8200/api/v1/sdf/sm2/sign \
+  -H 'Authorization: Bearer sdf-token' \
+  -d '{"priv_key":"...hex...","data":"...hex..."}'
+```
+
+### 18.4 SM3 哈希
+
+```bash
+curl -X POST http://kms:8200/api/v1/sdf/sm3/hash \
+  -H 'Authorization: Bearer sdf-token' \
+  -d '{"data":"616263"}'
+```
+
+### 18.5 SM4 对称加密
+
+```bash
+curl -X POST http://kms:8200/api/v1/sdf/sm4/encrypt \
+  -H 'Authorization: Bearer sdf-token' \
+  -d '{"key":"...hex...","data":"...hex..."}'
+```
+
+### 18.6 随机数与密钥包装
+
+SDF 支持生成随机数和密钥包装（WrapKey/UnwrapKey），用于密钥安全分发。
+
+### 18.7 HTTP API 参考
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/v1/sdf/device/info` | 设备信息 |
+| POST | `/api/v1/sdf/random` | 随机数 |
+| POST | `/api/v1/sdf/sm2/generate-keypair` | SM2 密钥对 |
+| POST | `/api/v1/sdf/sm2/sign` | SM2 签名 |
+| POST | `/api/v1/sdf/sm2/verify` | SM2 验签 |
+| POST | `/api/v1/sdf/sm2/encrypt` | SM2 加密 |
+| POST | `/api/v1/sdf/sm2/decrypt` | SM2 解密 |
+| POST | `/api/v1/sdf/sm3/hash` | SM3 哈希 |
+| POST | `/api/v1/sdf/sm4/encrypt` | SM4 加密 |
+| POST | `/api/v1/sdf/sm4/decrypt` | SM4 解密 |
+
+### 18.8 与硬件密码机的关系
+
+Yvonne SDF 是**软件实现**，适用于：
+- 密评二级以下场景
+- 开发测试环境
+- 无硬件密码机的中小系统
+
+对于密评三级以上或金融核心场景，需集成硬件密码机（通过 PKCS#11 或厂商 SDF 库）。
+
+---
+
+## 19. KAE 硬件加速
+
+v1.4.0 新增鲲鹏 920 处理器的 UADK 硬件加速支持。
+
+### 19.1 鲲鹏 UADK 概述
+
+KAE（Kunpeng Accelerator Engine）是鲲鹏 920 处理器的硬件加速引擎，UADK（User-space Accelerator Development Kit）是其用户态框架，支持 SM2/SM3/SM4/RSA/AES 硬件加速。
+
+### 19.2 配置与编译
+
+配置：
+```json
+{
+  "crypto": {
+    "suite": "kae",
+    "kae_base": "gmsm"
+  }
+}
+```
+
+编译（需鲲鹏 920 + openEuler + libwd）：
+```bash
+go build -tags 'kae,gmsm' -o bin/yvonne-kae ./cmd/yvonne
+```
+
+### 19.3 运行时检测与回退
+
+Yvonne 启动时检测 `/dev/uacce*` 设备：
+- 设备可用 → 使用 KAE 硬件加速
+- 设备不可用 → 回退软件套件（gmsm 或 standard）
+
+---
+
+## 20. HSM 集成
 
 ### 17.1 PKCS#11
 
@@ -1456,7 +1657,7 @@ Yvonne 提供统一的 KEK 抽象（`softwareKEK` / `hsmKEK`），业务代码�
 
 ---
 
-## 18. 故障排查
+## 21. 故障排查
 
 ### 18.1 常见问题
 
@@ -1535,7 +1736,7 @@ YVONNE_LOG_LEVEL=debug ./bin/yvonne dev
 
 ---
 
-## 19. 附录
+## 22. 附录
 
 ### 18.1 API 端点速查
 

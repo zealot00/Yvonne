@@ -1,6 +1,6 @@
 # Yvonne KMS User Manual
 
-> Version: v1.3.3 (LTS) | Last updated: 2026-07-01
+> Version: v1.4.0 | Last updated: 2026-07-02
 
 Welcome to Yvonne KMS. This manual covers all features and capabilities of the product, organized from basic to advanced, suitable for both DevOps engineers getting started and architects needing deep customization.
 
@@ -22,9 +22,12 @@ Welcome to Yvonne KMS. This manual covers all features and capabilities of the p
 14. [SDK Guide](#14-sdk-guide)
 15. [Deployment](#15-deployment)
 16. [GM (Chinese National Crypto) Compliance](#16-gm-chinese-national-crypto-compliance)
-17. [HSM Integration](#17-hsm-integration)
-18. [Troubleshooting](#18-troubleshooting)
-19. [Appendix](#19-appendix)
+17. [PKI Certificate Issuance](#17-pki-certificate-issuance)
+18. [SDF Software Cryptographic Device](#18-sdf-software-cryptographic-device)
+19. [KAE Hardware Acceleration](#19-kae-hardware-acceleration)
+20. [HSM Integration](#20-hsm-integration)
+21. [Troubleshooting](#21-troubleshooting)
+22. [Appendix](#22-appendix)
 
 ---
 
@@ -1423,7 +1426,180 @@ See [docs/compliance/self-assessment-level2.md](../compliance/self-assessment-le
 
 ---
 
-## 17. HSM Integration
+## 17. PKI Certificate Issuance
+
+v1.4.0 adds PKI certificate issuance capability, supporting the full lifecycle of SM2/RSA/ECDSA X.509 certificates: CA self-signing, end-entity issuance, chain verification, CRL revocation.
+
+### 17.1 Overview
+
+Yvonne PKI provides:
+- **CA Creation**: Self-signed root certificates (SM2/RSA/ECDSA)
+- **End-Entity Issuance**: CA signs end-entity certificates, supports single and GM dual certificates
+- **Chain Verification**: Verify certificate chains + CRL revocation check
+- **Revocation**: Mark revoked + re-issue CRL
+
+### 17.2 Creating a CA
+
+```bash
+curl -X POST http://kms:8200/api/v1/pki/ca \
+  -H 'Authorization: Bearer admin-token' \
+  -d '{"key_id":"my-ca","algo":"sm2","subject":{"CN":"My Root CA","O":"MyOrg"},"ttl_years":10}'
+```
+
+### 17.3 Issuing End-Entity Certificates
+
+```bash
+curl -X POST http://kms:8200/api/v1/pki/issue \
+  -H 'Authorization: Bearer admin-token' \
+  -d '{"ca_key_id":"my-ca","subject":{"CN":"server.example.com"},"algo":"sm2","public_key_pem":"...","cert_type":"sign","ttl_days":90}'
+```
+
+### 17.4 Chain Verification
+
+```bash
+curl -X POST http://kms:8200/api/v1/pki/verify \
+  -H 'Authorization: Bearer token' \
+  -d '{"cert_pem":"...","ca_cert_pem":"..."}'
+```
+
+### 17.5 Revocation & CRL
+
+```bash
+curl -X POST http://kms:8200/api/v1/pki/revoke \
+  -H 'Authorization: Bearer admin-token' \
+  -d '{"ca_key_id":"my-ca","serial_number":"123","reason":"key_compromise"}'
+
+curl http://kms:8200/api/v1/pki/ca/my-ca/crl -H 'Authorization: Bearer token'
+```
+
+### 17.6 API Reference
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/v1/pki/ca` | Create CA |
+| POST | `/api/v1/pki/issue` | Issue certificate |
+| POST | `/api/v1/pki/verify` | Verify chain |
+| GET | `/api/v1/pki/cert/{certID}` | Get certificate |
+| POST | `/api/v1/pki/revoke` | Revoke certificate |
+| GET | `/api/v1/pki/ca/{caKeyID}/crl` | Get CRL |
+
+### 17.7 GM Dual Certificates
+
+GM TLS (GB/T 38636) requires dual certificates: signing cert + encryption cert. The `cert_type` parameter:
+- `"sign"` — Signing certificate (KeyUsage: DigitalSignature)
+- `"encrypt"` — Encryption certificate (KeyUsage: KeyEncipherment + DataEncipherment)
+- `"dual"` — Issue both
+
+---
+
+## 18. SDF Software Cryptographic Device
+
+v1.4.0 adds the SDF (GM/T 0018-2023) software cryptographic device interface, enabling Yvonne to act as a software GM cryptographic device.
+
+### 18.1 GM/T 0018 Overview
+
+SDF is the standard interface for cryptographic devices in China's cryptography industry. Yvonne's software implementation allows applications to call the standard SDF interface without hardware.
+
+### 18.2 Device Management
+
+```bash
+curl -X POST http://kms:8200/api/v1/sdf/device/info \
+  -H 'Authorization: Bearer sdf-token' -d '{}'
+
+curl -X POST http://kms:8200/api/v1/sdf/random \
+  -H 'Authorization: Bearer sdf-token' -d '{"length":32}'
+```
+
+### 18.3 SM2 Operations
+
+```bash
+curl -X POST http://kms:8200/api/v1/sdf/sm2/generate-keypair \
+  -H 'Authorization: Bearer sdf-token' -d '{}'
+
+curl -X POST http://kms:8200/api/v1/sdf/sm2/sign \
+  -H 'Authorization: Bearer sdf-token' \
+  -d '{"priv_key":"...hex...","data":"...hex..."}'
+```
+
+### 18.4 SM3 Hash
+
+```bash
+curl -X POST http://kms:8200/api/v1/sdf/sm3/hash \
+  -H 'Authorization: Bearer sdf-token' -d '{"data":"616263"}'
+```
+
+### 18.5 SM4 Symmetric Encryption
+
+```bash
+curl -X POST http://kms:8200/api/v1/sdf/sm4/encrypt \
+  -H 'Authorization: Bearer sdf-token' \
+  -d '{"key":"...hex...","data":"...hex..."}'
+```
+
+### 18.6 Random & Key Wrapping
+
+SDF supports random number generation and key wrapping (WrapKey/UnwrapKey) for secure key distribution.
+
+### 18.7 HTTP API Reference
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/v1/sdf/device/info` | Device info |
+| POST | `/api/v1/sdf/random` | Random number |
+| POST | `/api/v1/sdf/sm2/generate-keypair` | SM2 keypair |
+| POST | `/api/v1/sdf/sm2/sign` | SM2 sign |
+| POST | `/api/v1/sdf/sm2/verify` | SM2 verify |
+| POST | `/api/v1/sdf/sm2/encrypt` | SM2 encrypt |
+| POST | `/api/v1/sdf/sm2/decrypt` | SM2 decrypt |
+| POST | `/api/v1/sdf/sm3/hash` | SM3 hash |
+| POST | `/api/v1/sdf/sm4/encrypt` | SM4 encrypt |
+| POST | `/api/v1/sdf/sm4/decrypt` | SM4 decrypt |
+
+### 18.8 Relationship with Hardware HSM
+
+Yvonne SDF is a **software implementation**, suitable for:
+- Cryptographic assessment level 2 and below
+- Development and testing environments
+- Small/medium systems without hardware HSM
+
+For level 3+ or financial core scenarios, integrate hardware HSM (via PKCS#11 or vendor SDF library).
+
+---
+
+## 19. KAE Hardware Acceleration
+
+v1.4.0 adds Kunpeng 920 processor UADK hardware acceleration support.
+
+### 19.1 Kunpeng UADK Overview
+
+KAE (Kunpeng Accelerator Engine) is the hardware acceleration engine of Kunpeng 920 processors. UADK (User-space Accelerator Development Kit) is its user-space framework, supporting SM2/SM3/SM4/RSA/AES hardware acceleration.
+
+### 19.2 Configuration & Build
+
+Config:
+```json
+{
+  "crypto": {
+    "suite": "kae",
+    "kae_base": "gmsm"
+  }
+}
+```
+
+Build (requires Kunpeng 920 + openEuler + libwd):
+```bash
+go build -tags 'kae,gmsm' -o bin/yvonne-kae ./cmd/yvonne
+```
+
+### 19.3 Runtime Detection & Fallback
+
+Yvonne detects `/dev/uacce*` at startup:
+- Device available → use KAE hardware acceleration
+- Device unavailable → fall back to software suite (gmsm or standard)
+
+---
+
+## 20. HSM Integration
 
 ### 17.1 PKCS#11
 
@@ -1455,7 +1631,7 @@ Yvonne provides unified KEK abstraction (`softwareKEK` / `hsmKEK`); business cod
 
 ---
 
-## 18. Troubleshooting
+## 21. Troubleshooting
 
 ### 18.1 Common Issues
 
@@ -1534,7 +1710,7 @@ YVONNE_LOG_LEVEL=debug ./bin/yvonne dev
 
 ---
 
-## 19. Appendix
+## 22. Appendix
 
 ### 19.1 API Endpoint Reference
 
