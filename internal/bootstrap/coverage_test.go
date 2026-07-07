@@ -162,7 +162,7 @@ func TestBuildAdminServer_Dev(t *testing.T) {
 	vault.DirectUnseal(mk)
 
 	cfg := &config.YvonneConfig{Mode: "dev"}
-	srv := buildAdminServer(cfg, vault)
+	srv := buildAdminServer(cfg, vault, nil)
 	if srv == nil {
 		t.Fatal("admin server should not be nil in dev mode")
 	}
@@ -182,7 +182,7 @@ func TestBuildAdminServer_ClusterDisabled(t *testing.T) {
 			Admin: config.AdminServerConfig{Enabled: false},
 		},
 	}
-	srv := buildAdminServer(cfg, vault)
+	srv := buildAdminServer(cfg, vault, nil)
 	if srv != nil {
 		t.Fatal("admin server should be nil when disabled")
 	}
@@ -202,7 +202,7 @@ func TestBuildAdminServer_ClusterEnabled(t *testing.T) {
 			Admin: config.AdminServerConfig{Enabled: true, AdminToken: "cluster-admin"},
 		},
 	}
-	srv := buildAdminServer(cfg, vault)
+	srv := buildAdminServer(cfg, vault, nil)
 	if srv == nil {
 		t.Fatal("admin server should not be nil when enabled")
 	}
@@ -222,7 +222,7 @@ func TestBuildAdminServer_ClusterNoToken(t *testing.T) {
 			Admin: config.AdminServerConfig{Enabled: true},
 		},
 	}
-	srv := buildAdminServer(cfg, vault)
+	srv := buildAdminServer(cfg, vault, nil)
 	if srv == nil {
 		t.Fatal("admin server should not be nil when enabled")
 	}

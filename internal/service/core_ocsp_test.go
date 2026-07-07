@@ -17,8 +17,8 @@ package service
 
 import (
 	"context"
-	"crypto/sha1" //nolint:gosec // OCSP IssuerNameHash 强制 SHA-1（RFC 6960 §4.1.1）
 	stdcrypto "crypto"
+	"crypto/sha1" //nolint:gosec // OCSP IssuerNameHash 强制 SHA-1（RFC 6960 §4.1.1）
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -105,7 +105,7 @@ func TestCore_OCSP_UnknownIssuer(t *testing.T) {
 	core, _, _ := setupOCAChain(t)
 
 	rogue := makeRSACertForOCSP(t)
-	issuerNameHash := sha1.Sum(rogue.RawSubject)              //nolint:gosec
+	issuerNameHash := sha1.Sum(rogue.RawSubject)             //nolint:gosec
 	issuerKeyHash := sha1.Sum(rogue.RawSubjectPublicKeyInfo) //nolint:gosec
 	req := stdocsp.Request{
 		HashAlgorithm:  stdcrypto.SHA1,
@@ -227,7 +227,7 @@ func issueLeafUnderWithID(t *testing.T, core *Core, caKeyID, subject string) (*b
 // mustBuildOCSPReq 构造 OCSP 请求 DER。
 func mustBuildOCSPReq(t *testing.T, caCert *x509.Certificate, serial *big.Int) []byte {
 	t.Helper()
-	issuerNameHash := sha1.Sum(caCert.RawSubject)              //nolint:gosec
+	issuerNameHash := sha1.Sum(caCert.RawSubject)             //nolint:gosec
 	issuerKeyHash := sha1.Sum(caCert.RawSubjectPublicKeyInfo) //nolint:gosec
 	req := stdocsp.Request{
 		HashAlgorithm:  stdcrypto.SHA1,

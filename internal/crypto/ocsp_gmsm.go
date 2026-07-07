@@ -83,7 +83,7 @@ func CreateSM2OCSPResponse(reqDER, sm2CertDER []byte, sm2Signer *SecureSigner, s
 	}
 
 	// 4. 构造 ResponseData。
-	issuerNameHash := sha1.Sum(sm2Cert.RawSubject)         //nolint:gosec // RFC 6960 强制 SHA-1
+	issuerNameHash := sha1.Sum(sm2Cert.RawSubject)             //nolint:gosec // RFC 6960 强制 SHA-1
 	issuerKeyHash := sha1.Sum(sm2Cert.RawSubjectPublicKeyInfo) //nolint:gosec // RFC 6960 强制 SHA-1
 
 	certStatus, err := buildSM2CertStatus(status, revokedAt, reason)
@@ -193,15 +193,15 @@ type certIDASN1Ocsp struct {
 
 // certStatusASN1 是 CertStatus 的 CHOICE 结构。
 type certStatusASN1 struct {
-	Good    asn1.RawValue `asn1:"implicit,tag:0,optional"`
+	Good    asn1.RawValue   `asn1:"implicit,tag:0,optional"`
 	Revoked revokedInfoASN1 `asn1:"explicit,tag:1,optional"`
-	Unknown asn1.RawValue `asn1:"implicit,tag:2,optional"`
+	Unknown asn1.RawValue   `asn1:"implicit,tag:2,optional"`
 }
 
 // revokedInfoASN1 是 RevokedInfo 的 ASN.1 结构（RFC 6960 §4.2.1）。
 type revokedInfoASN1 struct {
-	RevocationTime   time.Time       `asn1:"generalized"`
-	RevocationReason asn1.RawValue   `asn1:"explicit,tag:0,optional"`
+	RevocationTime   time.Time     `asn1:"generalized"`
+	RevocationReason asn1.RawValue `asn1:"explicit,tag:0,optional"`
 }
 
 // basicOCSPResponseASN1 是 BasicOCSPResponse 的 ASN.1 结构。

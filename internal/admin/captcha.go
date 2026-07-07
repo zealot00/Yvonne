@@ -8,8 +8,8 @@
 //
 // 安全注意：
 //   - 答案用 crypto/subtle.ConstantTimeCompare 比较
-//   - ID 用 crypto/rand 16 字节
-//   - 字符用 crypto/rand 选择（不暴露状态）
+//   - ID 用 memguard.GenerateSecureRandom 16 字节
+//   - 字符用 crypto/rand.Int 选择（不暴露状态）
 package admin
 
 import (
@@ -18,6 +18,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"math/big"
+
+	"yvonne/internal/memguard"
 	"strings"
 	"sync"
 	"time"
@@ -93,9 +95,10 @@ func randomText(n int, alphabet string) (string, error) {
 }
 
 // randomID 生成 n 字节随机 ID → base64url（无 padding）。
+// 走 memguard 统一熵源入口（红线：禁止直接调 crypto/rand.Read）。
 func randomID(n int) (string, error) {
-	buf := make([]byte, n)
-	if _, err := rand.Read(buf); err != nil {
+	buf, err := memguard.GenerateSecureRandom(n)
+	if err != nil {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(buf), nil

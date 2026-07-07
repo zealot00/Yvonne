@@ -481,12 +481,17 @@ func clientIP(r *http.Request) string {
 }
 
 func (s *Server) writeLoginHTML(w http.ResponseWriter) {
-	// 占位：完整 HTML 在 Day 2 实现
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(`<!DOCTYPE html><html><head><title>Yvonne Admin Login</title></head>
+	data, err := staticFS.ReadFile("web/login.html")
+	if err != nil {
+		// fallback placeholder if embed fails
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(`<!DOCTYPE html><html><head><title>Yvonne Admin Login</title></head>
 <body><h1>Yvonne KMS Admin Console</h1>
-<p>Login form placeholder (Day 2 will render real UI).</p>
-</body></html>`))
+<p>Login form temporarily unavailable.</p></body></html>`))
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(data)
 }
 
 // =====================================================================

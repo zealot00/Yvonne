@@ -25,7 +25,7 @@ import (
 	"yvonne/internal/seal"
 )
 
-//go:embed web/static/* web/index.html
+//go:embed web/static/* web/index.html web/login.html
 var staticFS embed.FS
 
 // 确保 context 包被引用。

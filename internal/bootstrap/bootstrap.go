@@ -15,7 +15,6 @@ package bootstrap
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -708,8 +707,8 @@ func wireAdminV142(srv *admin.Server, devMode bool, auditor audit.Auditor) {
 		srv.SetSessionSecret([]byte(raw))
 	} else {
 		// dev fallback：随机生成（重启失效，可接受）
-		salt := make([]byte, 32)
-		if _, err := rand.Read(salt); err != nil {
+		salt, err := memguard.GenerateSecureRandom(32)
+		if err != nil {
 			log.Printf("FATAL: generate random session secret: %v", err)
 		}
 		srv.SetSessionSecret(salt)

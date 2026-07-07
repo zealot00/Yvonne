@@ -153,7 +153,7 @@ func (s *Server) handleUnseal(w http.ResponseWriter, req *http.Request) {
 	})
 }
 
-// handleIndex 返回 SPA 入口 HTML。
+// handleIndex 返回 SPA 入口 HTML（v1.4.2：未登录自动 302 → /admin/login）。
 func (s *Server) handleIndex(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -163,6 +163,11 @@ func (s *Server) handleIndex(w http.ResponseWriter, req *http.Request) {
 		// 未匹配的路径回退到 index.html，供前端路由使用。
 		req.URL.Path = "/"
 	}
+	// 未登录 → 跳登录页（除非是 dev mode 且无 adminToken）
+	if !s.isAuthenticated(req) {
+		http.Redirect(w, req, "/admin/login", http.StatusFound)
+		return
+	}
 	data, err := staticFS.ReadFile("web/index.html")
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -170,4 +175,24 @@ func (s *Server) handleIndex(w http.ResponseWriter, req *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(data)
+}
+
+// isAuthenticated 检查请求是否携带有效 session cookie（v1.4.2 用于 index 路由）。
+// dev 模式且 adminToken 空 → 直接视为已认证（保留 v1.4.0 行为）。
+func (s *Server) isAuthenticated(req *http.Request) bool {
+	if s.adminToken == "" {
+		return true
+	}
+	c, err := req.Cookie(SessionCookieName)
+	if err != nil || c.Value == "" {
+		return false
+	}
+	if s.sessions == nil {
+		return false
+	}
+	sess, ok := s.sessions.Get(c.Value)
+	if !ok {
+		return false
+	}
+	return sess.IsAlive()
 }

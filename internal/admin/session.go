@@ -74,6 +74,13 @@ func NewSession(userID string, idleTimeout, hardCapTimeout time.Duration, rememb
 	}, nil
 }
 
+// IsAlive 检查 session 是否仍有效（未超 idle，未超 hard cap）。
+// 不触发 lazy cleanup（仅供只读查询，如 handleIndex）。
+func (s *Session) IsAlive() bool {
+	now := time.Now()
+	return now.Before(s.ExpiresAt) && now.Before(s.HardCapAt)
+}
+
 // =====================================================================
 // SessionStore 接口 + 内存实现
 // =====================================================================

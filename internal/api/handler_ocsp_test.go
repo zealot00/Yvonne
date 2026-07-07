@@ -12,8 +12,8 @@ package api
 
 import (
 	"bytes"
-	"crypto/sha1" //nolint:gosec // OCSP IssuerNameHash 强制 SHA-1
 	stdcrypto "crypto"
+	"crypto/sha1" //nolint:gosec // OCSP IssuerNameHash 强制 SHA-1
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -223,7 +223,7 @@ func mustParseCAPEM(t *testing.T, pemBytes []byte) *x509.Certificate {
 // mustBuildOCSPReq constructs an OCSP request DER from CA cert + serial.
 func mustBuildOCSPReq(t *testing.T, caCert *x509.Certificate, serial *big.Int) []byte {
 	t.Helper()
-	nameHash := sha1.Sum(caCert.RawSubject)              //nolint:gosec
+	nameHash := sha1.Sum(caCert.RawSubject)             //nolint:gosec
 	keyHash := sha1.Sum(caCert.RawSubjectPublicKeyInfo) //nolint:gosec
 	req := stdocsp.Request{
 		HashAlgorithm:  stdcrypto.SHA1,

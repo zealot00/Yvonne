@@ -132,7 +132,7 @@ func (c *Core) matchCertByIssuerHash(ctx context.Context, caKeyID string, issuer
 		if err != nil || caCert == nil {
 			continue
 		}
-		nameHash := sha1.Sum(caCert.RawSubject)              //nolint:gosec
+		nameHash := sha1.Sum(caCert.RawSubject)             //nolint:gosec
 		keyHash := sha1.Sum(caCert.RawSubjectPublicKeyInfo) //nolint:gosec
 		if subtle.ConstantTimeCompare(nameHash[:], issuerNameHash) == 1 &&
 			subtle.ConstantTimeCompare(keyHash[:], issuerKeyHash) == 1 {

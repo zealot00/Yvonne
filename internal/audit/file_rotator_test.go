@@ -181,9 +181,9 @@ func TestFileRotator_CrossDayRolloverInZone(t *testing.T) {
 
 	// 人为回拨一天 → 写一条触发轮转。
 	rotator.mu.Lock()
-	currentToday := rotator.today                                          // today's UTC date
-	staleDate := time.Now().UTC().AddDate(0, 0, -1).Format("20060102")     // yesterday UTC
-	rotator.today = staleDate                                              // 模拟跨天
+	currentToday := rotator.today                                      // today's UTC date
+	staleDate := time.Now().UTC().AddDate(0, 0, -1).Format("20060102") // yesterday UTC
+	rotator.today = staleDate                                          // 模拟跨天
 	rotator.mu.Unlock()
 
 	if err := rotator.Write([]byte("day0-retrigger"), "Generic"); err != nil {

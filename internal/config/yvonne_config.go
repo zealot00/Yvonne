@@ -115,13 +115,13 @@ type AlertingConfig struct {
 // 国密部署默认 TimezoneEnabled=true, Timezone="Asia/Shanghai"，
 // 运维/合规审查员在 CN 时区下文件名与日历日期对齐。
 type AuditModeConf struct {
-	Dir             string `json:"dir"               yaml:"dir"`                // 日志目录（如 /var/log/yvonne）
-	Filename        string `json:"filename"          yaml:"filename"`           // 当前日志文件名（默认 audit.log）
-	RetentionDays   int    `json:"retention_days"    yaml:"retention_days"`     // 留存天数（默认 180）
-	SyslogEnabled   bool   `json:"syslog_enabled"    yaml:"syslog_enabled"`     // 是否启用 Syslog 双写
-	SyslogTag       string `json:"syslog_tag"        yaml:"syslog_tag"`         // Syslog tag（默认 yvonne-kms）
-	TimezoneEnabled bool   `json:"timezone_enabled"  yaml:"timezone_enabled"`   // 是否按本地时区切文件 + 留存
-	Timezone        string `json:"timezone"          yaml:"timezone"`           // IANA 时区名（如 Asia/Shanghai），TimezoneEnabled=true 时必填
+	Dir             string `json:"dir"               yaml:"dir"`              // 日志目录（如 /var/log/yvonne）
+	Filename        string `json:"filename"          yaml:"filename"`         // 当前日志文件名（默认 audit.log）
+	RetentionDays   int    `json:"retention_days"    yaml:"retention_days"`   // 留存天数（默认 180）
+	SyslogEnabled   bool   `json:"syslog_enabled"    yaml:"syslog_enabled"`   // 是否启用 Syslog 双写
+	SyslogTag       string `json:"syslog_tag"        yaml:"syslog_tag"`       // Syslog tag（默认 yvonne-kms）
+	TimezoneEnabled bool   `json:"timezone_enabled"  yaml:"timezone_enabled"` // 是否按本地时区切文件 + 留存
+	Timezone        string `json:"timezone"          yaml:"timezone"`         // IANA 时区名（如 Asia/Shanghai），TimezoneEnabled=true 时必填
 }
 
 // AuthModeConf 是认证配置（Cluster 模式必填，Dev 模式忽略）。

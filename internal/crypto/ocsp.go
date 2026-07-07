@@ -20,8 +20,8 @@ import (
 	stdcrypto "crypto"
 	"crypto/sha1" //nolint:gosec // OCSP IssuerNameHash/IssuerKeyHash 强制 SHA-1（RFC 6960 §4.1.1）
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/asn1"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"math/big"
