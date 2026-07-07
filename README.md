@@ -1,5 +1,9 @@
 # 🧊 Yvonne
 
+<p align="center">
+  <img src="docs/assets/banner.png" alt="Yvonne KMS — 国密合规的密钥管理" width="800">
+</p>
+
 [English](#english) | [中文](#中文)
 
 ---

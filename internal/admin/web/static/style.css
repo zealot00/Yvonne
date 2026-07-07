@@ -140,6 +140,22 @@ button { cursor: pointer; background: none; border: none; }
 
 .login-brand .icon { width: 32px; height: 32px; color: var(--primary); }
 
+/* === App logo (used in topbar + login) === */
+.app-logo {
+  width: 28px;
+  height: 28px;
+  display: block;
+  border-radius: 6px;
+}
+
+.app-logo-large {
+  width: 48px;
+  height: 48px;
+  display: block;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(3, 105, 161, 0.25);
+}
+
 .login-brand-name {
   font-size: var(--text-xl);
   font-weight: 600;

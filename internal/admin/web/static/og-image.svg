@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-label="Yvonne KMS — 国密合规的密钥管理">
+  <title>Yvonne KMS — 国密合规的密钥管理</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0a0a0a"/>
+      <stop offset="0.5" stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#0a0a0a"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.2" cy="0.3" r="0.5">
+      <stop offset="0" stop-color="#0369A1" stop-opacity="0.18"/>
+      <stop offset="0.7" stop-color="#0369A1" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="0.85" cy="0.85" r="0.5">
+      <stop offset="0" stop-color="#22C55E" stop-opacity="0.1"/>
+      <stop offset="0.7" stop-color="#22C55E" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="logoGrad" x1="0" y1="0" x2="200" y2="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0284C7"/>
+      <stop offset="1" stop-color="#0369A1"/>
+    </linearGradient>
+    <radialGradient id="dot" cx="0.4" cy="0.4" r="0.6">
+      <stop offset="0" stop-color="#22C55E"/>
+      <stop offset="1" stop-color="#16A34A"/>
+    </radialGradient>
+    <pattern id="grid" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0 L0 0 0 40" fill="none" stroke="rgba(255,255,255,0.025)" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <!-- 背景 -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+  <rect width="1200" height="630" fill="url(#glow2)"/>
+
+  <!-- Logo mark (大号) -->
+  <g transform="translate(120, 175) scale(3.5)">
+    <path d="M8 16 Q8 8 16 8 L48 8 Q56 8 56 16 L56 48 Q56 56 48 56 L16 56 Q8 56 8 48 Z"
+          fill="url(#logoGrad)"/>
+    <path d="M20 18 L30 32" stroke="white" stroke-width="4.5" stroke-linecap="round"/>
+    <path d="M44 18 L34 32" stroke="white" stroke-width="4.5" stroke-linecap="round"/>
+    <path d="M32 32 L32 42" stroke="white" stroke-width="4.5" stroke-linecap="round"/>
+    <circle cx="32" cy="46" r="3" fill="url(#dot)"/>
+  </g>
+
+  <!-- 文字 -->
+  <g font-family="Inter, -apple-system, 'Segoe UI', sans-serif" fill="white">
+    <text x="370" y="295" font-size="100" font-weight="700" letter-spacing="-3">Yvonne KMS</text>
+    <text x="370" y="375" font-size="32" font-weight="400" fill="#a3a3a3" letter-spacing="-0.5">
+      国密合规 · 自主可控 · 密钥管理
+    </text>
+  </g>
+
+  <!-- 标签 -->
+  <g font-family="ui-monospace, 'SF Mono', Consolas, monospace" font-size="22">
+    <g transform="translate(370, 430)">
+      <rect width="200" height="44" rx="22" fill="rgba(3,105,161,0.18)" stroke="rgba(3,105,161,0.4)"/>
+      <text x="100" y="29" text-anchor="middle" fill="#7DD3FC" font-weight="500">SM2 / SM3 / SM4</text>
+    </g>
+    <g transform="translate(585, 430)">
+      <rect width="180" height="44" rx="22" fill="rgba(34,197,94,0.15)" stroke="rgba(34,197,94,0.4)"/>
+      <text x="90" y="29" text-anchor="middle" fill="#86EFAC" font-weight="500">等保三级</text>
+    </g>
+    <g transform="translate(780, 430)">
+      <rect width="200" height="44" rx="22" fill="rgba(168,85,247,0.15)" stroke="rgba(168,85,247,0.4)"/>
+      <text x="100" y="29" text-anchor="middle" fill="#D8B4FE" font-weight="500">PKI · OCSP · KMS</text>
+    </g>
+  </g>
+
+  <!-- 底部版本 -->
+  <text x="120" y="560" font-family="ui-monospace, 'SF Mono', Consolas, monospace" font-size="20" fill="#525252">
+    v1.4.2 · Open Source · https://github.com/zealot00/Yvonne
+  </text>
+</svg>
