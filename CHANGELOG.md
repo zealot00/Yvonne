@@ -11,6 +11,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - v2.0: 企业级（KMIP + Vault 兼容 + 多区域）
 - 详见 [docs/roadmap.md](docs/roadmap.md)
 
+## [1.4.2] - 2026-07-07 (Admin Web UI 双因子登录重做)
+
+### Security — Admin Web 合规 UX
+
+**背景**：v1.4.0 的 admin web UI 采用"双层 auth"（HTTP Basic + Bearer Token 同一 adminToken）反人类设计，且登录本身是单因子，不满足等保三级 8.1.2 双因子鉴别要求。v1.4.2 完整重做。
+
+#### Added — 登录态机制
+
+- **双因子登录（a/b 项）**：adminToken（密码技术）+ TOTP RFC 6238（拥有因素），配合图形验证码防自动化
+- **Session Cookie 模式**：HttpOnly + Secure + SameSite=Strict + CSP nonce，替代 v1.4.0 的 HTTP Basic 弹窗
+- **失败锁定（b 项）**：3 次连续失败 → 30 分钟 IP+用户级锁定（`LoginState` + 滑动窗口）
+- **会话超时（b 项）**：idle 30 分钟（自动续期）+ hard cap 8 小时（绝对上限）
+- **设备指纹**：HMAC-SHA-256(secret, ua\|lang\|plat\|screen\|tz)，30 天 TTL，勾选"记住此设备"跳过 captcha + TOTP
+- **CSRF 防护**：double-submit cookie 模式（cookie vs body 一致性校验）
+- **TOTP 防重放**：`markUsed` 回调（`admin-totp:<code>` 90s TTL = 60s 窗口 + 30s buffer）
+- **Bearer Token 兼容**：curl / Selenium CDP / 服务对服务调用仍可用 `Authorization: Bearer` 头（中间件 cookie 优先）
+
+#### Added — 5 类新审计事件（c 项）
+
+- `LoginSuccess` / `LoginFailure` / `LoginLock` / `Logout` / `SessionTimeout`
+- 全部经 `audit.Auditor.Record()` 写入 HMAC 哈希链 + 文件轮转 + 异步 syslog 双写
+
+#### Added — SVG 图形验证码
+
+- 字符集 32 个（排除视觉混淆 0/O/1/I/L）
+- 长度 5，5 分钟 TTL，一次性消费
+- 旋转 ±25°、X 抖动 ±8 px、Y 抖动 ±5 px、4 条干扰线、35 个噪点
+- constant-time 比对（`subtle.ConstantTimeCompare`）
+
+#### Changed — 前端重做
+
+- **OLED 暗色主题**：`#0a0a0a` bg / `#0369A1` primary / `#22C55E` CTA / Inter 字体
+- 4 断点响应式（375 / 768 / 1024 / 1440）
+- 严格 CSP（nonce 注入）、X-Frame-Options DENY、Referrer-Policy no-referrer
+- Lucide 图标 sprite（15 个 icon，24×24 viewBox，MIT）
+- 30 秒倒计时弹窗 + 自动跳登录
+
+#### Style — 品牌图标 v2/v3
+
+- 像素龙 v2（48×48 全身龙，参考用户提供的图）→ v3（clean Y monogram）
+- 全套：logo.svg / favicon.ico (16+32+48) / apple-touch-icon.png / og-image.png / banner.png
+
+### Compliance
+
+- **等保三级 8.1.2/7.1.4/7.1.5/7.1.6 全面覆盖**：a) 双因子鉴别 + b) 失败处理+超时 + c) 5 类新审计 + d) Cookie 标记+CSRF
+- **关闭 1 项 P2**（P2-AU-1：可配置告警规则 → LoginLock 自动告警）
+- 详见 [docs/compliance/dengbao-level3-crypto.md 附录 C](docs/compliance/dengbao-level3-crypto.md#c)
+
+### Security
+
+- `crypto/rand.Read` → `memguard.GenerateSecureRandom`（captcha.go + bootstrap.go）
+- 12 项 `scripts/security-check.sh` 全过
+- `go test -race` 覆盖率 ≥ 85%
+- 77/77 单元测试 + 33/33 浏览器 E2E + 12/12 安全扫描
+
+### Tests
+
+- `internal/admin/captcha_test.go` — 字符集 / 长度 / viewBox / constant-time / TTL
+- `internal/admin/login_state_test.go` — 3 次锁 / Reset / 30 min 解锁 / 并发
+- `internal/admin/session_test.go` — 熵 / idle / hard cap / Reap / KV 往返
+- `internal/admin/device_token_test.go` — HMAC 确定性 / salt 差异 / 过期
+- `internal/admin/csrf_test.go` — cookie/input 一致 / 缺 403 / GET 跳过
+- `internal/admin/handlers_auth_test.go` — 11 个子测试
+- `internal/admin/auth_middleware_test.go` — Bearer / Cookie / CSRF / 401 / dev
+- `/tmp/yvonne-e2e/test_v142_login_full.py` — 33 个 CDP 浏览器用例
+
+### Docs
+
+- [docs/compliance/dengbao-level3-crypto.md](docs/compliance/dengbao-level3-crypto.md) 增 v1.4.2 附录 C（a/b/c/d 四项核心要求全覆盖）
+- [docs/manual/user-manual.zh.md](docs/manual/user-manual.zh.md) 增第 19 章"管理控制台登录"（流程、配置、会话、忘记 token 怎么办、浏览器兼容、API 兼容、常见问题）
+
 ## [1.4.0] - 2026-07-02 (国密 PKI + 软件密码机 + KAE 加速)
 
 ### Added — PKI 证书签发

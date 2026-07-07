@@ -1858,4 +1858,110 @@ Apache License 2.0。详见 [LICENSE](../../LICENSE)。
 
 ---
 
+## 19. 管理控制台登录（v1.4.2+）
+
+> 本章为 v1.4.2 新增内容。v1.4.0 之前的"双层 auth"（HTTP Basic + Bearer Token 同一密码）已废弃。
+
+### 19.1 登录入口
+
+浏览器访问 admin 监听地址（默认 `http://127.0.0.1:8250/admin`），未登录会自动跳转到 `/admin/login` 页面。
+
+```
+http://127.0.0.1:8250/admin/login
+```
+
+### 19.2 登录流程（双因子）
+
+v1.4.2 起，admin web 登录采用**双因子鉴别**，满足等保三级 8.1.2 要求：
+
+| 步骤 | 表单字段 | 说明 |
+|---|---|---|
+| 1 | 管理员令牌 (adminToken) | 密码技术因素，env `YVONNE_ADMIN_TOKEN` 设定 |
+| 2 | TOTP 动态口令 | 拥有因素，env `YVONNE_ADMIN_TOTP_SECRET` 设定（base32） |
+| 3 | 图形验证码 | 5 字符，5 分钟有效，一次性 |
+| 4 | 记住此设备 30 天 | 可选，勾选后 30 天内自动跳过 captcha + TOTP |
+
+dev 模式下，如果 `YVONNE_ADMIN_TOKEN` 与 `YVONNE_ADMIN_TOTP_SECRET` 均为空，会跳过所有鉴权步骤方便开发（生产严禁）。
+
+### 19.3 配置示例
+
+```bash
+# /etc/yvonne.env
+export YVONNE_ADMIN_TOKEN="<32+ 字节随机字符串>"
+export YVONNE_ADMIN_TOTP_SECRET="JBSWY3DPEHPK3PXP"  # base32，绑定到 Authenticator app
+export YVONNE_SESSION_SECRET="<32+ 字节随机字符串>"  # 用于 device fingerprint HMAC salt
+```
+
+TOTP secret 可用任意 TOTP 生成器（Google Authenticator、Authy、1Password）扫描二维码或手动输入 base32。
+
+### 19.4 会话与超时
+
+| 机制 | 时长 | 行为 |
+|---|---|---|
+| Idle timeout | 30 分钟 | 无操作则过期；任何 API 调用自动续期 |
+| Hard cap | 8 小时 | 绝对上限，强制重新登录 |
+| 失败锁定 | 3 次 / 30 分钟 | 连续失败 3 次后 IP+用户锁 30 分钟 |
+
+页面右下角实时倒计时显示剩余 idle 时长，60 秒前弹窗提醒。
+
+### 19.5 设备指纹（记住此设备）
+
+勾选"记住此设备 30 天"后，浏览器写入 `yvonne_device` cookie（HttpOnly），下次访问时自动跳过 captcha + TOTP。仍需输入 adminToken。
+
+**注意**：浏览器升级、UA 变化、隐身模式、清空 cookie 会导致设备指纹失效，需重新走完整双因子流程。
+
+### 19.6 注销
+
+- 主动注销：点击右上角"注销"按钮
+- 自动注销：idle 30 分钟或 hard cap 8 小时
+- 强制注销：清空 cookie（dev 调试用）
+
+注销后所有 admin session 立即失效（HMAC 哈希链审计留痕）。
+
+### 19.7 忘记 adminToken 怎么办？
+
+1. **dev 模式**：env 不设 `YVONNE_ADMIN_TOKEN` 即跳过鉴权
+2. **生产模式**：通过运维流程修改 env，重启 `yvonne server` 进程
+3. **紧急通道**：通过应急封印 API（`/api/v1/sys/panic`）先封印服务，然后运维介入重置
+
+详细应急流程见 [emergency-and-drill-handbook.md](../compliance/emergency-and-drill-handbook.md)。
+
+### 19.8 浏览器兼容
+
+| 浏览器 | 支持版本 | 说明 |
+|---|---|---|
+| Chrome / Edge | 90+ | 完整支持 |
+| Firefox | 88+ | 完整支持 |
+| Safari | 14+ | 完整支持 |
+| IE 11 | ❌ 不支持 | 使用 ES2020 语法 + Web Crypto API |
+
+### 19.9 API 兼容（curl / 服务对服务）
+
+v1.4.2 仍保留 Bearer Token 兼容路径供自动化调用：
+
+```bash
+# curl 方式（自动跳过 cookie + TOTP 流程）
+curl -H "Authorization: Bearer $YVONNE_ADMIN_TOKEN" \
+     http://127.0.0.1:8250/admin/api/dashboard
+
+# 同时支持 session cookie（来自浏览器登录）
+curl --cookie "yvonne_session=$SESSION_ID" \
+     http://127.0.0.1:8250/admin/api/dashboard
+```
+
+中间件优先级：先看 cookie（浏览器），再看 Bearer（自动化）；两者都提供时 cookie 优先。
+
+### 19.10 常见问题
+
+| 问题 | 原因 | 解决 |
+|---|---|---|
+| 登录后立刻 401 | CSRF token 缺失或过期 | 刷新页面重新登录 |
+| 验证码看不清 | SVG 字符抖动过大 | 点击"换一张"刷新 |
+| TOTP 一直错误 | 服务器时间偏差 > 30s | 同步 NTP（`chronyc tracking`） |
+| 30 分钟后被踢 | idle 超时 | 点击页面任意位置续期；或关闭"记住此设备" |
+| 8 小时后被踢 | hard cap | 重新登录 |
+| 提示"已锁定 30 分钟" | 3 次失败 | 等待 30 分钟或运维解锁 |
+
+---
+
 > 反馈与建议：[GitHub Issues](https://github.com/zealot00/Yvonne/issues)

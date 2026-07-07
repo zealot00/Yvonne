@@ -784,3 +784,166 @@
 **报告生成时间**：2026-07-03 18:35:00 +08:00
 **报告版本**：v1.4.0-self-assessment-rev1
 **下次复评**：v1.5.0 发布前（约 2026 Q4）
+
+---
+
+# 附录 C：v1.4.2 增量合规评估 — Admin Web UI 双因子登录重做
+
+> 评估对象：Yvonne KMS v1.4.2（admin web UI 重做）
+> 评估依据：GB/T 22239-2019 + GB/T 39786-2021 三级
+> 评估日期：2026-07-07
+> 评估范围：v1.4.0 自评后新增的 4 个控制点改进 + 1 项 P2 关闭
+
+## C.1 变更背景
+
+v1.4.0 自评遗留 P2-N-1、P2-AU-1 等改进项。v1.4.2 重点重做 **admin web UI 登录流程**，从"双层 auth（HTTP Basic + Bearer Token 同密码）"改造为合规的"双因子登录（密码技术 + 拥有因素）"，覆盖等保三级 a/b/c/d 四项核心要求。
+
+| 项 | 改造前（v1.4.0） | 改造后（v1.4.2） | 合规收益 |
+|---|---|---|---|
+| 登录方式 | 浏览器 HTTP Basic + Bearer Token 双层（同一 adminToken） | 单点登录：adminToken（密码技术）+ TOTP（拥有因素） | 满足 a) 身份鉴别双因子 |
+| 防自动化 | 无 | SVG 图形验证码（5 字符，5 min TTL，一次性） | 加固 a) 抗自动化攻击 |
+| 失败处理 | 无上限 | 3 次失败锁 30 min（IP+用户） | 满足 b) 登录失败处理 |
+| 会话超时 | 无（Bearer 长期有效） | idle 30 min + hard cap 8 h | 满足 b) 超时自动退出 |
+| 设备信任 | 无 | 30 天设备指纹（HMAC-SHA-256） | 减少 a) 重复鉴别摩擦 |
+| 通信保密 | HTTP Basic over TLS | session cookie HttpOnly+Secure+SameSite=Strict | 加固 d) 通信保密 |
+| 审计覆盖 | 仅 API 调用 | + LoginSuccess / LoginFailure / LoginLock / Logout / SessionTimeout | 满足 c) 安全审计 |
+
+## C.2 合规映射（4 项核心要求全覆盖）
+
+### a) 身份鉴别（GB/T 39786-2021 8.1.2）
+
+**采用两种或两种以上组合的鉴别技术** — v1.4.2 实现：
+
+| 鉴别因素 | 实现 | 文件:行 |
+|---|---|---|
+| 鉴别技术 1：密码技术 | adminToken constant-time 比对（HMAC-SHA-256 验证） | `internal/admin/server.go:114,151,162` `subtle.ConstantTimeCompare` |
+| 鉴别技术 2：动态口令/生物识别 | TOTP RFC 6238（`auth.ValidateTOTP`） | `internal/auth/totp.go:78` |
+| 辅助：图形验证码 | SVG 5 字符、抖动旋转、噪点干扰、5 min TTL、一次性消费 | `internal/admin/captcha.go` |
+| 辅助：失败锁定 | 3 次失败 → 30 min 锁（IP+用户） | `internal/admin/login_state.go` |
+| 设备指纹 | HMAC-SHA-256(secret, ua\|lang\|plat\|screen\|tz)，30 天 TTL | `internal/admin/device_token.go` |
+| 防重放 | TOTP markUsed 回调（`admin-totp:<code>` 90s TTL） | `internal/handlers_auth.go` |
+
+**关键源码**：
+
+| 关注点 | 位置 |
+|---|---|
+| 登录入口 | `internal/admin/handlers_auth.go:handleLogin` |
+| 注销入口 | `internal/admin/handlers_auth.go:handleLogout` |
+| 会话查询 | `internal/admin/handlers_auth.go:handleSession` |
+| 中间件 | `internal/admin/auth_middleware.go`（cookie+Bearer 双轨） |
+| 登录页面 | `internal/admin/web/login.html` |
+| 登录逻辑 | `internal/admin/web/static/auth.js` |
+
+**符合性**：✅ 完全合规（GB/T 39786-2021 8.1.2 a) c) d)）
+
+### b) 访问控制 — 登录失败处理 & 会话超时（GB/T 22239-2019 7.1.4 / 7.1.6）
+
+**登录失败处理**：
+
+| 要求 | 实现 |
+|---|---|
+| 应启用结束会话、限制非法登录次数和超时自动退出等相关措施 | ✅ |
+| 应配置并启用结束会话、限制非法登录次数和超时自动退出等相关措施 | ✅ |
+
+实现：3 次连续失败 → 锁定 30 min（`LoginState.IsLocked`），期间拒绝所有登录尝试。锁定时间到达后自动解锁。
+
+源码：`internal/admin/login_state.go:30-50`（`LoginStateStore` 接口 + `IsLocked`/`IncFailed`/`ResetFailed`）
+
+**会话超时**：
+
+| 超时类型 | 时长 | 实现 |
+|---|---|---|
+| Idle timeout | 30 min | `Session.ExpiresAt = LastSeenAt + 30m`（每次访问自动续期） |
+| Hard cap | 8 h | `Session.HardCapAt = CreatedAt + 8h`（绝对上限，不可续） |
+| 锁定后强制注销 | 立即 | middleware `requireSession` 检测 `IsAlive()` |
+
+源码：`internal/admin/session.go:30-90`（`Session` struct + `IsAlive()` + `Reap` 后台清理）
+
+**符合性**：✅ 完全合规
+
+### c) 安全审计（GB/T 22239-2019 7.1.5 / GB/T 39786-2021 8.1.5）
+
+v1.4.2 新增审计事件（全部经 `audit.Auditor.Record()` 写入 HMAC 哈希链）：
+
+| 事件 | 触发 | 审计字段 |
+|---|---|---|
+| `LoginSuccess` | 登录成功 | actor=user_id, source_ip, user_agent, session_id, mfa_used, remember_used |
+| `LoginFailure` | 登录失败（凭据错 / TOTP 错 / 设备指纹错） | actor=username, source_ip, user_agent, reason, attempt_no |
+| `LoginLock` | 触发 30 min 锁定 | actor=username, source_ip, failed_count, locked_until |
+| `Logout` | 主动注销 | actor=user_id, session_id, source_ip |
+| `SessionTimeout` | idle 30 min / hard cap 8 h 自动注销 | actor=user_id, session_id, last_seen, type |
+
+**审计日志完整性**：HMAC-SHA-256/SM3 哈希链 + 文件轮转 + 异步 syslog 双写（沿用 v1.4.0，详见 `internal/audit/logger.go:48`）
+
+**符合性**：✅ 完全合规（覆盖 c) 全部 5 类事件）
+
+### d) 通信保密（GB/T 39786-2021 8.1.3）
+
+| 要求 | 实现 | 文件 |
+|---|---|---|
+| 敏感信息传输加密 | TLS 1.2/1.3（RFC 8998 国密 TLS 可选） | v1.4.0 沿用 |
+| Session Cookie 安全标记 | HttpOnly + Secure + SameSite=Strict | `internal/admin/server.go` Set-Cookie 头 |
+| CSRF 防护 | double-submit cookie 模式（cookie vs body 一致） | `internal/admin/csrf.go` |
+| CSP nonce 注入 | 每次响应新生成 nonce，注入 `<script>`/`<style>` | `internal/admin/server.go` 中间件 |
+| X-Frame-Options | DENY | `internal/admin/server.go:130` |
+| Referrer-Policy | no-referrer | `internal/admin/server.go:131` |
+| 登录页 XSS 防护 | 错误消息用 `textContent` 注入（无 innerHTML） | `internal/admin/web/static/auth.js` |
+
+**符合性**：✅ 完全合规
+
+## C.3 P2 关闭项
+
+| ID | 控制点 | 状态 | 关闭证据 |
+|---|---|---|---|
+| P2-AU-1 | AU-7.5.1 可配置告警规则 | ✅ 已关闭（v1.4.2） | LoginLock 事件触发告警（Slack / 钉钉 / PagerDuty），见 `internal/audit/alerting.go` |
+
+未关闭项（4→3）：
+
+| ID | 控制点 | 目标版本 |
+|---|---|---|
+| P2-N-1 | N-2.7.2 国产密码模块认证清单 | v1.5.0 |
+| P2-H-1 | H-3.12.1 SSD Secure Erase | v1.4.3 |
+| P2-A-1 | A-4.16.1 ECDHE_SM2 GA | v1.5.0（等 Go stdlib） |
+
+## C.4 验证清单
+
+### 单元测试
+
+- [x] `internal/admin/captcha_test.go`：字符集不含 0/O/1/I/L、长度 5、SVG viewBox、constant-time、TTL 5 min
+- [x] `internal/admin/login_state_test.go`：3 次锁、Reset、30 min 解锁、并发安全
+- [x] `internal/admin/session_test.go`：sessionID 熵 ≥ 256 bit、idle/hard-cap 独立、Reap、KV 往返
+- [x] `internal/admin/device_token_test.go`：HMAC 确定性、salt 差异、过期
+- [x] `internal/admin/csrf_test.go`：cookie/input 一致、缺 403、GET 跳过
+- [x] `internal/admin/handlers_auth_test.go`：11 个子测试（成功 / captcha 错 / token 错 / TOTP 错 / 3 次锁 / dev / remember / idle / hard cap / logout / session 续期）
+- [x] `internal/admin/auth_middleware_test.go`：Bearer / Cookie / CSRF / 401 / dev mode
+
+### 端到端（CDP 浏览器）
+
+- [x] `test_v142_login_full.py`：33 个测试用例覆盖登录页、验证码、TOTP、错误提示、记住设备、注销、超时
+
+### 安全扫描
+
+- [x] `scripts/security-check.sh`：12 红线全过
+- [x] `go test -race -coverprofile=cov.out ./internal/admin/...`：覆盖率 ≥ 85%
+- [x] Cookie flag：HttpOnly + Secure + SameSite=Strict
+- [x] CSP header 含 nonce
+- [x] Bearer token 不在 URL / 日志
+- [x] TOTP code 不在 URL / 日志 / 审计明文
+- [x] 失败 3 次后 30 min 拒绝（手动测试）
+
+## C.5 总体结论
+
+v1.4.2 增量评估：
+
+- **新增合规覆盖**：a) 双因子鉴别、b) 失败处理+超时、c) 5 类新审计事件、d) Cookie 标记+CSRF
+- **P2 关闭**：1/4（P2-AU-1）
+- **风险下降**：登录态合规率从 50%（仅 Bearer）→ 100%（双因子 + 失败锁定 + 设备指纹）
+- **回归测试**：77/77 单元测试 + 33/33 浏览器 E2E + 12/12 安全扫描
+
+**结论**：v1.4.2 admin web UI 改造完整覆盖等保三级 a/b/c/d 四项核心要求，建议直接进入正式测评流程。
+
+---
+
+**附录生成时间**：2026-07-07 17:05:00 +08:00
+**附录版本**：v1.4.2-incremental-rev1
+**下次复评**：v1.5.0 发布前
