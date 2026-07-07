@@ -379,9 +379,21 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSession GET /admin/api/session 返回当前 session 信息。
-// 由 sessionOrBearer 中间件保证有 session。
+// 由 sessionOrBearer 中间件保证有 session（dev 模式无 adminToken 时也可能为 nil，
+// 此时返回 dev-mode placeholder 而非 panic）。
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request, sess *Session) {
 	w.Header().Set("Content-Type", "application/json")
+	if sess == nil {
+		// dev 模式（adminToken 空）直接放行，session 为 nil → 返回 placeholder
+		json.NewEncoder(w).Encode(map[string]any{
+			"ok":               true,
+			"user_id":          "dev-mode",
+			"dev_mode":         true,
+			"idle_seconds":     0,
+			"hard_cap_seconds": 0,
+		})
+		return
+	}
 	json.NewEncoder(w).Encode(map[string]any{
 		"ok":               true,
 		"user_id":          sess.UserID,

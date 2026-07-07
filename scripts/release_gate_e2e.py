@@ -536,11 +536,13 @@ def test_browser(admin_base: str, admin_token: str | None = None) -> None:
     try:
         from selenium import webdriver
         from selenium.webdriver.chrome.options import Options
+        from selenium.webdriver.chrome.service import Service as ChromeService
         from selenium.webdriver.common.by import By
         from selenium.webdriver.support.ui import WebDriverWait
         from selenium.webdriver.support import expected_conditions as EC
+        from webdriver_manager.chrome import ChromeDriverManager
     except ImportError:
-        record("Selenium import", False, "selenium not installed (pip install selenium)")
+        record("Selenium import", False, "selenium not installed (pip install selenium webdriver-manager)")
         return
 
     options = Options()
@@ -552,7 +554,10 @@ def test_browser(admin_base: str, admin_token: str | None = None) -> None:
     options.set_capability("goog:loggingPrefs", {"browser": "ALL"})
 
     try:
-        driver = webdriver.Chrome(options=options)
+        # v1.4.2: 显式用 webdriver-manager 装匹配版本的 chromedriver。
+        # selenium 内置 Manager 经常下载老版本（与本机 Chrome 不匹配）。
+        service = ChromeService(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=options)
     except Exception as e:
         record("Selenium 启动 Chrome", False, str(e))
         return
@@ -566,41 +571,110 @@ def test_browser(admin_base: str, admin_token: str | None = None) -> None:
         except Exception as e:
             record(name, False, f"异常: {type(e).__name__}: {e}")
 
-    # B0. Cluster 模式下预先注入 admin bearer token。
-    #   Dev 模式 admin_token 为空，跳过此步。
-    #   关键：headless Chrome 不会弹出 Basic Auth 对话框，所以页面 GET / 返回 401
-    #   会导致 chrome-error 页面（无 #tokenInput 元素）。
-    #   解法：先用 Chrome DevTools Protocol（CDP）注入 Authorization 头到所有请求，
-    #   这样后续 driver.get() 自动带认证。
+    # B0. Admin 登录（v1.4.2 双因子登录重做）。
+    #
+    # 三种情形：
+    #   (a) --admin-token 未传：dev/cluster 模式均自动认证（adminToken="" → isAuth=true）
+    #       → 访问 /admin/ 直接看到 dashboard
+    #   (b) --admin-token 已传 + dev 模式（_dev_captcha_text 端点可用）：
+    #       真实表单登录：GET /admin/login → 填 captcha_text via dev 端点
+    #       → POST /admin/api/login → session cookie → /admin/ dashboard
+    #       这是 v1.4.2 重点覆盖的双因子登录路径
+    #   (c) --admin-token 已传 + cluster 模式（无 dev 端点，devMode=false）：
+    #       退回 Bearer Token 兼容路径（CDP 注入 Authorization 头）
+    #       双因子核心由 handlers_auth_test.go (Go 单元测试) 覆盖
+    def is_dev_mode() -> bool:
+        """探测 _dev_captcha_text 端点是否可用（仅 dev 模式启用）。
+        - dev 模式：返回 200 / 400 / 404（按 id 是否合法 / 存在）
+        - cluster 模式：返回 403 (disabled_in_production)
+        """
+        try:
+            code, _ = http_request("GET",
+                f"{admin_base}/admin/api/_dev_captcha_text?id=__probe__")
+            return code in (200, 400, 404)
+        except Exception:
+            return False
+
+    def b0_form_login_inner():
+        """真实表单提交登录（v1.4.2 双因子）。仅 dev 模式可用。
+        异常抛出由 b0_login 捕获。
+        """
+        # 1. 导航 /admin/ → 302 → /admin/login
+        driver.get(admin_base + "/admin/")
+        WebDriverWait(driver, PAGE_LOAD_TIMEOUT).until(
+            EC.presence_of_element_located((By.ID, "login-form"))
+        )
+        # 2. 等 captcha 自动加载（auth.js 调 /admin/api/captcha）
+        WebDriverWait(driver, 5).until(
+            lambda d: d.find_element(By.ID, "captcha_id").get_attribute("value") or ""
+        )
+        captcha_id = driver.find_element(By.ID, "captcha_id").get_attribute("value")
+        if not captcha_id:
+            raise RuntimeError("captcha 未渲染完成")
+
+        # 3. 通过 dev 端点拉 captcha text（避开 OCR）
+        code, resp = http_request("GET",
+            f"{admin_base}/admin/api/_dev_captcha_text?id={captcha_id}")
+        if code != 200:
+            raise RuntimeError(f"captcha text 端点 code={code} resp={resp}")
+        captcha_text = resp.get("text", "")
+        if not captcha_text:
+            raise RuntimeError(f"captcha text 为空 resp={resp}")
+
+        # 4. 填表。TOTP 未配置时填任意 6 位均可通过（dev mode 默认无 TOTP）
+        driver.find_element(By.ID, "admin_token").clear()
+        driver.find_element(By.ID, "admin_token").send_keys(admin_token)
+        driver.find_element(By.ID, "totp_code").clear()
+        driver.find_element(By.ID, "totp_code").send_keys("000000")
+        driver.find_element(By.ID, "captcha_text").clear()
+        driver.find_element(By.ID, "captcha_text").send_keys(captcha_text)
+
+        # 5. 提交（auth.js 自动加 X-CSRF-Token header）
+        driver.find_element(By.ID, "btn-submit").click()
+
+        # 6. 等跳到 /admin/ + dashboard 可见
+        WebDriverWait(driver, PAGE_LOAD_TIMEOUT).until(
+            lambda d: admin_base + "/admin/" in d.current_url
+        )
+        WebDriverWait(driver, PAGE_LOAD_TIMEOUT).until(
+            EC.presence_of_element_located((By.ID, "nav-dashboard"))
+        )
+
     def b0_login():
+        # (a) 无 admin_token：auto-authed
         if not admin_token:
+            driver.get(admin_base + "/admin/")
+            WebDriverWait(driver, PAGE_LOAD_TIMEOUT).until(
+                EC.presence_of_element_located((By.ID, "nav-dashboard"))
+            )
+            record("B0 Admin 登录 (auto-authed, no admin_token)", True)
             return
-        # CDP 注入全局 Authorization header（Selenium 4+）
+
+        # (b) admin_token + dev 模式：真实表单登录
+        if is_dev_mode():
+            try:
+                b0_form_login_inner()
+                record("B0 Admin 双因子表单登录 (admin_token + captcha + session cookie)", True)
+            except Exception as e:
+                record("B0 Admin 双因子表单登录", False,
+                       f"异常: {type(e).__name__}: {e}")
+            return
+
+        # (c) admin_token + cluster 模式：CDP Bearer 兼容路径（保留 v1.4.0 行为）
         try:
             driver.execute_cdp_cmd("Network.enable", {})
             driver.execute_cdp_cmd("Network.setExtraHTTPHeaders", {
                 "headers": {"Authorization": f"Bearer {admin_token}"}
             })
         except Exception as e:
-            record("B0 Cluster Admin 登录", False, f"CDP 注入失败: {e}")
+            record("B0 cluster Bearer 兼容", False, f"CDP 注入失败: {e}")
             return
-        # 加载页面 → admin_token 已带 → 渲染 dashboard
-        driver.get(admin_base + "/")
+        driver.get(admin_base + "/admin/")
         WebDriverWait(driver, PAGE_LOAD_TIMEOUT).until(
             EC.presence_of_element_located((By.ID, "nav-dashboard"))
         )
-        # 同时把 token 写入 #tokenInput + localStorage（页面后续 reload 不依赖 CDP）
-        try:
-            token_input = driver.find_element(By.ID, "tokenInput")
-            driver.execute_script(
-                "document.getElementById('tokenInput').value = arguments[0];"
-                " localStorage.setItem('yvonne_token', arguments[0]);",
-                admin_token,
-            )
-        except Exception:
-            pass
-        record("B0 Cluster Admin 登录（Bearer Token 注入）", True)
-    safe_test("B0 Cluster Admin 登录", b0_login)
+        record("B0 cluster Bearer 兼容 (form login N/A — 双因子走 Go 单测)", True)
+    safe_test("B0 Admin 登录", b0_login)
 
     # B1. 页面加载
     def b1():
