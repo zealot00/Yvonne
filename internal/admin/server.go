@@ -18,7 +18,10 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
+	"sync"
+	"time"
 
+	"yvonne/internal/audit"
 	"yvonne/internal/seal"
 )
 
@@ -35,6 +38,24 @@ type Server struct {
 	adminToken string
 	mux        *http.ServeMux
 	apiHandler http.Handler // 可选：V1Router 引用（转发 API 请求）
+
+	// v1.4.2: 双因子登录 / session / 设备 token
+	totpSecret    string       // 从 YVONNE_ADMIN_TOTP_SECRET 读；空时跳过 TOTP
+	sessionSecret []byte       // 设备指纹 HMAC salt
+	sessions      SessionStore // session 存储
+	captchaStore  CaptchaStore // 验证码存储
+	loginStates   LoginStateStore
+	devices       DeviceStore
+	auditor       audit.Auditor // 审计（可空）
+
+	devMode bool // true 时启用 /admin/api/_dev_captcha_text（E2E 测试用）
+
+	idleTimeout time.Duration // 默认 30 min
+	hardCap     time.Duration // 默认 8 h
+
+	// TOTP 防重放（仅当前进程）
+	totpUsedMu sync.Mutex
+	totpUsed   map[string]time.Time
 }
 
 // keyLister 是 admin 查询密钥列表所需的最小接口。
@@ -69,35 +90,92 @@ func (s *Server) SetAPIHandler(h http.Handler) {
 	s.apiHandler = h
 }
 
-func (s *Server) register() {
-	// 静态资源：/static/* 来自 embed.FS
-	// Go 1.21 ServeMux 不支持 "GET /path" 方法前缀，用 path 注册 + handler 内检查 Method。
-	staticRoot, err := fs.Sub(staticFS, "web/static")
-	if err != nil {
-		panic("admin: embed static fs: " + err.Error())
-	}
-	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticRoot))))
+// =====================================================================
+// v1.4.2 Setter（bootstrap 接线用）
+// =====================================================================
 
-	// 页面路由：返回入口 HTML，由前端 JS 调用 /api/* 与 /sys/*。
-	s.mux.HandleFunc("/", s.handleIndex)
-
-	// 管理页面 API。
-	// seal-status 不需认证（用于探活/概览）。
-	s.mux.HandleFunc("/admin/api/seal-status", s.handleSealStatus)
-	// keys 列表需认证（含密钥元数据）。
-	s.mux.HandleFunc("/admin/api/keys", s.requireAdminToken(s.handleAPIKeys))
-	// v1.3.1: Web 控制台 API。
-	s.mux.HandleFunc("/admin/api/crypto/encrypt", s.requireAdminToken(s.handleAPIEncrypt))
-	s.mux.HandleFunc("/admin/api/crypto/decrypt", s.requireAdminToken(s.handleAPIDecrypt))
-	s.mux.HandleFunc("/admin/api/audit", s.requireAdminToken(s.handleAPIAudit))
-	s.mux.HandleFunc("/admin/api/dashboard", s.requireAdminToken(s.handleAPIDashboard))
-	// seal/unseal 需要认证（如果设置了 adminToken）。
-	s.mux.HandleFunc("/admin/api/seal", s.requireAdminToken(s.handleSeal))
-	s.mux.HandleFunc("/admin/api/unseal", s.requireAdminToken(s.handleUnseal))
+// SetTOTPSecret 设置 TOTP secret（base32）。空 → 跳过 TOTP 校验。
+func (s *Server) SetTOTPSecret(secret string) {
+	s.totpSecret = secret
 }
 
-// requireAdminToken 包装 handler，要求 Bearer Token 认证。
-// adminToken 为空时跳过认证（向后兼容 Dev 模式）。
+// SetSessionSecret 设置 session 加密 salt（≥32 字节）。
+func (s *Server) SetSessionSecret(b []byte) {
+	s.sessionSecret = b
+}
+
+// SetSessionStore 注入 session 存储。
+func (s *Server) SetSessionStore(store SessionStore) {
+	s.sessions = store
+}
+
+// SetCaptchaStore 注入 captcha 存储。
+func (s *Server) SetCaptchaStore(store CaptchaStore) {
+	s.captchaStore = store
+}
+
+// SetLoginStateStore 注入登录失败计数存储。
+func (s *Server) SetLoginStateStore(store LoginStateStore) {
+	s.loginStates = store
+}
+
+// SetDeviceStore 注入设备 token 存储。
+func (s *Server) SetDeviceStore(store DeviceStore) {
+	s.devices = store
+}
+
+// SetAuditor 注入审计 logger。
+func (s *Server) SetAuditor(a audit.Auditor) {
+	s.auditor = a
+}
+
+// SetIdleTimeout 设置 session idle 超时（默认 30 min）。
+func (s *Server) SetIdleTimeout(d time.Duration) {
+	s.idleTimeout = d
+}
+
+// SetHardCap 设置 session hard cap（默认 8 h）。
+func (s *Server) SetHardCap(d time.Duration) {
+	s.hardCap = d
+}
+
+// SetDevMode 启用 dev mode（暴露 _dev_captcha_text 等调试端点）。
+// 生产环境必须 false。
+func (s *Server) SetDevMode(b bool) {
+	s.devMode = b
+}
+
+// StartReaper 启动后台清理 goroutine，返回 stop 函数。
+func (s *Server) StartReaper(interval time.Duration) func() {
+	if interval <= 0 {
+		interval = 5 * time.Minute
+	}
+	ticker := time.NewTicker(interval)
+	stop := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case now := <-ticker.C:
+				if s.sessions != nil {
+					_ = s.sessions.Reap(now)
+				}
+				if s.captchaStore != nil {
+					_ = s.captchaStore.Reap(now)
+				}
+				if s.devices != nil {
+					_ = s.devices.Reap(now)
+				}
+			case <-stop:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+	return func() { close(stop) }
+}
+
+// requireAdminToken 已废弃（v1.4.2）：请用 sessionOrBearer 替代。
+// 保留作为 Bearer-only 兼容路径（curl / 自动化），不强制 session。
 func (s *Server) requireAdminToken(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		if s.adminToken == "" {
@@ -119,49 +197,64 @@ func (s *Server) requireAdminToken(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// ServeHTTP 实现 http.Handler。
-// 若设置了 adminToken，所有请求（含页面）必须通过 Basic Auth 或 Bearer Token。
+// sessionHandlerFn 把接受 *Session 的 handler 转成 http.Handler（从 ctx 取出）。
+type sessionHandlerFn func(w http.ResponseWriter, r *http.Request, sess *Session)
+
+func (s *Server) withSession(h sessionHandlerFn) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess := SessionFromContext(r.Context())
+		h(w, r, sess)
+	}
+}
+
+func (s *Server) register() {
+	// 静态资源：/static/* 来自 embed.FS
+	staticRoot, err := fs.Sub(staticFS, "web/static")
+	if err != nil {
+		panic("admin: embed static fs: " + err.Error())
+	}
+	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticRoot))))
+
+	// 页面路由：根路径返回 SPA index.html（由前端 JS 决定登录/主界面）。
+	s.mux.HandleFunc("/", s.handleIndex)
+
+	// v1.4.2: 登录入口（不需要 session）
+	s.mux.HandleFunc("/admin/login", s.handleLoginPage)
+	s.mux.HandleFunc("/admin/api/captcha", s.handleCaptcha)
+	s.mux.HandleFunc("/admin/api/_dev_captcha_text", s.handleDevCaptchaText) // dev only
+	// 登录本身需要 CSRF（双提交 cookie）
+	s.mux.Handle("/admin/api/login", CSRFProtect(http.HandlerFunc(s.handleLogin)))
+
+	// v1.4.2: 注销 / 会话信息 / 设备撤销（需 session + CSRF for state-changing）
+	s.mux.Handle("/admin/api/logout",
+		CSRFProtect(s.sessionOrBearer(http.HandlerFunc(s.handleLogout))))
+	s.mux.Handle("/admin/api/session",
+		s.sessionOrBearer(http.HandlerFunc(s.withSession(s.handleSession))))
+	s.mux.Handle("/admin/api/device",
+		CSRFProtect(s.sessionOrBearer(http.HandlerFunc(s.handleDeviceRevoke))))
+
+	// 受保护 API（向后兼容 Bearer 自动化路径）。
+	// seal-status 公开（用于探活/概览）。
+	s.mux.HandleFunc("/admin/api/seal-status", s.handleSealStatus)
+	// 其他需 session 或 Bearer。
+	s.mux.Handle("/admin/api/keys", s.sessionOrBearer(http.HandlerFunc(s.handleAPIKeys)))
+	s.mux.Handle("/admin/api/crypto/encrypt", s.sessionOrBearer(http.HandlerFunc(s.handleAPIEncrypt)))
+	s.mux.Handle("/admin/api/crypto/decrypt", s.sessionOrBearer(http.HandlerFunc(s.handleAPIDecrypt)))
+	s.mux.Handle("/admin/api/audit", s.sessionOrBearer(http.HandlerFunc(s.handleAPIAudit)))
+	s.mux.Handle("/admin/api/dashboard", s.sessionOrBearer(http.HandlerFunc(s.handleAPIDashboard)))
+	s.mux.Handle("/admin/api/seal", s.sessionOrBearer(http.HandlerFunc(s.handleSeal)))
+	s.mux.Handle("/admin/api/unseal", s.sessionOrBearer(http.HandlerFunc(s.handleUnseal)))
+}
+
+// ServeHTTP 实现 http.Handler（v1.4.2：移除双层 auth）。
+// 顶层不再做 Basic/Bearer 拦截；统一在 register() 用 sessionOrBearer/CSRFProtect 包裹。
 func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// 统一安全响应头。
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	// CSP：所有资源本地加载，无 CDN，无 unsafe-eval（纯原生 JS）。
 	w.Header().Set("Content-Security-Policy",
 		"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'")
 
-	// 若设置了 adminToken，强制全站认证（含页面 + API + 静态资源）。
-	if s.adminToken != "" {
-		if !s.authenticate(req) {
-			w.Header().Set("WWW-Authenticate", `Basic realm="Yvonne Admin"`)
-			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-			return
-		}
-	}
 	s.mux.ServeHTTP(w, req)
-}
-
-// authenticate 支持两种认证方式：
-// 1. Basic Auth: username 任意，password = adminToken
-// 2. Bearer Token: Authorization: Bearer <adminToken>
-func (s *Server) authenticate(req *http.Request) bool {
-	// 尝试 Basic Auth。
-	if user, pass, ok := req.BasicAuth(); ok {
-		// username 不校验（任意），password 必须等于 adminToken。
-		if subtle.ConstantTimeCompare([]byte(pass), []byte(s.adminToken)) == 1 {
-			_ = user // username 不参与校验
-			return true
-		}
-		return false
-	}
-	// 尝试 Bearer Token。
-	auth := req.Header.Get("Authorization")
-	const prefix = "Bearer "
-	if len(auth) > len(prefix) && auth[:len(prefix)] == prefix {
-		token := auth[len(prefix):]
-		if subtle.ConstantTimeCompare([]byte(token), []byte(s.adminToken)) == 1 {
-			return true
-		}
-	}
-	return false
 }

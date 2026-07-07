@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"yvonne/internal/lifecycle"
 	"yvonne/internal/memguard"
@@ -104,98 +105,69 @@ func TestAdmin_SetManager(t *testing.T) {
 	t.Log("✅ SetManager")
 }
 
-// TestAdmin_Authenticate_BasicAuth Basic Auth 认证。
-func TestAdmin_Authenticate_BasicAuth(t *testing.T) {
+// TestAdmin_ServeHTTP_PublicIndex 设置 token 后根路径仍可访问（v1.4.2 不再有双层 auth）。
+// 公共页面不需要 auth；受保护 API 需要 session 或 Bearer。
+func TestAdmin_ServeHTTP_PublicIndex(t *testing.T) {
 	srv := NewServer(testVault(t))
 	srv.SetAdminToken("secret")
+	wireMinimalStorage(srv)
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.SetBasicAuth("admin", "secret")
-
-	if !srv.authenticate(req) {
-		t.Fatal("BasicAuth should succeed")
-	}
-	t.Log("✅ authenticate BasicAuth correct")
-}
-
-// TestAdmin_Authenticate_BasicAuthWrong Basic Auth 错误密码。
-func TestAdmin_Authenticate_BasicAuthWrong(t *testing.T) {
-	srv := NewServer(testVault(t))
-	srv.SetAdminToken("secret")
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.SetBasicAuth("admin", "wrong")
-
-	if srv.authenticate(req) {
-		t.Fatal("BasicAuth should fail")
-	}
-	t.Log("✅ authenticate BasicAuth wrong → false")
-}
-
-// TestAdmin_Authenticate_Bearer Bearer token 认证。
-func TestAdmin_Authenticate_Bearer(t *testing.T) {
-	srv := NewServer(testVault(t))
-	srv.SetAdminToken("secret")
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Authorization", "Bearer secret")
-
-	if !srv.authenticate(req) {
-		t.Fatal("Bearer should succeed")
-	}
-	t.Log("✅ authenticate Bearer correct")
-}
-
-// TestAdmin_Authenticate_BearerWrong Bearer 错误。
-func TestAdmin_Authenticate_BearerWrong(t *testing.T) {
-	srv := NewServer(testVault(t))
-	srv.SetAdminToken("secret")
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Authorization", "Bearer wrong")
-
-	if srv.authenticate(req) {
-		t.Fatal("Bearer should fail")
-	}
-	t.Log("✅ authenticate Bearer wrong → false")
-}
-
-// TestAdmin_Authenticate_NoAuth 无认证头。
-func TestAdmin_Authenticate_NoAuth(t *testing.T) {
-	srv := NewServer(testVault(t))
-	srv.SetAdminToken("secret")
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	if srv.authenticate(req) {
-		t.Fatal("no auth should fail")
-	}
-	t.Log("✅ authenticate no auth → false")
-}
-
-// TestAdmin_ServeHTTP_WithAuth 设置 token 后需要认证。
-func TestAdmin_ServeHTTP_WithAuth(t *testing.T) {
-	srv := NewServer(testVault(t))
-	srv.SetAdminToken("secret")
-
-	// 无认证 → 401。
+	// 根路径无认证 → 公开 index（200 / SPA 占位）
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
 	srv.ServeHTTP(w, req)
-	if w.Code != 401 {
-		t.Fatalf("expected 401, got %d", w.Code)
+	// 可能 200 / 404 / 405（取决于 index handler），不应是 401
+	if w.Code == 401 {
+		t.Fatalf("public index should not be 401, got %d", w.Code)
 	}
-	t.Log("✅ ServeHTTP no auth → 401")
+	t.Logf("✅ ServeHTTP public index → %d (no longer 401)", w.Code)
 
-	// 有认证 → 通过。
-	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
-	req2.SetBasicAuth("admin", "secret")
+	// 受保护 API 无认证 → 401
+	req2 := httptest.NewRequest(http.MethodGet, "/admin/api/dashboard", nil)
 	w2 := httptest.NewRecorder()
 	srv.ServeHTTP(w2, req2)
-	// 可能返回 404（根路径无 handler），但不应该是 401。
-	if w2.Code == 401 {
-		t.Fatal("should pass with auth")
+	if w2.Code != 401 {
+		t.Fatalf("protected API without auth should be 401, got %d", w2.Code)
 	}
-	t.Logf("✅ ServeHTTP with auth → %d", w2.Code)
+	t.Log("✅ ServeHTTP protected API no auth → 401")
+
+	// Bearer 通过
+	req3 := httptest.NewRequest(http.MethodGet, "/admin/api/dashboard", nil)
+	req3.Header.Set("Authorization", "Bearer secret")
+	w3 := httptest.NewRecorder()
+	srv.ServeHTTP(w3, req3)
+	if w3.Code == 401 {
+		t.Fatalf("Bearer should pass protected API, got %d", w3.Code)
+	}
+	t.Logf("✅ ServeHTTP protected API + Bearer → %d", w3.Code)
+}
+
+// wireMinimalStorage 给一个最小可用的 Server 注入 v1.4.2 存储（测试 helper）。
+func wireMinimalStorage(s *Server) {
+	if s.sessions == nil {
+		s.sessions = NewMemorySessionStore()
+	}
+	if s.captchaStore == nil {
+		s.captchaStore = NewMemoryCaptchaStore()
+	}
+	if s.loginStates == nil {
+		s.loginStates = NewMemoryLoginStateStore()
+	}
+	if s.devices == nil {
+		s.devices = NewMemoryDeviceStore()
+	}
+	if s.auditor == nil {
+		s.auditor = &NoopAuditor{}
+	}
+	if s.idleTimeout == 0 {
+		s.idleTimeout = 30 * time.Minute
+	}
+	if s.hardCap == 0 {
+		s.hardCap = 8 * time.Hour
+	}
+	if s.sessionSecret == nil {
+		s.sessionSecret = []byte("test-session-secret-32-bytes-pad!")
+	}
 }
 
 // 辅助函数。

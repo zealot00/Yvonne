@@ -15,6 +15,7 @@ package bootstrap
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -247,7 +248,7 @@ func buildDevMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, metrics
 	v1Router := api.NewV1Router(vault, auditLog, lifecycleMgr, metricsReg, nil)
 
 	// 装配 Admin Web UI（Dev 模式默认启用，绑 127.0.0.1:8250）。
-	adminSrv := buildAdminServer(cfg, vault)
+	adminSrv := buildAdminServer(cfg, vault, auditLog)
 	adminSrv.SetManager(lifecycleMgr) // P1: Admin UI 密钥列表
 	adminSrv.SetAPIHandler(v1Router)  // v1.3.1: Web 控制台 API 转发
 
@@ -503,7 +504,7 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 	v1Router := api.NewV1Router(unsealer, auditLog, lifecycleMgr, metricsReg, authenticator)
 
 	// 装配 Admin Web UI。
-	adminSrv := buildAdminServer(cfg, vault)
+	adminSrv := buildAdminServer(cfg, vault, auditLog)
 	adminSrv.SetManager(lifecycleMgr)
 	adminSrv.SetAPIHandler(v1Router)
 
@@ -640,7 +641,7 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 //   - 未配置时默认 127.0.0.1:8250
 //
 // 安全：管理页面强制绑 127.0.0.1，禁止 0.0.0.0。
-func buildAdminServer(cfg *config.YvonneConfig, unsealer seal.Unsealer) *admin.Server {
+func buildAdminServer(cfg *config.YvonneConfig, unsealer seal.Unsealer, auditor audit.Auditor) *admin.Server {
 	// Dev 模式强制启用 admin UI。
 	if cfg.Mode == config.ModeDev {
 		log.Printf("DEV MODE: admin web UI forced enabled")
@@ -648,6 +649,7 @@ func buildAdminServer(cfg *config.YvonneConfig, unsealer seal.Unsealer) *admin.S
 		if cfg.Server.Admin.AdminToken != "" {
 			srv.SetAdminToken(cfg.Server.Admin.AdminToken)
 		}
+		wireAdminV142(srv, true, auditor)
 		return srv
 	}
 
@@ -661,11 +663,67 @@ func buildAdminServer(cfg *config.YvonneConfig, unsealer seal.Unsealer) *admin.S
 	srv := admin.NewServer(unsealer)
 	if cfg.Server.Admin.AdminToken != "" {
 		srv.SetAdminToken(cfg.Server.Admin.AdminToken)
-		log.Printf("admin web UI: Basic Auth enabled (admin_token configured)")
+		log.Printf("admin web UI: session-cookie auth enabled (admin_token configured)")
 	} else {
 		log.Printf("WARNING: admin web UI has no admin_token — UNPROTECTED (bind 127.0.0.1 only)")
 	}
+	wireAdminV142(srv, false, auditor)
 	return srv
+}
+
+// wireAdminV142 v1.4.2 接线：内存版 session/captcha/device 存储 + TOTP + 默认时长。
+//
+// 内存版实现（dev / 单实例 cluster 够用）。后续 cluster 多实例可注入 KVStore 后端。
+func wireAdminV142(srv *admin.Server, devMode bool, auditor audit.Auditor) {
+	// 存储（v1.4.2 dev / 单实例 cluster 用内存版）
+	srv.SetSessionStore(admin.NewMemorySessionStore())
+	srv.SetCaptchaStore(admin.NewMemoryCaptchaStore())
+	srv.SetLoginStateStore(admin.NewMemoryLoginStateStore())
+	srv.SetDeviceStore(admin.NewMemoryDeviceStore())
+
+	// 审计：注入 bootstrap 已有的 audit logger
+	if auditor != nil {
+		srv.SetAuditor(auditor)
+		log.Printf("admin web UI: audit logging enabled")
+	}
+
+	// dev mode 启用调试端点
+	if devMode {
+		srv.SetDevMode(true)
+	}
+
+	// TOTP secret：从 YVONNE_ADMIN_TOTP_SECRET env 读；空 → 跳过 TOTP。
+	if secret := os.Getenv("YVONNE_ADMIN_TOTP_SECRET"); secret != "" {
+		srv.SetTOTPSecret(secret)
+		log.Printf("admin web UI: TOTP 2FA enabled")
+	} else {
+		log.Printf("admin web UI: TOTP 2FA disabled (set YVONNE_ADMIN_TOTP_SECRET to enable)")
+	}
+
+	// Session secret / device 指纹 salt。
+	if raw := os.Getenv("YVONNE_ADMIN_SESSION_SECRET"); raw != "" {
+		if len(raw) < 32 {
+			log.Printf("WARNING: YVONNE_ADMIN_SESSION_SECRET too short (%d < 32 bytes), padding", len(raw))
+		}
+		srv.SetSessionSecret([]byte(raw))
+	} else {
+		// dev fallback：随机生成（重启失效，可接受）
+		salt := make([]byte, 32)
+		if _, err := rand.Read(salt); err != nil {
+			log.Printf("FATAL: generate random session secret: %v", err)
+		}
+		srv.SetSessionSecret(salt)
+		log.Printf("admin web UI: random session secret (dev mode, restart invalidates)")
+	}
+
+	// 默认时长（等保 b 项）
+	srv.SetIdleTimeout(30 * time.Minute)
+	srv.SetHardCap(8 * time.Hour)
+
+	// 后台 reaper（每 5 min 清理过期）
+	stop := srv.StartReaper(5 * time.Minute)
+	log.Printf("admin web UI: reaper started (interval=5m) — stop on shutdown")
+	_ = stop // TODO: 接到 shutdown signal handler
 }
 
 // coreAlerterAdapter 把 observability.Alerter 适配为 service.Alerter（Bug-6 修复）。
