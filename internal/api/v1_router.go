@@ -104,8 +104,18 @@ func (r *V1Router) SetTracingEnabled(enabled bool) {
 }
 
 // SetSDFHandler 注入 SDF HTTP handler（v1.5）。
+//
+// SDF 有独立 token 认证（GM/T 0018 密码设备接口），不需要 authAndSeal。
+//
+// 实现：与 SetOCSPHandler 相同的动态注入模式 — 调用时立即注册到 mux。
+// 原因：register() 在 NewV1Router 内一次性执行，此时 sdfHandler 必为 nil，
+// 若依赖 register() 中的条件注册，bootstrap 后续注入将永远失效（404）。
 func (r *V1Router) SetSDFHandler(h http.Handler) {
 	r.sdfHandler = h
+	if h == nil {
+		return
+	}
+	r.mux.Handle("/api/v1/sdf/", h)
 }
 
 // SetOCSPHandler 注入 OCSP HTTP handler（v1.4.x）。
@@ -189,10 +199,10 @@ func (r *V1Router) register() {
 	r.mux.HandleFunc("/api/v1/pki/revoke", r.auditMiddleware("RevokeCert", r.authAndSeal("RevokeCert", r.handlePKIRevoke)))
 	r.mux.HandleFunc("/api/v1/pki/ca/", r.auditMiddleware("GetCRL", r.authAndSeal("GetCRL", r.handlePKIGetCRL)))
 
-	// v1.5 新增：SDF 软件密码机接口（独立 handler，SDF 自带 token 认证）。
-	if r.sdfHandler != nil {
-		r.mux.Handle("/api/v1/sdf/", r.sdfHandler)
-	}
+	// v1.5 新增：SDF 路由不在此处注册（动态注入见 SetSDFHandler）。
+	// 原因：register() 在 NewV1Router 内一次性调用，无法接收后续注入的 handler。
+	// 此处若保留条件注册（sdfHandler 恒为 nil），与 SetSDFHandler 的 mux.Handle
+	// 会造成 ServeMux 重复注册 panic。
 
 	// v1.4.x 新增：OCSP 路由不在此处注册（动态注入见 SetOCSPHandler）。
 	// 原因：register() 在 NewV1Router 内一次性调用，无法接收后续注入的 handler。

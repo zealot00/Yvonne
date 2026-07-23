@@ -273,6 +273,19 @@ func buildDevMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, metrics
 		log.Printf("DEV MODE: OCSP responder enabled at /api/v1/ocsp (RFC 6960, %s)", mode)
 	}
 
+	// v1.5: Dev 模式 SDF 软件密码机装配（GM/T 0018-2023）。
+	// 与 buildClusterMode 的 SDF 装配对齐；纯软件设备，无外部依赖。
+	if cfg.SDF.Enabled {
+		sdfDev, err := sdf.NewSoftwareDevice()
+		if err != nil {
+			log.Printf("WARNING: SDF device init failed (non-fatal): %v", err)
+		} else {
+			sdfServer := sdf.NewServer(sdfDev, cfg.SDF.Token)
+			v1Router.SetSDFHandler(sdfServer)
+			log.Printf("DEV MODE: SDF software device enabled (GM/T 0018-2023)")
+		}
+	}
+
 	// gRPC server（Dev 模式可选，默认启用）。
 	var grpcSrv *grpc.Server
 	if cfg.Server.GRPC.Enabled {

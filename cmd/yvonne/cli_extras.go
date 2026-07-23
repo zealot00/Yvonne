@@ -103,6 +103,10 @@ func runDemoSetup(addr string, port int) {
 	fmt.Printf("      KeyID: \"demo-order-key\",\n")
 	fmt.Printf("      Plaintext: []byte(\"secret\"),\n")
 	fmt.Printf("  })\n\n")
+	fmt.Printf("  # SDF 软件密码机（GM/T 0018-2023）— 演示 token: demo-sdf-token\n")
+	fmt.Printf("  curl -X POST %s/api/v1/sdf/device/info \\\n", baseURL)
+	fmt.Printf("    -H 'Authorization: Bearer demo-sdf-token' \\\n")
+	fmt.Printf("    -H 'Content-Type: application/json' -d '{}' | jq .\n\n")
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Println()
 }

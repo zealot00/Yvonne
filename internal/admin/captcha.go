@@ -19,10 +19,10 @@ import (
 	"fmt"
 	"math/big"
 
-	"yvonne/internal/memguard"
 	"strings"
 	"sync"
 	"time"
+	"yvonne/internal/memguard"
 )
 
 // captchaAlphabet 排除视觉混淆字符：0/O/1/I/L

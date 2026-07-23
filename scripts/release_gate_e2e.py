@@ -454,34 +454,95 @@ def test_http_api(api_base: str, token: str | None) -> None:
                 content_type="application/ocsp-request",
                 token=token)
             ct = hdrs.get("Content-Type", "") or hdrs.get("content-type", "")
-            # 检查响应是合法 OCSP DER（首字节 0x30 = SEQUENCE）。
-            ok_post = (code == 200 and
-                       "application/ocsp-response" in ct.lower() and
-                       len(body) > 0 and body[0] == 0x30)
-            record("22.1 OCSP POST raw DER (RFC 6960 §A.2)",
-                   ok_post,
-                   f"code={code} ct={ct} body={len(body)}B")
+            if code == 404:
+                # OCSP 未装配（dev 模式默认 pki.ocsp_enabled=false）→ 整组跳过。
+                skip("22.1 OCSP POST raw DER (RFC 6960 §A.2)",
+                     "OCSP 未启用（dev 模式默认关闭，需 pki.ocsp_enabled=true）")
+                skip("23.1 OCSP GET base64 (RFC 6960 §A.1)",
+                     "OCSP 未启用（dev 模式默认关闭，需 pki.ocsp_enabled=true）")
+            else:
+                # 检查响应是合法 OCSP DER（首字节 0x30 = SEQUENCE）。
+                ok_post = (code == 200 and
+                           "application/ocsp-response" in ct.lower() and
+                           len(body) > 0 and body[0] == 0x30)
+                record("22.1 OCSP POST raw DER (RFC 6960 §A.2)",
+                       ok_post,
+                       f"code={code} ct={ct} body={len(body)}B")
+
+                # 24. OCSP GET base64 — URL-safe base64 编码后作为 path 段
+                ocsp_req_der = build_ocsp_request_der(ca_pem_text, leaf_serial)
+                encoded = base64.urlsafe_b64encode(ocsp_req_der).rstrip(b"=").decode()
+                code, body, hdrs = http_request_raw(
+                    "GET", f"{api_base}/api/v1/ocsp/{encoded}",
+                    body=None,
+                    content_type="application/ocsp-request",
+                    token=token)
+                ct = hdrs.get("Content-Type", "") or hdrs.get("content-type", "")
+                ok_get = (code == 200 and
+                          "application/ocsp-response" in ct.lower() and
+                          len(body) > 0 and body[0] == 0x30)
+                record("23.1 OCSP GET base64 (RFC 6960 §A.1)",
+                       ok_get,
+                       f"code={code} ct={ct} body={len(body)}B")
         else:
             skip("22.1 OCSP POST raw DER", "leaf 签发失败，前置缺失")
-
-        # 24. OCSP GET base64 — URL-safe base64 编码后作为 path 段
-        if leaf_serial:
-            ocsp_req_der = build_ocsp_request_der(ca_pem_text, leaf_serial)
-            encoded = base64.urlsafe_b64encode(ocsp_req_der).rstrip(b"=").decode()
-            code, body, hdrs = http_request_raw(
-                "GET", f"{api_base}/api/v1/ocsp/{encoded}",
-                body=None,
-                content_type="application/ocsp-request",
-                token=token)
-            ct = hdrs.get("Content-Type", "") or hdrs.get("content-type", "")
-            ok_get = (code == 200 and
-                      "application/ocsp-response" in ct.lower() and
-                      len(body) > 0 and body[0] == 0x30)
-            record("23.1 OCSP GET base64 (RFC 6960 §A.1)",
-                   ok_get,
-                   f"code={code} ct={ct} body={len(body)}B")
-        else:
             skip("23.1 OCSP GET base64", "leaf 签发失败，前置缺失")
+
+    # === v1.5.x: SDF 软件密码机（GM/T 0018-2023）===
+    # 端点：POST /api/v1/sdf/*，独立 SDF token（dev 模式固定 demo-sdf-token）。
+    # 注意：SDF 软件设备依赖 tjfoc/gmsm，需 `-tags gmsm` 编译的二进制才可用。
+    #       标准二进制（无标签）下 SDF 未装配 → 404，整组跳过。
+    sdf_token = "demo-sdf-token"
+
+    code, resp = http_request("POST", f"{api_base}/api/v1/sdf/device/info", {}, sdf_token)
+    if code == 404:
+        skip("24.x SDF 测试套件", "SDF 未装配（需 go build -tags gmsm 编译的二进制）")
+    else:
+        # 24. SDF 设备信息
+        record("24.1 SDF device/info",
+               code == 200 and resp.get("data", {}).get("version") == "GM/T 0018-2023",
+               f"code={code} resp={resp}")
+
+        # 25. SDF SM3 哈希（"abc" = hex 616263）
+        code, resp = http_request("POST", f"{api_base}/api/v1/sdf/sm3/hash",
+                                  {"data": "616263"}, sdf_token)
+        sm3_hash = resp.get("data", {}).get("hash", "")
+        record("25.1 SDF SM3 hash",
+               code == 200 and len(sm3_hash) == 64,
+               f"code={code} hash={sm3_hash[:16]}...")
+
+        # 26. SDF SM4 加密 + 解密往返
+        sm4_key_hex = "30313233343536373839616263646566"  # "0123456789abcdef"
+        sm4_plain_hex = b"Hello SDF SM4!".hex()
+        code, resp = http_request("POST", f"{api_base}/api/v1/sdf/sm4/encrypt",
+                                  {"key": sm4_key_hex, "data": sm4_plain_hex}, sdf_token)
+        sm4_ct = resp.get("data", {}).get("ciphertext", "")
+        sm4_rt = False
+        if sm4_ct:
+            code, resp = http_request("POST", f"{api_base}/api/v1/sdf/sm4/decrypt",
+                                      {"key": sm4_key_hex, "ciphertext": sm4_ct}, sdf_token)
+            sm4_pt_hex = resp.get("data", {}).get("plaintext", "")
+            try:
+                sm4_rt = bytes.fromhex(sm4_pt_hex) == b"Hello SDF SM4!"
+            except Exception:
+                sm4_rt = False
+        record("26.1 SDF SM4 encrypt+decrypt round-trip",
+               sm4_ct != "" and sm4_rt,
+               f"ct={sm4_ct[:16]}... rt={sm4_rt}")
+
+        # 27. SDF 随机数
+        code, resp = http_request("POST", f"{api_base}/api/v1/sdf/random",
+                                  {"length": 32}, sdf_token)
+        rnd = resp.get("data", {}).get("random", "")
+        record("27.1 SDF random(32)",
+               code == 200 and len(rnd) == 64,
+               f"code={code} len={len(rnd)}")
+
+        # 28. SDF 认证拒绝（错误 token）
+        code, resp = http_request("POST", f"{api_base}/api/v1/sdf/device/info", {}, "wrong-token")
+        record("28.1 SDF auth reject (wrong token)",
+               code == 401,
+               f"code={code}")
 
 
 # ---------------------------------------------------------------------------

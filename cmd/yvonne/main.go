@@ -171,6 +171,13 @@ func runDevCmd(args []string) {
 			Output:        "stdout",
 			RedactSecrets: true,
 		},
+		// Dev 模式默认启用 SDF 软件密码机（纯软件，无外部依赖），
+		// 便于本地体验 GM/T 0018 接口与 release gate E2E 覆盖。
+		// 演示 token 固定为 demo-sdf-token（demo banner 会打印）。
+		SDF: config.SDFConfig{
+			Enabled: true,
+			Token:   "demo-sdf-token",
+		},
 	}
 
 	if err := config.ValidateYvonneConfig(cfg); err != nil {
