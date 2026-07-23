@@ -107,6 +107,12 @@ func runDemoSetup(addr string, port int) {
 	fmt.Printf("  curl -X POST %s/api/v1/sdf/device/info \\\n", baseURL)
 	fmt.Printf("    -H 'Authorization: Bearer demo-sdf-token' \\\n")
 	fmt.Printf("    -H 'Content-Type: application/json' -d '{}' | jq .\n\n")
+	fmt.Printf("  # PKI 创建 CA（自签根证书）\n")
+	fmt.Printf("  curl -X POST %s/api/v1/pki/ca \\\n", baseURL)
+	fmt.Printf("    -H 'Content-Type: application/json' \\\n")
+	fmt.Printf("    -d '{\"key_id\":\"demo-root-ca\",\"algo\":\"rsa\",\"subject\":\"CN=Demo Root CA\",\"ttl_years\":10}' | jq .\n\n")
+	fmt.Printf("  # OCSP 在线证书状态查询（RFC 6960，需先签发证书）\n")
+	fmt.Printf("  # POST %s/api/v1/ocsp（raw DER）或 GET /api/v1/ocsp/{base64}\n\n", baseURL)
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Println()
 }

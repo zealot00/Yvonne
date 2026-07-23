@@ -178,6 +178,13 @@ func runDevCmd(args []string) {
 			Enabled: true,
 			Token:   "demo-sdf-token",
 		},
+		// Dev 模式默认启用 PKI + OCSP（纯软件 CA，无外部依赖），
+		// 便于本地体验证书签发与 RFC 6960 在线状态查询。
+		// OCSPToken 留空 = 无认证（dev 模式绑定 127.0.0.1，可接受）。
+		PKI: config.PKIConfig{
+			Enabled:     true,
+			OCSPEnabled: true,
+		},
 	}
 
 	if err := config.ValidateYvonneConfig(cfg); err != nil {
