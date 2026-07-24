@@ -227,6 +227,22 @@ func (c *Core) VerifyCert(ctx context.Context, certPEM, caCertPEM []byte, policy
 		return nil, err
 	}
 
+	// Bug 修复：吊销状态检查（此前 crlDER 恒为 nil，吊销后仍返回 valid=true）。
+	//
+	// 方案：按证书 serial 在 CertManager 元数据中查询（不依赖 CRL 文件），
+	// serial 为 128-bit 随机，跨 CA 碰撞概率 ~2^-128，可安全忽略 issuer 二次匹配。
+	// 外部证书（非本系统签发）查询不到 → 保持签名验证结果（Revoked=false，未知≠吊销）。
+	serial, _, parseErr := crypto.ParseCertSerialIssuer(certPEM)
+	if parseErr == nil && serial != "" {
+		if meta, ferr := c.certManager.FindBySerialAnyCA(ctx, serial); ferr == nil && meta != nil {
+			if meta.State == lifecycle.CertStateRevoked {
+				result.Revoked = true
+				result.Valid = false
+				result.Error = "certificate is revoked"
+			}
+		}
+	}
+
 	c.recordAudit(ctx, "VerifyCert", "", 0, "success", "")
 	return &VerifyCertResult{
 		Valid:   result.Valid,

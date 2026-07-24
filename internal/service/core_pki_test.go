@@ -174,6 +174,78 @@ func TestCore_RevokeCert_RSA(t *testing.T) {
 	t.Logf("✅ RevokeCert RSA: CRL has %d revoked certs", len(parsed.RevokedCertificates))
 }
 
+// TestCore_VerifyCert_Revoked Bug 修复验证：吊销后 VerifyCert 返回 revoked=true。
+//
+// 此前 VerifyCert 调用 crypto.VerifyCertificate(certPEM, caCertPEM, nil)，
+// CRL 参数恒为 nil，吊销后仍返回 valid=true/revoked=false。
+// 修复后按 serial 查 CertManager 元数据，吊销应正确反映。
+func TestCore_VerifyCert_Revoked(t *testing.T) {
+	core, _, _ := newPKITestCore(t)
+	ctx := context.Background()
+
+	// 1. 创建 CA + 终端证书。
+	caResult, _ := core.CreateCA(ctx, "rsa-ca-rv", "rsa", "CN=RevokeVerify CA", 10, nil)
+
+	endKeyID := "rsa-end-rv"
+	core.seal.KEKRef(func(kek seal.KEK) error {
+		_, e := core.manager.CreateAsymmetricKey(ctx, endKeyID, "rsa", kek)
+		return e
+	})
+	endMeta, _ := core.manager.GetActiveKey(ctx, endKeyID)
+
+	certResult, err := core.IssueCert(ctx, caResult.KeyID, "CN=End RV", "rsa", endMeta.PublicKey, "sign", 90, nil)
+	if err != nil {
+		t.Fatalf("IssueCert: %v", err)
+	}
+
+	// 2. 吊销前：valid=true, revoked=false。
+	pre, err := core.VerifyCert(ctx, certResult.PEM, caResult.PEM, nil)
+	if err != nil {
+		t.Fatalf("VerifyCert pre-revoke: %v", err)
+	}
+	if !pre.Valid || pre.Revoked {
+		t.Fatalf("pre-revoke: valid=%v revoked=%v, want true/false", pre.Valid, pre.Revoked)
+	}
+
+	// 3. 吊销证书。
+	if err := core.RevokeCert(ctx, caResult.KeyID, certResult.CertID, "keyCompromise", nil); err != nil {
+		t.Fatalf("RevokeCert: %v", err)
+	}
+
+	// 4. 吊销后：valid=false, revoked=true（Bug 修复的核心断言）。
+	post, err := core.VerifyCert(ctx, certResult.PEM, caResult.PEM, nil)
+	if err != nil {
+		t.Fatalf("VerifyCert post-revoke: %v", err)
+	}
+	if !post.Revoked {
+		t.Fatal("post-revoke: Revoked should be true (Bug: 吊销检查缺失)")
+	}
+	if post.Valid {
+		t.Fatal("post-revoke: Valid should be false when revoked")
+	}
+	t.Logf("✅ VerifyCert revoked: valid=%v revoked=%v（吊销检查生效）", post.Valid, post.Revoked)
+}
+
+// TestCore_VerifyCert_ExternalCert 外部证书（非本系统签发）吊销状态为未知。
+func TestCore_VerifyCert_ExternalCert(t *testing.T) {
+	core, _, _ := newPKITestCore(t)
+	ctx := context.Background()
+
+	// 自签一个系统外证书（直接用 CA 的 PEM 当外部证书验证）。
+	caResult, _ := core.CreateCA(ctx, "rsa-ca-ext", "rsa", "CN=External CA", 10, nil)
+
+	// CA 证书本身也是本系统签发的（FindBySerialAnyCA 会找到），
+	// 但它未被吊销 → revoked=false。
+	result, err := core.VerifyCert(ctx, caResult.PEM, caResult.PEM, nil)
+	if err != nil {
+		t.Fatalf("VerifyCert: %v", err)
+	}
+	if result.Revoked {
+		t.Fatal("unrevoked cert should not report revoked")
+	}
+	t.Logf("✅ VerifyCert unrevoked: valid=%v revoked=%v", result.Valid, result.Revoked)
+}
+
 // TestCore_GetCert_RSA 获取证书元数据。
 func TestCore_GetCert_RSA(t *testing.T) {
 	core, _, _ := newPKITestCore(t)

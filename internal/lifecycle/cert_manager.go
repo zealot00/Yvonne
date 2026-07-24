@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"yvonne/internal/storage"
@@ -206,6 +207,61 @@ func (cm *CertManager) FindBySerial(ctx context.Context, caKeyID string, serial 
 		return nil, err
 	}
 	return cm.GetCert(ctx, string(certIDBytes))
+}
+
+// FindBySerialAnyCA 按序列号跨所有 CA 查询证书（吊销检查用）。
+//
+// 扫描 cert:by-ca:{caKeyID}:{serial} 索引，匹配最后一段 serial。
+// 用于 VerifyCert 的吊销检查：调用方只知证书本身，不知 CA keyID。
+//
+// 说明：serial 为 128-bit 随机数，跨 CA 碰撞概率 ~2^-128，忽略 issuer 二次匹配。
+// 证书不在本系统签发（外部证书）时返回 ErrNotFound 语义（state 未知，视为未吊销）。
+func (cm *CertManager) FindBySerialAnyCA(ctx context.Context, serial string) (*CertMetadata, error) {
+	if serial == "" {
+		return nil, errors.New("lifecycle: serial is empty")
+	}
+
+	const idxPrefix = "cert:by-ca:"
+	matchSuffix := ":" + serial
+
+	// 优先 PrefixScanner，回退 PagedPrefixScanner。
+	if scanner, ok := cm.store.(storage.PrefixScanner); ok {
+		items, err := scanner.ScanPrefix(ctx, idxPrefix)
+		if err != nil {
+			return nil, fmt.Errorf("lifecycle: scan by-ca index: %w", err)
+		}
+		for key := range items {
+			if strings.HasSuffix(key, matchSuffix) {
+				return cm.GetCert(ctx, string(items[key]))
+			}
+		}
+		return nil, storage.ErrNotFound
+	}
+
+	pagedScanner, ok := cm.store.(storage.PagedPrefixScanner)
+	if !ok {
+		return nil, storage.ErrNotFound
+	}
+	const pageSize = 1000
+	offset := 0
+	for {
+		items, _, err := pagedScanner.ScanPrefixPaged(ctx, idxPrefix, offset, pageSize)
+		if err != nil {
+			return nil, err
+		}
+		if len(items) == 0 {
+			return nil, storage.ErrNotFound
+		}
+		for _, item := range items {
+			if strings.HasSuffix(string(item.Key), matchSuffix) {
+				return cm.GetCert(ctx, string(item.Value))
+			}
+		}
+		offset += len(items)
+		if len(items) < pageSize {
+			return nil, storage.ErrNotFound
+		}
+	}
 }
 
 // SaveCRL 存储 CRL DER（覆盖旧 CRL）。
