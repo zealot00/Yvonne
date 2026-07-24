@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Yvonne 全功能演示 — asciinema 回放</title>
+<link rel="stylesheet" href="vendor/asciinema-player.min.css">
+<style>
+  body { margin: 0; background: #0d1117; color: #c9d1d9; font-family: -apple-system, "PingFang SC", sans-serif; }
+  .header { padding: 24px 32px 8px; }
+  .header h1 { font-size: 20px; margin: 0 0 6px; }
+  .header p { font-size: 13px; color: #8b949e; margin: 0; }
+  .header code { background: #161b22; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+  #player { padding: 16px 32px 32px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>Yvonne 全功能演示（cluster 模式 + PostgreSQL）</h1>
+  <p>KMS 信封加密 · PKI 证书签发 · SDF 软件密码机 · 审计链 · PG 持久化验证</p>
+  <p>打开方式：在本目录（docs/demo/）执行 <code>python3 -m http.server 8000</code> 后访问
+     <code>http://127.0.0.1:8000/player.html</code>；或直接 <code>asciinema play yvonne-demo.cast</code>。</p>
+</div>
+<div id="player"></div>
+<script src="vendor/asciinema-player.min.js"></script>
+<script>
+AsciinemaPlayer.create('yvonne-demo.cast', document.getElementById('player'), {
+  autoPlay: false,
+  loop: false,
+  speed: 1.5,
+  theme: 'asciinema',
+  fit: 'width',
+  terminalFontSize: '13px',
+});
+</script>
+</body>
+</html>
