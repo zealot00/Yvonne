@@ -118,6 +118,16 @@ func (r *V1Router) SetSDFHandler(h http.Handler) {
 	r.mux.Handle("/api/v1/sdf/", h)
 }
 
+// SetAuditDir 设置审计日志目录（audit/query 端点用）。
+//
+// Bug 修复：auditDir 字段自 v1.2 引入以来从未被赋值，
+// 导致 POST /api/v1/audit/query 恒返回 "audit query not configured"。
+// cluster 模式（audit.dir 落盘）必须调用此方法注入目录。
+// dev 模式审计输出到 stdout（无目录），不调用即可（端点返回 503 属预期）。
+func (r *V1Router) SetAuditDir(dir string) {
+	r.auditDir = dir
+}
+
 // SetOCSPHandler 注入 OCSP HTTP handler（v1.4.x）。
 //
 // OCSP 是公开查询协议（RFC 6960），不需要 authAndSeal。

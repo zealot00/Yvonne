@@ -1,0 +1,20 @@
+=== Yvonne Cluster 模式 PG 持久化验证（2026-07-24）===
+
+[步骤]
+1. cluster 模式启动（PostgreSQL @ 172.20.0.16/yvonne_demo2 + local_pki 自动解封）
+2. 跑完整 demo（demo_full.py --token demo-admin-token）：KMS + PKI + OCSP + SDF
+3. 停止 server（pkill）
+4. unseal.pem 已被"阅后即焚"删除（安全设计：私钥不滞留磁盘）
+5. 运维流程：从安全位置放回备份私钥（cp unseal-backup.pem unseal.pem）
+6. 重启 server → local_pki 自动解封成功
+
+[验证结果]
+4.1 demo-rsa 公钥仍在:          {"ok":true,"pub_len":1068}
+4.2 demo-aes 重启后加解密往返:   "persistence-ok"（CMK 持久化，DEK 正常解密）
+4.3 吊销的 CRL 仍保留:           {"ok":true,"crl_len":968}（吊销记录不丢）
+4.4 审计日志累计:                33+ 行（/audit/audit.log 落盘）
+4.5 audit/query API（修复后）:    {"ok":true,"count":5}
+
+[结论]
+cluster 模式 + PostgreSQL 下，密钥、证书、吊销状态、审计日志
+全部持久化，进程重启后完整可用。

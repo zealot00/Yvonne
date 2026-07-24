@@ -515,6 +515,12 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 	// 装配 V1Router（注入认证器，绝不传 nil）。
 	v1Router := api.NewV1Router(unsealer, auditLog, lifecycleMgr, metricsReg, authenticator)
 
+	// Bug 修复：注入审计目录，启用 POST /api/v1/audit/query。
+	// 此前 auditDir 从未被赋值，audit/query 恒返回 "audit query not configured"。
+	if cfg.Audit.Dir != "" {
+		v1Router.SetAuditDir(cfg.Audit.Dir)
+	}
+
 	// 装配 Admin Web UI。
 	adminSrv := buildAdminServer(cfg, vault, auditLog)
 	adminSrv.SetManager(lifecycleMgr)

@@ -92,8 +92,11 @@ def wait_ready(api: str) -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--api-port", type=int, default=DEFAULT_API_PORT)
+    ap.add_argument("--token", default=None,
+                    help="Bearer token（cluster 模式必填，如 demo-admin-token；dev 模式留空）")
     args = ap.parse_args()
     api = f"http://127.0.0.1:{args.api_port}"
+    token = args.token
 
     banner("🧊 Yvonne 全功能演示")
     step("目标: 一个平台完成密钥管理 + 证书签发 + 密码机服务 + 审计")
@@ -109,35 +112,35 @@ def main() -> int:
     # ------------------------------------------------------------------
     banner("Part 1/5: KMS 信封加密 — 密钥全生命周期")
 
-    http("POST", f"{api}/api/v1/keys", {"key_id": "demo-aes", "algorithm": "AES-256-GCM"})
+    http("POST", f"{api}/api/v1/keys", {"key_id": "demo-aes", "algorithm": "AES-256-GCM"}, token)
     step("创建 AES-256-GCM 密钥 demo-aes")
 
     code, r = http("POST", f"{api}/api/v1/encrypt",
-                   {"key_id": "demo-aes", "plaintext": b64("身份证 110101199001011234")})
+                   {"key_id": "demo-aes", "plaintext": b64("身份证 110101199001011234")}, token)
     ct = r.get("data", {}).get("ciphertext", "")
     step("加密敏感数据", f"密文(前32): {ct[:32]}...  版本化自路由格式 [ver|nonce|ct]")
 
-    code, r = http("POST", f"{api}/api/v1/decrypt", {"key_id": "demo-aes", "ciphertext": ct})
+    code, r = http("POST", f"{api}/api/v1/decrypt", {"key_id": "demo-aes", "ciphertext": ct}, token)
     pt = b64d(r.get("data", {}).get("plaintext", ""))
     step("解密回原文", f"plaintext: {pt}")
 
-    http("POST", f"{api}/api/v1/keys/demo-aes/rotate", None)
+    http("POST", f"{api}/api/v1/keys/demo-aes/rotate", None, token)
     step("轮转密钥 → v2（旧密文仍可解密，版本自动路由）")
 
-    code, r = http("POST", f"{api}/api/v1/decrypt", {"key_id": "demo-aes", "ciphertext": ct})
+    code, r = http("POST", f"{api}/api/v1/decrypt", {"key_id": "demo-aes", "ciphertext": ct}, token)
     step("用 v2 解 v1 密文", f"仍得到: {b64d(r.get('data', {}).get('plaintext', ''))}")
 
-    code, r = http("POST", f"{api}/api/v1/keys/demo-aes/generate-data-key", None)
+    code, r = http("POST", f"{api}/api/v1/keys/demo-aes/generate-data-key", None, token)
     step("GenerateDataKey", "明文 DEK 经 SecureBuffer 受控暴露，写响应后立即 Wipe")
 
-    http("POST", f"{api}/api/v1/keys/asymmetric", {"key_id": "demo-rsa", "key_type": "rsa"})
-    code, r = http("POST", f"{api}/api/v1/sign", {"key_id": "demo-rsa", "data": b64("合同内容")})
+    http("POST", f"{api}/api/v1/keys/asymmetric", {"key_id": "demo-rsa", "key_type": "rsa"}, token)
+    code, r = http("POST", f"{api}/api/v1/sign", {"key_id": "demo-rsa", "data": b64("合同内容")}, token)
     sig = r.get("data", {}).get("signature", "")
     code, r = http("POST", f"{api}/api/v1/verify",
-                   {"key_id": "demo-rsa", "data": b64("合同内容"), "signature": sig})
+                   {"key_id": "demo-rsa", "data": b64("合同内容"), "signature": sig}, token)
     step("RSA-4096-PSS 签名验签", f"valid: {r.get('data', {}).get('valid')}")
 
-    code, r = http("POST", f"{api}/api/v1/mac/generate", {"key_id": "demo-aes", "data": b64("phone:13800000000")})
+    code, r = http("POST", f"{api}/api/v1/mac/generate", {"key_id": "demo-aes", "data": b64("phone:13800000000")}, token)
     mac = r.get("data", {}).get("mac", "")
     step("HMAC 盲索引", "加密字段也能等值查询（HMAC 做索引列，不可逆）")
 
@@ -148,7 +151,7 @@ def main() -> int:
 
     code, r = http("POST", f"{api}/api/v1/pki/ca",
                    {"key_id": "demo-root-ca", "algo": "rsa",
-                    "subject": "CN=Yvonne Demo Root CA,O=Yvonne", "ttl_years": 10})
+                    "subject": "CN=Yvonne Demo Root CA,O=Yvonne", "ttl_years": 10}, token)
     d = must(code, r, "CreateCA")
     ca_pem_b64 = d.get("pem", "")
     ca_pem = base64.b64decode(ca_pem_b64).decode() if ca_pem_b64 else ""
@@ -160,13 +163,13 @@ def main() -> int:
     # 注意：public_key 字段是 []byte JSON 编码 = base64(PEM 文本)，
     #       IssueCert 的 public_key_pem 同样是 []byte（客户端传 base64(PEM)），
     #       因此直接透传即可，不要二次 base64 编码。
-    code, r = http("GET", f"{api}/api/v1/keys/public-key?key_id=demo-rsa")
+    code, r = http("GET", f"{api}/api/v1/keys/public-key?key_id=demo-rsa", None, token)
     d = must(code, r, "GetPublicKey")
     leaf_pub_b64 = d.get("public_key", "")
     code, r = http("POST", f"{api}/api/v1/pki/issue",
                    {"ca_key_id": "demo-root-ca", "subject": "CN=demo-service",
                     "algo": "rsa", "public_key_pem": leaf_pub_b64,
-                    "cert_type": "sign", "ttl_days": 365})
+                    "cert_type": "sign", "ttl_days": 365}, token)
     d = must(code, r, "IssueCert")
     leaf_pem_b64 = d.get("pem", "")
     leaf_serial = d.get("serial", "")
@@ -175,7 +178,7 @@ def main() -> int:
          f"serial: {leaf_serial[:24]}...  TTL: 365d")
 
     code, r = http("POST", f"{api}/api/v1/pki/verify",
-                   {"cert_pem": leaf_pem_b64, "ca_cert_pem": ca_pem_b64})
+                   {"cert_pem": leaf_pem_b64, "ca_cert_pem": ca_pem_b64}, token)
     v = must(code, r, "VerifyCert")
     step("验证证书链", f"valid: {v.get('valid')}  revoked: {v.get('revoked')}")
 
@@ -186,17 +189,17 @@ def main() -> int:
 
     code, r = http("POST", f"{api}/api/v1/pki/revoke",
                    {"ca_key_id": "demo-root-ca", "cert_id": leaf_cert_id,
-                    "reason": "keyCompromise"})
+                    "reason": "keyCompromise"}, token)
     must(code, r, "RevokeCert")
     step("吊销 demo-service 证书", "reason: keyCompromise")
 
-    code, r = http("GET", f"{api}/api/v1/pki/ca/demo-root-ca/crl")
+    code, r = http("GET", f"{api}/api/v1/pki/ca/demo-root-ca/crl", None, token)
     d = must(code, r, "GetCRL")
     crl = d.get("crl", "")
     step("获取 CRL", f"CRL DER: {len(base64.b64decode(crl)) if crl else 0} bytes（含已吊销序列号）")
 
     code, r = http("POST", f"{api}/api/v1/pki/verify",
-                   {"cert_pem": leaf_pem_b64, "ca_cert_pem": ca_pem_b64})
+                   {"cert_pem": leaf_pem_b64, "ca_cert_pem": ca_pem_b64}, token)
     v = must(code, r, "VerifyCert(revoked)")
     step("吊销后再次验证", f"valid: {v.get('valid')}  revoked: {v.get('revoked')}")
 
@@ -241,7 +244,7 @@ def main() -> int:
     # ------------------------------------------------------------------
     banner("Part 5/5: 审计 — 哈希链完整性")
 
-    code, r = http("POST", f"{api}/api/v1/audit/query", {"limit": 5})
+    code, r = http("POST", f"{api}/api/v1/audit/query", {"limit": 5}, token)
     entries = []
     if code == 200 and r.get("ok"):
         data = r.get("data", {})
