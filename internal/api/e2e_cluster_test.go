@@ -54,7 +54,10 @@ func newClusterEnv(t *testing.T, threshold, total int) *clusterEnv {
 
 	dsn := os.Getenv("YVONNE_TEST_PG_DSN")
 	if dsn == "" {
-		dsn = os.Getenv("YVONNE_TEST_PG_DSN")
+		dsn = os.Getenv("YVONNE_PG_DSN")
+	}
+	if dsn == "" {
+		t.Skip("YVONNE_TEST_PG_DSN not set, skipping Cluster PG E2E test")
 	}
 
 	ctx := context.Background()
@@ -331,7 +334,11 @@ func TestE2E_Cluster_PersistenceWithShamir(t *testing.T) {
 
 	// 模拟重启：新 vault（sealed）+ 新 manager（同一 PG）。
 	// 不关闭 env.store（让 t.Cleanup 处理），用新连接读同一 PG。
-	store2, _ := storage.NewPostgresKVStore(ctx, os.Getenv("YVONNE_TEST_PG_DSN"))
+	dsn2 := os.Getenv("YVONNE_TEST_PG_DSN")
+	if dsn2 == "" {
+		dsn2 = os.Getenv("YVONNE_PG_DSN")
+	}
+	store2, _ := storage.NewPostgresKVStore(ctx, dsn2)
 	defer store2.Close(ctx)
 	mgr2 := lifecycle.NewManager(store2)
 	vault2 := seal.NewVaultState(3, 2, 0) // sealed

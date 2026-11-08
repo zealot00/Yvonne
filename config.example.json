@@ -6,7 +6,8 @@
     "admin": {
       "enabled": true,
       "bind_addr": "127.0.0.1",
-      "bind_port": 8250
+      "bind_port": 8250,
+      "admin_token": "CHANGE_ME_ADMIN_TOKEN"
     }
   },
   "storage": {

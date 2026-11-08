@@ -153,7 +153,7 @@ func runDevCmd(args []string) {
 			BindPort: *port,
 			Admin: config.AdminServerConfig{
 				Enabled:  true,
-				BindAddr: "127.0.0.1",
+				BindAddr: *addr,
 				BindPort: 8250,
 			},
 		},

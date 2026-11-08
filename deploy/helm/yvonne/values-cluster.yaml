@@ -28,15 +28,20 @@ config:
       bind_port: 8251
       tls:
         enabled: true
+        cert_file: /etc/yvonne/tls/tls.crt
+        key_file: /etc/yvonne/tls/tls.key
+        min_version: "TLS1.3"
     mcp:
       enabled: false  # 生产按需启用
 
   storage:
-    backend: postgres
+    type: postgres
     dsn: "postgres://yvonne:CHANGE_ME@yvonne-postgresql:5432/yvonne?sslmode=require"
 
   unseal:
-    strategy: shamir  # shamir | localpki | hsm
+    type: shamir  # shamir | local_pki | hsm
+    total_shares: 5
+    threshold: 3
 
   auth:
     app_roles:
@@ -56,6 +61,12 @@ config:
     filename: audit.log
     retention_days: 365
     syslog_enabled: false
+
+  logging:
+    level: info
+    format: json
+    output: stdout
+    redact_secrets: true
 
 persistence:
   enabled: false  # Cluster 模式用外部 PG，无需本地存储

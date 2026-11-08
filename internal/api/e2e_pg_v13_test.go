@@ -42,7 +42,10 @@ func newE2EPGEnvV13(t *testing.T) *e2ePGEnvV13 {
 
 	dsn := os.Getenv("YVONNE_TEST_PG_DSN")
 	if dsn == "" {
-		dsn = os.Getenv("YVONNE_TEST_PG_DSN")
+		dsn = os.Getenv("YVONNE_PG_DSN")
+	}
+	if dsn == "" {
+		t.Skip("YVONNE_TEST_PG_DSN not set, skipping PG v1.3 E2E test")
 	}
 
 	ctx := context.Background()
@@ -150,7 +153,11 @@ func TestE2E_PG_V13_SignVerify(t *testing.T) {
 	t.Log("✅ PG Verify RSA: valid=true")
 
 	// PG 持久化验证——重启后密钥仍在。
-	store2, _ := storage.NewPostgresKVStore(ctx, os.Getenv("YVONNE_TEST_PG_DSN"))
+	dsn2 := os.Getenv("YVONNE_TEST_PG_DSN")
+	if dsn2 == "" {
+		dsn2 = os.Getenv("YVONNE_PG_DSN")
+	}
+	store2, _ := storage.NewPostgresKVStore(ctx, dsn2)
 	defer store2.Close(ctx)
 	mgr2 := lifecycle.NewManager(store2)
 	meta, err := mgr2.GetActiveKey(ctx, "pg-rsa")
@@ -383,7 +390,11 @@ func TestE2E_PG_V13_Persistence(t *testing.T) {
 	})
 
 	// 关闭 PG store + 重新打开（模拟重启）。
-	store2, _ := storage.NewPostgresKVStore(ctx, os.Getenv("YVONNE_TEST_PG_DSN"))
+	dsn2 := os.Getenv("YVONNE_TEST_PG_DSN")
+	if dsn2 == "" {
+		dsn2 = os.Getenv("YVONNE_PG_DSN")
+	}
+	store2, _ := storage.NewPostgresKVStore(ctx, dsn2)
 	defer store2.Close(ctx)
 	mgr2 := lifecycle.NewManager(store2)
 	vault2 := seal.NewVaultState(1, 1, 0)

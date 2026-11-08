@@ -23,15 +23,20 @@ config:
       enabled: false
 
   storage:
-    backend: boltdb
-    path: /data/yvonne.boltdb
+    type: memory
 
   unseal:
-    strategy: auto
+    type: auto
 
   audit:
     dir: /var/log/yvonne
     filename: audit.log
+
+  logging:
+    level: info
+    format: json
+    output: stdout
+    redact_secrets: true
 
 # Dev 模式用 emptyDir（重启数据丢失）
 persistence:

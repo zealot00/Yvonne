@@ -7,7 +7,7 @@
 # -- 镜像配置
 image:
   repository: yvonne/kms
-  tag: "0.4.0"
+  tag: "1.4.3"
   pullPolicy: IfNotPresent
   # pullSecrets: []  # 私有仓库时配置
 
@@ -52,14 +52,15 @@ config:
       allowed_keys: []
 
   storage:
-    # dev 模式用 boltdb（emptyDir），cluster 模式用 postgres
-    backend: boltdb
-    path: /data/yvonne.boltdb
+    # dev 模式用 memory，cluster 模式用 postgres
+    type: memory
     # dsn: "postgres://yvonne:pass@postgres:5432/yvonne?sslmode=disable"
 
   unseal:
-    # dev 模式 auto，cluster 模式 shamir/localpki/hsm
-    strategy: auto
+    # dev 模式 auto，cluster 模式 shamir/local_pki/hsm
+    type: auto
+    total_shares: 5
+    threshold: 3
 
   auth:
     # dev 模式无需配置，cluster 模式配置 app_roles 或 jwt
@@ -79,12 +80,18 @@ config:
     syslog_enabled: false
     syslog_tag: yvonne-kms
 
+  logging:
+    level: info
+    format: json
+    output: stdout
+    redact_secrets: true
+
 # -- 环境变量（覆盖 config 字段）
 env:
   YVONNE_MODE: ""
   YVONNE_SERVER_BIND_ADDR: ""
   YVONNE_SERVER_BIND_PORT: ""
-  YVONNE_STORAGE_BACKEND: ""
+  YVONNE_STORAGE_TYPE: ""
   YVONNE_STORAGE_DSN: ""
   YVONNE_AUDIT_DIR: ""
 

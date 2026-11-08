@@ -31,6 +31,16 @@ data:
           "enabled": {{ $config.server.grpc.enabled }},
           "bind_addr": {{ $config.server.grpc.bind_addr | quote }},
           "bind_port": {{ $config.server.grpc.bind_port }}
+          {{- if $config.server.grpc.tls }},
+          "tls": {
+            "enabled": {{ $config.server.grpc.tls.enabled | default false }},
+            {{- if $config.server.grpc.tls.cert_file }}
+            "cert_file": {{ $config.server.grpc.tls.cert_file | quote }},
+            "key_file": {{ $config.server.grpc.tls.key_file | quote }},
+            {{- end }}
+            "min_version": {{ $config.server.grpc.tls.min_version | default "TLS1.3" | quote }}
+          }
+          {{- end }}
         },
         "mcp": {
           "enabled": {{ $config.server.mcp.enabled }},
@@ -41,22 +51,44 @@ data:
         }
       },
       "storage": {
-        "backend": {{ $config.storage.backend | quote }},
-        {{- if $config.storage.path }}
-        "path": {{ $config.storage.path | quote }},
-        {{- end }}
-        {{- if $config.storage.dsn }}
+        "type": {{ default $config.storage.backend $config.storage.type | quote }}
+        {{- if $config.storage.dsn }},
         "dsn": {{ $config.storage.dsn | quote }}
         {{- end }}
       },
       "unseal": {
-        "strategy": {{ $config.unseal.strategy | quote }}
+        "type": {{ default $config.unseal.strategy $config.unseal.type | quote }},
+        "total_shares": {{ $config.unseal.total_shares | default 5 }},
+        "threshold": {{ $config.unseal.threshold | default 3 }}
+        {{- if $config.unseal.pki_key_path }},
+        "pki_key_path": {{ $config.unseal.pki_key_path | quote }}
+        {{- end }}
       },
+      {{- if $config.auth }}
+      "auth": {
+        "app_roles": {{ toJson ($config.auth.app_roles | default list) }}
+        {{- if and $config.auth.jwt $config.auth.jwt.signing_method }},
+        "jwt": {
+          "signing_method": {{ $config.auth.jwt.signing_method | quote }},
+          "verifying_key_path": {{ $config.auth.jwt.verifying_key_path | default "" | quote }},
+          "issuer": {{ $config.auth.jwt.issuer | default "" | quote }},
+          "audience": {{ toJson ($config.auth.jwt.audience | default list) }},
+          "role_claim": {{ $config.auth.jwt.role_claim | default "sub" | quote }}
+        }
+        {{- end }}
+      },
+      {{- end }}
       "audit": {
         "dir": {{ $config.audit.dir | quote }},
         "filename": {{ $config.audit.filename | quote }},
-        "retention_days": {{ $config.audit.retention_days }},
-        "syslog_enabled": {{ $config.audit.syslog_enabled }},
-        "syslog_tag": {{ $config.audit.syslog_tag | quote }}
+        "retention_days": {{ $config.audit.retention_days | default 180 }},
+        "syslog_enabled": {{ $config.audit.syslog_enabled | default false }},
+        "syslog_tag": {{ $config.audit.syslog_tag | default "yvonne-kms" | quote }}
+      },
+      "logging": {
+        "level": {{ ($config.logging).level | default "info" | quote }},
+        "format": {{ ($config.logging).format | default "json" | quote }},
+        "output": {{ ($config.logging).output | default "stdout" | quote }},
+        "redact_secrets": {{ if hasKey ($config.logging | default dict) "redact_secrets" }}{{ $config.logging.redact_secrets }}{{ else }}true{{ end }}
       }
     }

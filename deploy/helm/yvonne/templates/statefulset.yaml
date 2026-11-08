@@ -58,6 +58,11 @@ spec:
             {{- end }}
             {{- end }}
             {{- if .Values.config.server.admin.admin_token }}
+            - name: YVONNE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "yvonne.fullname" . }}-secrets
+                  key: admin-token
             - name: YVONNE_SERVER_ADMIN_ADMIN_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -82,6 +87,11 @@ spec:
             - name: config
               mountPath: /etc/yvonne
               readOnly: true
+            {{- if .Values.config.server.tls.enabled }}
+            - name: tls
+              mountPath: /etc/yvonne/tls
+              readOnly: true
+            {{- end }}
             {{- if .Values.persistence.enabled }}
             - name: data
               mountPath: {{ .Values.persistence.mountPath }}
@@ -100,6 +110,11 @@ spec:
         - name: config
           configMap:
             name: {{ include "yvonne.fullname" . }}-config
+        {{- if .Values.config.server.tls.enabled }}
+        - name: tls
+          secret:
+            secretName: {{ include "yvonne.fullname" . }}-tls
+        {{- end }}
         - name: audit
           emptyDir: {}
         - name: tmp

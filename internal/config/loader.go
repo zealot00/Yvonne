@@ -130,6 +130,8 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("YVONNE_ADMIN_TOKEN"); v != "" {
 		cfg.Server.Admin.AdminToken = v
+	} else if v := os.Getenv("YVONNE_SERVER_ADMIN_ADMIN_TOKEN"); v != "" {
+		cfg.Server.Admin.AdminToken = v
 	}
 	if v := os.Getenv("YVONNE_AUDIT_SALT"); v != "" {
 		cfg.Audit.AuditKeyDerivationSalt = v

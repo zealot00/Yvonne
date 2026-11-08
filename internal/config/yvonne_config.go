@@ -259,7 +259,18 @@ func applyYvonneEnvOverrides(cfg *YvonneConfig) {
 	if v := os.Getenv("YVONNE_MODE"); v != "" {
 		cfg.Mode = Mode(v)
 	}
+	if v := os.Getenv("YVONNE_SERVER_BIND_ADDR"); v != "" {
+		cfg.Server.BindAddr = v
+	}
+	if v := os.Getenv("YVONNE_SERVER_BIND_PORT"); v != "" {
+		var p int
+		if _, err := fmt.Sscanf(v, "%d", &p); err == nil {
+			cfg.Server.BindPort = p
+		}
+	}
 	if v := os.Getenv("YVONNE_STORAGE_TYPE"); v != "" {
+		cfg.Storage.Type = v
+	} else if v := os.Getenv("YVONNE_STORAGE_BACKEND"); v != "" {
 		cfg.Storage.Type = v
 	}
 	if v := os.Getenv("YVONNE_STORAGE_DSN"); v != "" {
@@ -275,6 +286,9 @@ func applyYvonneEnvOverrides(cfg *YvonneConfig) {
 			cfg.Unseal.Threshold = n
 		}
 	}
+	if v := os.Getenv("YVONNE_AUDIT_DIR"); v != "" {
+		cfg.Audit.Dir = v
+	}
 	if v := os.Getenv("YVONNE_AUDIT_TIMEZONE_ENABLED"); v != "" {
 		cfg.Audit.TimezoneEnabled = v == "true" || v == "1"
 	}
@@ -283,6 +297,14 @@ func applyYvonneEnvOverrides(cfg *YvonneConfig) {
 	}
 	if v := os.Getenv("YVONNE_ADMIN_TOKEN"); v != "" {
 		cfg.Server.Admin.AdminToken = v
+	} else if v := os.Getenv("YVONNE_SERVER_ADMIN_ADMIN_TOKEN"); v != "" {
+		cfg.Server.Admin.AdminToken = v
+	}
+	if v := os.Getenv("YVONNE_SERVER_MCP_TOKEN"); v != "" {
+		cfg.Server.MCP.Token = v
+	}
+	if v := os.Getenv("YVONNE_AUTH_JWT_SECRET"); v != "" {
+		cfg.Auth.JWT.Secret = v
 	}
 }
 

@@ -60,7 +60,8 @@ postgres://yvonne:<password>@<host>:5432/yvonne?sslmode=require
     "admin": {
       "enabled": true,
       "bind_addr": "127.0.0.1",
-      "bind_port": 8250
+      "bind_port": 8250,
+      "admin_token": "CHANGE_ME_ADMIN_TOKEN"
     }
   },
   "storage": {
@@ -70,6 +71,21 @@ postgres://yvonne:<password>@<host>:5432/yvonne?sslmode=require
   "unseal": {
     "type": "local_pki",
     "pki_key_path": "/var/run/yvonne/unseal.pem"
+  },
+  "auth": {
+    "app_roles": [
+      {
+        "role_id": "admin",
+        "token": "CHANGE_ME_APPROLE_TOKEN",
+        "allowed_keys": ["*"],
+        "allowed_actions": ["*"]
+      }
+    ]
+  },
+  "audit": {
+    "dir": "/var/log/yvonne",
+    "filename": "audit.log",
+    "retention_days": 180
   },
   "logging": {
     "level": "info",
@@ -154,14 +170,19 @@ sudo systemctl enable --now yvonne
 
 ```dockerfile
 # Dockerfile
-FROM golang:1.21 AS builder
+FROM golang:1.25-alpine AS builder
 WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /yvonne ./cmd/yvonne
+RUN CGO_ENABLED=0 go build -tags "gmsm,timetzdata" -trimpath -ldflags="-s -w" -o /out/yvonne ./cmd/yvonne
 
-FROM gcr.io/distroless/static
-COPY --from=builder /yvonne /yvonne
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=builder /out/yvonne /yvonne
+USER nonroot:nonroot
+EXPOSE 8200 8250 8251 8252
 ENTRYPOINT ["/yvonne"]
+CMD ["dev", "--addr", "0.0.0.0"]
 ```
 
 ```bash

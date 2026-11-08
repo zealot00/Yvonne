@@ -1,0 +1,17 @@
+.git
+.github
+.cache
+.DS_Store
+.reasonix
+.sisyphus
+bin/
+dist/
+yvonne
+quickstart
+index_bench
+gen_index_bench_chart
+coverage*
+*.log
+*.out
+*.test
+reports/

@@ -25,7 +25,10 @@ func testDSN(t testing.TB) string {
 	t.Helper()
 	dsn := os.Getenv("YVONNE_TEST_PG_DSN")
 	if dsn == "" {
-		dsn = os.Getenv("YVONNE_TEST_PG_DSN")
+		dsn = os.Getenv("YVONNE_PG_DSN")
+	}
+	if dsn == "" {
+		t.Skip("YVONNE_TEST_PG_DSN not set, skipping PG integration test")
 	}
 	return dsn
 }

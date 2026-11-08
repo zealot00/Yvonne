@@ -14,7 +14,7 @@ ExecStart=/usr/local/bin/yvonne server --config /etc/yvonne/config.json
 
 # 环境变量（DSN 等敏感信息不写入配置文件）
 Environment="YVONNE_STORAGE_DSN=postgresql://postgres:pass@127.0.0.1:5432/yvonne"
-# Environment="YVONNE_SERVER_ADMIN_ADMIN_TOKEN=your-admin-token"
+# Environment="YVONNE_ADMIN_TOKEN=your-admin-token"
 
 # 工作目录
 WorkingDirectory=/var/lib/yvonne

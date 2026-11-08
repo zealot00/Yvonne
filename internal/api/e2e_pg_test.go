@@ -45,7 +45,10 @@ func newE2EPGEnv(t *testing.T) *e2ePGEnv {
 
 	dsn := os.Getenv("YVONNE_TEST_PG_DSN")
 	if dsn == "" {
-		dsn = os.Getenv("YVONNE_TEST_PG_DSN")
+		dsn = os.Getenv("YVONNE_PG_DSN")
+	}
+	if dsn == "" {
+		t.Skip("YVONNE_TEST_PG_DSN not set, skipping PG E2E test")
 	}
 
 	ctx := context.Background()
@@ -301,7 +304,10 @@ func TestE2E_PG_PersistenceAcrossRestart(t *testing.T) {
 	// 重新创建 store + manager + router（数据在 PG 中持久化）。
 	dsn := os.Getenv("YVONNE_TEST_PG_DSN")
 	if dsn == "" {
-		dsn = os.Getenv("YVONNE_TEST_PG_DSN")
+		dsn = os.Getenv("YVONNE_PG_DSN")
+	}
+	if dsn == "" {
+		t.Skip("YVONNE_TEST_PG_DSN not set, skipping PG E2E test")
 	}
 	newStore, err := storage.NewPostgresKVStore(ctx, dsn)
 	if err != nil {
