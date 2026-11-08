@@ -147,9 +147,23 @@ func TestValidate_AdminBindAddrNotLoopback(t *testing.T) {
 	cfg.Server.Admin.Enabled = true
 	cfg.Server.Admin.BindAddr = "0.0.0.0"
 	cfg.Server.Admin.BindPort = 8250
+	cfg.Server.Admin.AdminToken = "test-admin-token"
 	err := Validate(cfg)
 	if err == nil || !strings.Contains(err.Error(), "127.0.0.1") {
 		t.Fatalf("admin 0.0.0.0 should fail: %v", err)
+	}
+}
+
+// TestValidate_AdminEmptyTokenRejected Admin 启用但未配置 admin_token 应拒绝启动。
+func TestValidate_AdminEmptyTokenRejected(t *testing.T) {
+	cfg := validConfig()
+	cfg.Server.Admin.Enabled = true
+	cfg.Server.Admin.BindAddr = "127.0.0.1"
+	cfg.Server.Admin.BindPort = 8250
+	cfg.Server.Admin.AdminToken = ""
+	err := Validate(cfg)
+	if err == nil || !strings.Contains(err.Error(), "admin.admin_token") {
+		t.Fatalf("admin enabled without admin_token should fail: %v", err)
 	}
 }
 

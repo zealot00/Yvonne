@@ -30,9 +30,13 @@ func SessionFromContext(ctx context.Context) *Session {
 // sessionOrBearer 中间件：Cookie 优先，Bearer 兜底。
 func (s *Server) sessionOrBearer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 1. dev 模式：全过
+		// 1. 仅在显式 dev 模式且未配 token 时放行；生产环境空 token 强制拒绝（fail-closed）
 		if s.adminToken == "" {
-			next.ServeHTTP(w, r)
+			if s.devMode {
+				next.ServeHTTP(w, r)
+				return
+			}
+			http.Error(w, `{"ok":false,"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
 

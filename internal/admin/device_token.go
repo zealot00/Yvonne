@@ -1,19 +1,16 @@
-// Package admin - Device Token（v1.4.2）。
+// Package admin - Device Token 与 TOTP 防重放存储（v1.4.2）。
 //
-// 设计：勾选"记住此设备 30 天"后，下一次登录用同样指纹自动跳过验证码 + TOTP。
-// 仍需 adminToken 密码技术（不被完全绕过）。
+// 设计：勾选"记住此设备 30 天"后，下一次登录验证设备指纹通过时仅跳过图形验证码（Captcha），
+// 绝不跳过 adminToken 与 TOTP 二次认证，防止设备 cookie 泄露导致 30 天无 2FA 裸奔。
 //
 // 设备指纹：HMAC-SHA-256(sessionSecret, JSON(ua,lang,plat,screen,tz))
 //   - 任意浏览器属性变化 → 指纹失效（接受为退化路径）
 //   - salt (sessionSecret) 防伪造，服务端不暴露
-//
-// 安全风险与缓解：
-//   - 浏览器升级 / OS 升级 → UA 变化 → 失效（用户重新走完整登录）
-//   - salt 泄露 → 历史设备 token 全可伪造（接受：salt 失守=会话体系崩）
-//   - 用户无法主动撤销（v1.4.2 不在范围；v1.5.0 加 device 管理 UI）
+//   - 校验时同时比对请求重算的指纹、User-Agent 与绑定 IP
 package admin
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -21,6 +18,9 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"yvonne/internal/auth"
+	"yvonne/internal/storage"
 )
 
 // DeviceTTL 设备 token 默认有效期 30 天。
@@ -160,6 +160,127 @@ func (s *MemoryDeviceStore) Reap(now time.Time) int {
 	for fp, t := range s.store {
 		if t.IsExpired(now) {
 			delete(s.store, fp)
+			n++
+		}
+	}
+	return n
+}
+
+// =====================================================================
+// TOTPReplayStore 接口 + 内存/集群 KV 实现
+// =====================================================================
+
+// TOTPReplayStore TOTP 验证码防重放存储抽象。
+// 在集群模式下应注入 KVTOTPReplayStore（共享 PostgreSQL 后端），
+// 防止同一 TOTP 验证码在时间窗口内对不同副本各重放一次。
+type TOTPReplayStore interface {
+	MarkUsed(key string, now time.Time, ttl time.Duration) error
+	Reap(now time.Time) int
+}
+
+// MemoryTOTPReplayStore 进程内内存 TOTP 防重放存储（dev / 单实例）。
+type MemoryTOTPReplayStore struct {
+	mu   sync.Mutex
+	used map[string]time.Time // key -> expiresAt
+}
+
+// NewMemoryTOTPReplayStore 创建内存版 TOTP 防重放存储。
+func NewMemoryTOTPReplayStore() *MemoryTOTPReplayStore {
+	return &MemoryTOTPReplayStore{used: make(map[string]time.Time)}
+}
+
+// MarkUsed 原子检查并标记 key 已使用；若未过期则拒绝并返回 auth.ErrTOTPAlreadyUsed。
+func (s *MemoryTOTPReplayStore) MarkUsed(key string, now time.Time, ttl time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, exp := range s.used {
+		if !now.Before(exp) {
+			delete(s.used, k)
+		}
+	}
+	if exp, exists := s.used[key]; exists && now.Before(exp) {
+		return auth.ErrTOTPAlreadyUsed
+	}
+	s.used[key] = now.Add(ttl)
+	return nil
+}
+
+// Reap 清理过期记录。
+func (s *MemoryTOTPReplayStore) Reap(now time.Time) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for k, exp := range s.used {
+		if !now.Before(exp) {
+			delete(s.used, k)
+			n++
+		}
+	}
+	return n
+}
+
+// KVTOTPReplayStore 基于共享 storage.KVStore 的集群级 TOTP 防重放存储。
+// 利用 WithTx + RowLocker (SELECT FOR UPDATE) 保证跨副本原子防重放。
+type KVTOTPReplayStore struct {
+	kv storage.KVStore
+	ns string
+}
+
+// NewKVTOTPReplayStore 创建基于共享 KVStore 的 TOTP 防重放存储。
+func NewKVTOTPReplayStore(kv storage.KVStore) *KVTOTPReplayStore {
+	return &KVTOTPReplayStore{
+		kv: kv,
+		ns: "admin:totp_used:",
+	}
+}
+
+func (s *KVTOTPReplayStore) k(key string) string { return s.ns + key }
+
+// MarkUsed 在共享 KV 事务内原子检查并写入已用 TOTP key。
+func (s *KVTOTPReplayStore) MarkUsed(key string, now time.Time, ttl time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	fullKey := s.k(key)
+
+	return s.kv.WithTx(ctx, func(tx storage.KVStore) error {
+		var raw []byte
+		var err error
+		if rl, ok := tx.(storage.RowLocker); ok {
+			raw, err = rl.GetForUpdate(ctx, fullKey)
+		} else {
+			raw, err = tx.Get(ctx, fullKey)
+		}
+		if err == nil && len(raw) > 0 {
+			var exp time.Time
+			if jsonErr := json.Unmarshal(raw, &exp); jsonErr == nil && now.Before(exp) {
+				return auth.ErrTOTPAlreadyUsed
+			}
+		}
+		buf, mErr := json.Marshal(now.Add(ttl))
+		if mErr != nil {
+			return mErr
+		}
+		return tx.Put(ctx, fullKey, buf)
+	})
+}
+
+// Reap 扫描并清理已过期的 TOTP 防重放记录。
+func (s *KVTOTPReplayStore) Reap(now time.Time) int {
+	ps, ok := s.kv.(storage.PrefixScanner)
+	if !ok {
+		return 0
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	entries, err := ps.ScanPrefix(ctx, s.ns)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for fullKey, raw := range entries {
+		var exp time.Time
+		if json.Unmarshal(raw, &exp) == nil && !now.Before(exp) {
+			_ = s.kv.Delete(ctx, fullKey)
 			n++
 		}
 	}

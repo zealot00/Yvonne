@@ -223,12 +223,18 @@ func TestAdmin_ClientIP_AllBranches(t *testing.T) {
 func TestAdmin_IsAuthenticated_AllBranches(t *testing.T) {
 	vault := testVault(t)
 
-	// (1) adminToken 空 → 直接 true（dev mode 行为）
+	// (1) adminToken 空 + devMode=true → 直接 true（dev mode 行为）
 	srv1 := NewServer(vault)
+	srv1.SetDevMode(true)
 	if !srv1.isAuthenticated(httptest.NewRequest("GET", "/", nil)) {
-		t.Fatal("adminToken empty should auto-auth")
+		t.Fatal("adminToken empty in devMode should auto-auth")
 	}
-	t.Log("✅ isAuthenticated: adminToken empty → true")
+	// (1b) adminToken 空 + devMode=false → false（生产 fail-closed）
+	srv1Prod := NewServer(vault)
+	if srv1Prod.isAuthenticated(httptest.NewRequest("GET", "/", nil)) {
+		t.Fatal("adminToken empty in prod mode must NOT auto-auth")
+	}
+	t.Log("✅ isAuthenticated: adminToken empty (devMode=true → true, devMode=false → false)")
 
 	// (2) adminToken 设置 + 无 session → false
 	srv2 := NewServer(vault)
@@ -283,8 +289,9 @@ func TestAdmin_HandleIndex_AllBranches(t *testing.T) {
 	}
 	t.Log("✅ handleIndex: POST → 405")
 
-	// (3) adminToken empty → 200 (auto-authed)
+	// (3) adminToken empty + devMode=true → 200 (auto-authed)
 	srv3 := NewServer(vault)
+	srv3.SetDevMode(true)
 	req3 := httptest.NewRequest("GET", "/", nil)
 	w3 := httptest.NewRecorder()
 	srv3.handleIndex(w3, req3)
@@ -550,8 +557,9 @@ func TestAdmin_NoopAuditor_Close(t *testing.T) {
 func TestAdmin_RequireAdminToken_AllBranches(t *testing.T) {
 	vault := testVault(t)
 
-	// (1) adminToken 空 → 跳过
+	// (1) adminToken 空 + devMode=true → 跳过；devMode=false → 401
 	srv1 := NewServer(vault)
+	srv1.SetDevMode(true)
 	h := srv1.requireAdminToken(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -559,9 +567,18 @@ func TestAdmin_RequireAdminToken_AllBranches(t *testing.T) {
 	req1 := httptest.NewRequest("GET", "/", nil)
 	h(w1, req1)
 	if w1.Code != 200 {
-		t.Fatalf("adminToken empty: expected 200, got %d", w1.Code)
+		t.Fatalf("adminToken empty in devMode: expected 200, got %d", w1.Code)
 	}
-	t.Log("✅ requireAdminToken: adminToken empty → pass")
+	srv1Prod := NewServer(vault)
+	hProd := srv1Prod.requireAdminToken(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	w1Prod := httptest.NewRecorder()
+	hProd(w1Prod, httptest.NewRequest("GET", "/", nil))
+	if w1Prod.Code != 401 {
+		t.Fatalf("adminToken empty in prodMode: expected 401, got %d", w1Prod.Code)
+	}
+	t.Log("✅ requireAdminToken: adminToken empty (dev=200, prod=401)")
 
 	// (2) 错误 Bearer → 401
 	srv2 := NewServer(vault)
@@ -772,4 +789,39 @@ func TestAdmin_HandleDeviceRevoke_NoCookie(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 	t.Log("✅ handleDeviceRevoke: no cookie → 200")
+}
+
+// TestAdmin_SecureCookiesAndKVTOTPReplay 验证 Secure Cookie 翻转机制 + 集群共享 KV TOTP 防重放。
+func TestAdmin_SecureCookiesAndKVTOTPReplay(t *testing.T) {
+	srv := NewServer(testVault(t))
+	srv.SetSecureCookies(true)
+	if !srv.SecureCookies() {
+		t.Fatal("SecureCookies should be true")
+	}
+
+	// 验证 handleLoginPage 下发 Secure CSRF Cookie
+	req := httptest.NewRequest("GET", "/admin/login", nil)
+	w := httptest.NewRecorder()
+	srv.handleLoginPage(w, req)
+	var csrfCookie *http.Cookie
+	for _, c := range w.Result().Cookies() {
+		if c.Name == CSRFCookieName {
+			csrfCookie = c
+		}
+	}
+	if csrfCookie == nil || !csrfCookie.Secure {
+		t.Fatalf("CSRF cookie must have Secure=true when SecureCookies enabled, got %+v", csrfCookie)
+	}
+
+	// 验证 KVTOTPReplayStore 跨实例共享同一底层 KVStore 时拒绝二次重放
+	sharedKV := storage.NewMemoryStore()
+	replica1 := NewKVTOTPReplayStore(sharedKV)
+	replica2 := NewKVTOTPReplayStore(sharedKV)
+	now := time.Now()
+	if err := replica1.MarkUsed("123456", now, 2*time.Minute); err != nil {
+		t.Fatalf("first use on replica1 should succeed: %v", err)
+	}
+	if err := replica2.MarkUsed("123456", now, 2*time.Minute); err == nil {
+		t.Fatal("replay of same TOTP code on replica2 must be rejected")
+	}
 }

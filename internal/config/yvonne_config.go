@@ -222,7 +222,7 @@ func LoadYvonneConfig(path string) (*YvonneConfig, error) {
 			BindAddr: "127.0.0.1",
 			BindPort: 8200,
 			Admin: AdminServerConfig{
-				Enabled:  true,
+				Enabled:  false, // Dev 模式由 bootstrap 强制启用；Cluster 模式显式启用时必须配置 admin_token
 				BindAddr: "127.0.0.1",
 				BindPort: 8250,
 			},
@@ -280,6 +280,9 @@ func applyYvonneEnvOverrides(cfg *YvonneConfig) {
 	}
 	if v := os.Getenv("YVONNE_AUDIT_TIMEZONE"); v != "" {
 		cfg.Audit.Timezone = v
+	}
+	if v := os.Getenv("YVONNE_ADMIN_TOKEN"); v != "" {
+		cfg.Server.Admin.AdminToken = v
 	}
 }
 
@@ -373,6 +376,16 @@ func validateClusterConfig(cfg *YvonneConfig) error {
 		if _, err := time.LoadLocation(cfg.Audit.Timezone); err != nil {
 			errs = append(errs, fmt.Sprintf("audit.timezone %q is not a valid IANA name: %v (try 'UTC', 'Asia/Shanghai', 'America/New_York', etc.)",
 				cfg.Audit.Timezone, err))
+		}
+	}
+
+	// Cluster 模式管理台若启用，必须绑定 loopback 且配置非空 admin_token（拒绝 fail-open）。
+	if cfg.Server.Admin.Enabled {
+		if cfg.Server.Admin.BindAddr != "" && cfg.Server.Admin.BindAddr != "127.0.0.1" && cfg.Server.Admin.BindAddr != "localhost" {
+			errs = append(errs, "cluster mode requires server.admin.bind_addr to be 127.0.0.1 or localhost")
+		}
+		if cfg.Server.Admin.AdminToken == "" {
+			errs = append(errs, "cluster mode requires server.admin.admin_token when server.admin.enabled=true")
 		}
 	}
 

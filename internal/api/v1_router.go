@@ -16,6 +16,8 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
@@ -40,7 +42,9 @@ type V1Router struct {
 	auditDir       string // 审计日志目录（查询用），可为空
 	rateLimiter    *RateLimiter
 	mux            *http.ServeMux
-	mfaStore       auth.MFAStore      // v1.3: MFA TOTP 存储
+	mfaStore       auth.MFAStore // v1.3: MFA TOTP 存储
+	totpUsed       sync.Map      // roleID+":"+code -> time.Time（TOTP 防重放缓存）
+	markTOTPUsed   func(roleID, code string) bool
 	approvalStore  auth.ApprovalStore // v1.3: Quorum 审批存储
 	tracingEnabled bool               // v1.3: OTel tracing 开关
 	sdfHandler     http.Handler       // v1.5: SDF HTTP handler（nil=未启用）
@@ -91,6 +95,36 @@ func (r *V1Router) SetAdminToken(token string) {
 // SetMFAStore 设置 MFA 存储（v1.3）。
 func (r *V1Router) SetMFAStore(store auth.MFAStore) {
 	r.mfaStore = store
+}
+
+// SetTOTPReplayChecker 注入自定义（如集群级 KV）TOTP 防重放回调。
+// 返回 true 表示首次使用并标记成功，false 表示重放拒绝。
+func (r *V1Router) SetTOTPReplayChecker(fn func(roleID, code string) bool) {
+	r.markTOTPUsed = fn
+}
+
+func (r *V1Router) markRoleTOTPUsed(roleID string) func(time.Time, string) error {
+	return func(_ time.Time, code string) error {
+		if r.markTOTPUsed != nil {
+			if !r.markTOTPUsed(roleID, code) {
+				return auth.ErrTOTPAlreadyUsed
+			}
+			return nil
+		}
+		now := time.Now()
+		// 顺带清理 2 分钟前的过期记录。
+		r.totpUsed.Range(func(k, v any) bool {
+			if ts, ok := v.(time.Time); ok && now.Sub(ts) > 2*time.Minute {
+				r.totpUsed.Delete(k)
+			}
+			return true
+		})
+		key := roleID + ":" + code
+		if _, loaded := r.totpUsed.LoadOrStore(key, now); loaded {
+			return auth.ErrTOTPAlreadyUsed
+		}
+		return nil
+	}
 }
 
 // SetApprovalStore 设置审批存储（v1.3）。

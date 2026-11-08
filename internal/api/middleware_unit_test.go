@@ -2,11 +2,15 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"yvonne/internal/audit"
 	"yvonne/internal/auth"
+	"yvonne/internal/memguard"
+	"yvonne/internal/seal"
 )
 
 // TestAuthorizeBodyKeyID_NilPolicy Dev 模式放行。
@@ -291,3 +295,44 @@ func findSubstring(s, substr string) bool {
 
 // 确保 context 引用。
 var _ = context.Background
+
+type failingAuditor struct{}
+
+func (f *failingAuditor) Record(_ audit.LogEntry) error {
+	return errors.New("disk full: simulated audit write failure")
+}
+
+func (f *failingAuditor) Close() {}
+
+// TestAuditMiddleware_FailClosedOnAuditWriteError 验证审计写入失败时拒绝向客户端返回业务数据（返回 500）。
+func TestAuditMiddleware_FailClosedOnAuditWriteError(t *testing.T) {
+	mk, err := memguard.NewSecureBufferFromRandom(32)
+	if err != nil {
+		t.Fatalf("mk: %v", err)
+	}
+	defer mk.Wipe()
+	vault := seal.NewVaultState(1, 1, 0)
+	_ = vault.DirectUnseal(mk)
+
+	r := &V1Router{
+		seal:     vault,
+		auditLog: &failingAuditor{},
+	}
+
+	handler := r.auditMiddleware("GenerateDataKey", func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true,"data":{"plaintext_dek":"SUPER_SECRET_DEK"}}`))
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/keys/gdk", nil)
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when audit log write fails, got %d", rec.Code)
+	}
+	if contains(rec.Body.String(), "SUPER_SECRET_DEK") {
+		t.Fatalf("response body must not leak sensitive data when audit write fails: %s", rec.Body.String())
+	}
+}

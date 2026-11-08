@@ -23,6 +23,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -166,19 +167,68 @@ func extractKeyIDFromPath(path string) string {
 	return parts[0]
 }
 
+// bufferedAuditResponseRecorder 缓冲业务 handler 的响应头、状态码与响应体，
+// 确保审计日志落盘成功后再向客户端发送响应（防止审计写入失败时仍泄露明文 DEK 或操作结果）。
+type bufferedAuditResponseRecorder struct {
+	header      http.Header
+	body        []byte
+	status      int
+	wroteHeader bool
+}
+
+func newBufferedAuditResponseRecorder() *bufferedAuditResponseRecorder {
+	return &bufferedAuditResponseRecorder{
+		header: make(http.Header),
+		status: http.StatusOK,
+	}
+}
+
+func (r *bufferedAuditResponseRecorder) Header() http.Header {
+	return r.header
+}
+
+func (r *bufferedAuditResponseRecorder) WriteHeader(code int) {
+	if !r.wroteHeader {
+		r.status = code
+		r.wroteHeader = true
+	}
+}
+
+func (r *bufferedAuditResponseRecorder) Write(p []byte) (int, error) {
+	if !r.wroteHeader {
+		r.WriteHeader(http.StatusOK)
+	}
+	r.body = append(r.body, p...)
+	return len(p), nil
+}
+
+func (r *bufferedAuditResponseRecorder) wipe() {
+	clear(r.body)
+	runtime.KeepAlive(r.body)
+	r.body = nil
+}
+
+func (r *bufferedAuditResponseRecorder) flushTo(w http.ResponseWriter) {
+	dst := w.Header()
+	for k, vals := range r.header {
+		dst[k] = append([]string(nil), vals...)
+	}
+	w.WriteHeader(r.status)
+	if len(r.body) > 0 {
+		_, _ = w.Write(r.body)
+	}
+	r.wipe()
+}
+
 // auditMiddleware 是 v1 API 的强制审计中间件。
 //
 // 从 context 提取 RoleID 作为 Actor（若无可回退到 RemoteAddr）。
+//
+// 安全保证（Fail-Closed Audit）：
+//   - 业务响应先缓冲在内存中，待 r.auditLog.Record(entry) 写入成功后再刷写给客户端。
+//   - 若审计写入失败，立即擦除缓冲中的响应体（含潜在明文 DEK），记录 CRITICAL 告警并返回 500。
 func (r *V1Router) auditMiddleware(action string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
-		// 紧急封印状态：拒绝一切请求（auditMiddleware 拦截后仍记录审计日志）。
-		if r.seal.IsEmergencySealed() {
-			writeJSONError(w, http.StatusServiceUnavailable, "vault is emergency sealed")
-			return
-		}
-
-		startTime := time.Now()
-
 		// v1.3: TraceID 优先用 OTel span context，无 OTel 时用随机生成。
 		traceID := traceIDFromContext(req.Context())
 		if traceID == "" {
@@ -190,16 +240,47 @@ func (r *V1Router) auditMiddleware(action string, next http.HandlerFunc) http.Ha
 			traceID = hex.EncodeToString(traceIDBytes)
 		}
 
-		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		// 从 context 提取 RoleID 作为 Actor。
+		actor := auth.RoleIDFromContext(req.Context())
+		if actor == "" {
+			actor = req.RemoteAddr // 回退到 IP（未认证路由如 health）
+		}
+
+		// 紧急封印状态：拒绝一切请求（记录审计日志后返回 503）。
+		if r.seal.IsEmergencySealed() {
+			if r.auditLog != nil {
+				entry := audit.LogEntry{
+					TraceID:   traceID,
+					Timestamp: time.Now().UTC(),
+					Actor:     actor,
+					Action:    action,
+					KeyID:     "",
+					Status:    "failure",
+					Result:    "vault is emergency sealed",
+				}
+				if err := r.auditLog.Record(entry); err != nil {
+					log.Printf("CRITICAL: audit log write failed on emergency-sealed request action=%s actor=%s trace=%s: %v",
+						action, actor, traceID, err)
+					writeJSONError(w, http.StatusInternalServerError, "audit log write failed")
+					return
+				}
+			}
+			writeJSONError(w, http.StatusServiceUnavailable, "vault is emergency sealed")
+			return
+		}
+
+		startTime := time.Now()
+		rec := newBufferedAuditResponseRecorder()
 
 		func() {
 			defer func() {
 				if recov := recover(); recov != nil {
 					// 记录完整堆栈到日志（防静默吞异常）。
 					log.Printf("PANIC in handler %s: %v\n%s", req.URL.Path, recov, debug.Stack())
-					if rec.status == http.StatusOK {
-						writeJSONError(rec, http.StatusInternalServerError, "internal error")
-					}
+					rec.wipe()
+					rec.header = make(http.Header)
+					rec.wroteHeader = false
+					writeJSONError(rec, http.StatusInternalServerError, "internal error")
 					// 不 re-panic：http.Server 已接管连接，re-panic 会导致连接强制关闭
 					// 而无错误响应。记录堆栈 + 返回 500 已是最安全处理。
 				}
@@ -213,10 +294,9 @@ func (r *V1Router) auditMiddleware(action string, next http.HandlerFunc) http.Ha
 			r.metrics.RecordAPIRequest(action, duration, success)
 		}
 
-		// 从 context 提取 RoleID 作为 Actor。
-		actor := auth.RoleIDFromContext(req.Context())
-		if actor == "" {
-			actor = req.RemoteAddr // 回退到 IP（未认证路由如 health）
+		// 若内层中间件（如 RequireAuth）更新了 context，优先尝试重新提取 RoleID。
+		if roleAfter := auth.RoleIDFromContext(req.Context()); roleAfter != "" {
+			actor = roleAfter
 		}
 
 		status := "success"
@@ -227,15 +307,25 @@ func (r *V1Router) auditMiddleware(action string, next http.HandlerFunc) http.Ha
 			status = "unauthorized"
 		}
 
-		entry := audit.LogEntry{
-			TraceID:   traceID,
-			Timestamp: time.Now().UTC(),
-			Actor:     actor,
-			Action:    action,
-			KeyID:     "",
-			Status:    status,
+		if r.auditLog != nil {
+			entry := audit.LogEntry{
+				TraceID:   traceID,
+				Timestamp: time.Now().UTC(),
+				Actor:     actor,
+				Action:    action,
+				KeyID:     "",
+				Status:    status,
+			}
+			if err := r.auditLog.Record(entry); err != nil {
+				rec.wipe()
+				log.Printf("CRITICAL: audit log write failed for action=%s actor=%s trace=%s: %v",
+					action, actor, traceID, err)
+				writeJSONError(w, http.StatusInternalServerError, "audit log write failed")
+				return
+			}
 		}
-		_ = r.auditLog.Record(entry)
+
+		rec.flushTo(w)
 	}
 }
 

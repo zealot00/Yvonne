@@ -61,6 +61,7 @@ func (s *Server) middlewareTestHandler(w http.ResponseWriter, r *http.Request) {
 func TestMiddleware_DevModeSkipsAuth(t *testing.T) {
 	s := newTestServer(t)
 	s.adminToken = "" // dev mode
+	s.SetDevMode(true)
 
 	handler := s.sessionOrBearer(http.HandlerFunc(s.middlewareTestHandler))
 
@@ -70,6 +71,22 @@ func TestMiddleware_DevModeSkipsAuth(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("dev mode should skip auth, got %d", w.Code)
+	}
+}
+
+func TestMiddleware_ProdModeEmptyToken_401(t *testing.T) {
+	s := newTestServer(t)
+	s.adminToken = ""
+	s.SetDevMode(false)
+
+	handler := s.sessionOrBearer(http.HandlerFunc(s.middlewareTestHandler))
+
+	req := httptest.NewRequest("GET", "/admin/api/dashboard", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("prod mode with empty token must return 401, got %d", w.Code)
 	}
 }
 

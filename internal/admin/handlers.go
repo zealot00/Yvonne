@@ -178,10 +178,10 @@ func (s *Server) handleIndex(w http.ResponseWriter, req *http.Request) {
 }
 
 // isAuthenticated 检查请求是否携带有效 session cookie（v1.4.2 用于 index 路由）。
-// dev 模式且 adminToken 空 → 直接视为已认证（保留 v1.4.0 行为）。
+// 仅在显式 devMode 且 adminToken 空时直接视为已认证；非 devMode 空 token 一律拒绝（fail-closed）。
 func (s *Server) isAuthenticated(req *http.Request) bool {
 	if s.adminToken == "" {
-		return true
+		return s.devMode
 	}
 	c, err := req.Cookie(SessionCookieName)
 	if err != nil || c.Value == "" {

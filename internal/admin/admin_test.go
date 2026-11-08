@@ -25,7 +25,28 @@ func newTestAdminServer(t *testing.T) *Server {
 	if err := v.DirectUnseal(mk); err != nil {
 		t.Fatalf("DirectUnseal: %v", err)
 	}
-	return NewServer(v)
+	srv := NewServer(v)
+	srv.SetDevMode(true)
+	return srv
+}
+
+func TestAdminServer_FailClosedWhenProdModeTokenEmpty(t *testing.T) {
+	mk, err := memguard.NewSecureBufferFromRandom(32)
+	if err != nil {
+		t.Fatalf("generate master key: %v", err)
+	}
+	t.Cleanup(func() { mk.Wipe() })
+
+	v := seal.NewVaultState(3, 2, 0)
+	if err := v.DirectUnseal(mk); err != nil {
+		t.Fatalf("DirectUnseal: %v", err)
+	}
+	// devMode=false（生产默认）且 adminToken="" 时，所有受保护路由必须 401 fail-closed。
+	srv := NewServer(v)
+	code, _ := doRequest(t, srv, http.MethodGet, "/admin/api/dashboard", "")
+	if code != http.StatusUnauthorized {
+		t.Fatalf("prod mode with empty admin_token must return 401, got %d", code)
+	}
 }
 
 // doRequest 发送请求并返回 status code + 解析后的 JSON body。

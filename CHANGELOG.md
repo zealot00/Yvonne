@@ -11,6 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - v2.0: 企业级（KMIP + Vault 兼容 + 多区域）
 - 详见 [docs/roadmap.md](docs/roadmap.md)
 
+## [1.4.3] - 2026-11-08 (安全加固：管理台 Fail-Closed、MFA/Cookie 强化与全链路强制审计)
+
+### Security — 核心安全修复
+
+#### Fixed — [HIGH] 管理控制台空 Token Fail-Open 风险修复
+- **配置层强校验**：`internal/config/validator.go` 与 `internal/config/yvonne_config.go` 在 `server.admin.enabled=true` 时强制要求 `server.admin.admin_token` 非空，Cluster 模式下额外强制 `bind_addr` 为回环地址（`127.0.0.1` / `localhost`）。
+- **默认安全策略**：`LoadYvonneConfig` 默认将 `server.admin.enabled` 设为 `false`（Dev 模式由 bootstrap 显式开启，Cluster 模式需显式开启并配齐凭据），新增 `YVONNE_ADMIN_TOKEN` 环境变量覆盖支持。
+- **Bootstrap Fail-Closed**：`buildAdminServer` 在 Cluster 模式下若启用管理台但 `admin_token` 为空，直接 `panic` 拒绝启动，与 API 认证器漏配行为对齐。
+- **运行时显式 `devMode` 隔离**：`sessionOrBearer`、`loginFlow`、`isAuthenticated`、`requireAdminToken` 仅在显式 `devMode == true` 时允许空 `admin_token` 免密访问；生产模式（`devMode == false`）下空 Token 一律拒绝（401）。
+
+#### Fixed — [MEDIUM] 两条 MFA 弱化路径修复
+- **设备信任 Cookie 绝不跳过 TOTP**：修复“记住此设备 30 天”跳过 TOTP 二次认证的问题。现在设备信任仅免除图形验证码（Captcha），任何情况下均强制校验 `admin_token` + `TOTP`；同时服务端基于 `sessionSecret` 重算客户端上报的 `DeviceAttributes` HMAC-SHA256 指纹并比对 `UA` 与绑定 `IP`，防止窃取或伪造 `yvonne_device` Cookie 绕过认证。
+- **Cookie `Secure` 属性动态翻转**：新增 `Server.SetSecureCookies` 并在非 Dev 模式下默认开启，结合 `isSecureRequest`（TLS 或授信回环反代 `X-Forwarded-Proto: https`）为会话 Cookie（`yvonne_session`）、设备 Cookie（`yvonne_device`）及 CSRF Cookie（`yvonne_csrf`）动态设置 `Secure: true`。
+
+#### Fixed — [LOW-MEDIUM] 集群防重放、防爆破锁定与强制可证明审计
+- **集群级 TOTP 防重放**：新增 `TOTPReplayStore` 接口与基于共享 `storage.KVStore` 事务行锁（`WithTx` + `RowLocker`）的 `KVTOTPReplayStore`，在管理台登录与 API 敏感操作 MFA 中间件中阻断同一验证码跨副本重放。
+- **登录锁定防 NAT 互锁 + 防换 IP 绕过**：客户端维度按 `IP + sha256(UA|DeviceAttributes)` 细粒度隔离，避免同 NAT 下正常用户被连坐锁定；同时增加账户全局维度跨 IP 失败聚合（≥3 个不同源 IP 或累计失败达阈值即触发账户级锁定）与 `clientIP` 授信回环反代校验，防止轮换 IP 或伪造 `X-Forwarded-For` 绕过锁定；提供集群共享 `KVLoginStateStore`。
+- **gRPC 认证错误脱敏与哈希链审计**：`internal/grpc/interceptor.go` 移除向客户端回显内部认证错误细节的逻辑，统一返回通用 `"authentication failed"`；接入 `audit.Auditor` 将认证失败、Sealed 拒绝、Panic 与业务调用全部纳入 HMAC 哈希链审计，且审计写入失败时 fail-closed 返回 `codes.Internal`。
+- **HTTP 中间件 Fail-Closed 审计**：`internal/api/middleware.go` 引入 `bufferedAuditResponseRecorder` 先缓冲业务响应，待 `auditLog.Record` 落盘成功后再刷写给客户端；若审计写入失败，立即清零缓冲中的响应体（防止无审计泄露明文 DEK）、输出 `CRITICAL` 告警并返回 `500 Internal Server Error`，同时补齐 `IsEmergencySealed` 拒绝分支的审计记录。
+
 ## [1.4.2] - 2026-07-07 (Admin Web UI 双因子登录重做)
 
 ### Security — Admin Web 合规 UX

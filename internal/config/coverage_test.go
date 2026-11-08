@@ -89,7 +89,7 @@ func TestLoad_ValidFile(t *testing.T) {
 	path := filepath.Join(dir, "config.json")
 	// 用完整有效配置（通过 Validate）。
 	os.WriteFile(path, []byte(`{
-		"server": {"bind_addr": "127.0.0.1", "bind_port": 9999, "tls": {"enabled": false}},
+		"server": {"bind_addr": "127.0.0.1", "bind_port": 9999, "tls": {"enabled": false}, "admin": {"enabled": true, "bind_addr": "127.0.0.1", "bind_port": 8250, "admin_token": "test-admin-token"}},
 		"storage": {"backend": "boltdb", "path": "`+filepath.Join(dir, "test.db")+`"},
 		"seal": {"type": "auto"},
 		"auth": {"jwt": {"signing_method": "HS256", "secret": "test-secret-32-bytes-long-xxxxx", "issuer": "test"}},
@@ -335,6 +335,34 @@ func TestValidateClusterConfig_NoAppRoles(t *testing.T) {
 		t.Fatal("should reject no app_roles")
 	}
 	t.Logf("✅ validateClusterConfig no app_roles rejected: %v", err)
+}
+
+func TestValidateClusterConfig_AdminEnabledWithoutToken(t *testing.T) {
+	cfg := &YvonneConfig{
+		Mode: "cluster",
+		Server: ServerConfig{
+			Admin: AdminServerConfig{
+				Enabled:    true,
+				BindAddr:   "127.0.0.1",
+				BindPort:   8250,
+				AdminToken: "",
+			},
+		},
+		Storage: StorageModeConf{Type: "postgres", DSN: "postgresql://u:p@h/db"},
+		Unseal:  UnsealModeConf{Type: "shamir", Threshold: 2, TotalShares: 3},
+		Auth: AuthModeConf{
+			AppRoles: []AppRoleEntry{
+				{RoleID: "admin", Token: "t", AllowedKeys: []string{"*"}, AllowedActions: []string{"*"}},
+			},
+		},
+		Audit:   AuditModeConf{Dir: "/var/log/yvonne"},
+		Logging: LoggingConfig{RedactSecrets: true},
+	}
+	err := ValidateYvonneConfig(cfg)
+	if err == nil || !contains(err.Error(), "admin_token") {
+		t.Fatalf("should reject cluster admin enabled without admin_token: %v", err)
+	}
+	t.Logf("✅ validateClusterConfig admin without token rejected: %v", err)
 }
 
 func TestValidateYvonneConfig_InvalidMode(t *testing.T) {

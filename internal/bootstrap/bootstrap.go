@@ -82,13 +82,13 @@ func setVaultCryptoSuite(vault *seal.VaultState, cfg *config.YvonneConfig) {
 }
 
 // buildGRPCServer 创建 gRPC server 实例（含拦截器链 + 敏感数据擦除 codec + 可选 mTLS）。
-func buildGRPCServer(core *service.Core, authenticator auth.Authenticator, vault seal.Unsealer, tlsCfg *tls.Config) *grpc.Server {
+func buildGRPCServer(core *service.Core, authenticator auth.Authenticator, vault seal.Unsealer, tlsCfg *tls.Config, auditors ...audit.Auditor) *grpc.Server {
 	// 注册 wipingCodec（覆盖默认 proto codec，序列化后清理明文 DEK）。
 	grpcsrv.RegisterWipingCodec()
 
 	opts := []grpc.ServerOption{
 		grpc.UnaryInterceptor(
-			grpcsrv.InterceptorChain(authenticator, vault),
+			grpcsrv.InterceptorChain(authenticator, vault, auditors...),
 		),
 	}
 	if tlsCfg != nil {
@@ -289,7 +289,7 @@ func buildDevMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, metrics
 	// gRPC server（Dev 模式可选，默认启用）。
 	var grpcSrv *grpc.Server
 	if cfg.Server.GRPC.Enabled {
-		grpcSrv = buildGRPCServer(core, nil, vault, nil) // Dev 模式无 authenticator 无 TLS
+		grpcSrv = buildGRPCServer(core, nil, vault, nil, auditLog) // Dev 模式无 authenticator 无 TLS
 		log.Printf("DEV MODE: gRPC server enabled")
 	}
 
@@ -522,9 +522,11 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 	}
 
 	// 装配 Admin Web UI。
-	adminSrv := buildAdminServer(cfg, vault, auditLog)
-	adminSrv.SetManager(lifecycleMgr)
-	adminSrv.SetAPIHandler(v1Router)
+	adminSrv := buildAdminServer(cfg, vault, auditLog, pgStore)
+	if adminSrv != nil {
+		adminSrv.SetManager(lifecycleMgr)
+		adminSrv.SetAPIHandler(v1Router)
+	}
 
 	// 装配 RotationDaemon（Cluster 模式专用）。
 	// 使用 AdvisoryLocker 实现集群选主，确保只有一个节点执行轮转。
@@ -590,7 +592,11 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 	if cfg.MFA.Enabled {
 		mfaStore := auth.NewMemoryMFAStore()
 		v1Router.SetMFAStore(mfaStore)
-		log.Printf("MFA TOTP enabled (issuer=%s)", cfg.MFA.Issuer)
+		totpReplay := admin.NewKVTOTPReplayStore(pgStore)
+		v1Router.SetTOTPReplayChecker(func(roleID, code string) bool {
+			return totpReplay.MarkUsed("api-mfa:"+roleID+":"+code, time.Now(), 2*time.Minute) == nil
+		})
+		log.Printf("MFA TOTP enabled (issuer=%s, cluster replay protection=enabled)", cfg.MFA.Issuer)
 	}
 
 	// v1.3: Quorum Approval 装配（内存存储，生产可换 PG 实现）。
@@ -615,7 +621,7 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 		if cfg.Mode == "cluster" && grpcTLS == nil {
 			log.Fatalf("bootstrap: gRPC TLS must be enabled in cluster mode (refusing to start plaintext gRPC)")
 		}
-		grpcSrv = buildGRPCServer(core, authenticator, unsealer, grpcTLS)
+		grpcSrv = buildGRPCServer(core, authenticator, unsealer, grpcTLS, auditLog)
 		log.Printf("gRPC server enabled at %s:%d (TLS=%v)", cfg.Server.GRPC.BindAddr, cfg.Server.GRPC.BindPort, grpcTLS != nil)
 	}
 
@@ -652,14 +658,14 @@ func buildClusterMode(cfg *config.YvonneConfig, auditLog *audit.AuditLogger, met
 // buildAdminServer 装配 Admin Web UI。
 //
 // Dev 模式默认启用（即使配置 admin.enabled=false 也强制启用，方便本地测试）。
-// Cluster 模式按配置 admin.enabled 控制。
+// Cluster 模式按配置 admin.enabled 控制；若启用则强制要求 admin_token 非空，否则 panic 拒绝启动。
 //
 // 监听地址：
 //   - 优先用配置 admin.bind_addr / admin.bind_port
 //   - 未配置时默认 127.0.0.1:8250
 //
 // 安全：管理页面强制绑 127.0.0.1，禁止 0.0.0.0。
-func buildAdminServer(cfg *config.YvonneConfig, unsealer seal.Unsealer, auditor audit.Auditor) *admin.Server {
+func buildAdminServer(cfg *config.YvonneConfig, unsealer seal.Unsealer, auditor audit.Auditor, stores ...storage.KVStore) *admin.Server {
 	// Dev 模式强制启用 admin UI。
 	if cfg.Mode == config.ModeDev {
 		log.Printf("DEV MODE: admin web UI forced enabled")
@@ -667,7 +673,7 @@ func buildAdminServer(cfg *config.YvonneConfig, unsealer seal.Unsealer, auditor 
 		if cfg.Server.Admin.AdminToken != "" {
 			srv.SetAdminToken(cfg.Server.Admin.AdminToken)
 		}
-		wireAdminV142(srv, true, auditor)
+		wireAdminV142(srv, true, auditor, stores...)
 		return srv
 	}
 
@@ -677,27 +683,39 @@ func buildAdminServer(cfg *config.YvonneConfig, unsealer seal.Unsealer, auditor 
 		return nil
 	}
 
+	// 致命安全约束：Cluster 模式下启用 Admin UI 时必须配置 admin_token，绝不允许无凭据裸奔（fail-closed）。
+	if cfg.Server.Admin.AdminToken == "" {
+		panic("FATAL: Cluster mode requires server.admin.admin_token when admin web UI is enabled (set YVONNE_ADMIN_TOKEN or server.admin.admin_token)")
+	}
+
 	log.Printf("admin web UI enabled at %s:%d", cfg.Server.Admin.BindAddr, cfg.Server.Admin.BindPort)
 	srv := admin.NewServer(unsealer)
-	if cfg.Server.Admin.AdminToken != "" {
-		srv.SetAdminToken(cfg.Server.Admin.AdminToken)
-		log.Printf("admin web UI: session-cookie auth enabled (admin_token configured)")
-	} else {
-		log.Printf("WARNING: admin web UI has no admin_token — UNPROTECTED (bind 127.0.0.1 only)")
-	}
-	wireAdminV142(srv, false, auditor)
+	srv.SetAdminToken(cfg.Server.Admin.AdminToken)
+	log.Printf("admin web UI: session-cookie auth enabled (admin_token configured)")
+	wireAdminV142(srv, false, auditor, stores...)
 	return srv
 }
 
-// wireAdminV142 v1.4.2 接线：内存版 session/captcha/device 存储 + TOTP + 默认时长。
+// wireAdminV142 v1.4.2 接线：session/captcha/device/TOTP 防重放/锁定状态存储 + TOTP + 默认时长。
 //
-// 内存版实现（dev / 单实例 cluster 够用）。后续 cluster 多实例可注入 KVStore 后端。
-func wireAdminV142(srv *admin.Server, devMode bool, auditor audit.Auditor) {
-	// 存储（v1.4.2 dev / 单实例 cluster 用内存版）
+// Cluster 模式下若提供 KVStore 后端（如 PGStore），TOTP 防重放与登录锁定状态使用集群共享存储，
+// 防止跨副本重放同一 TOTP 验证码或跨节点绕过锁定。
+func wireAdminV142(srv *admin.Server, devMode bool, auditor audit.Auditor, stores ...storage.KVStore) {
+	var kv storage.KVStore
+	if len(stores) > 0 {
+		kv = stores[0]
+	}
+
 	srv.SetSessionStore(admin.NewMemorySessionStore())
 	srv.SetCaptchaStore(admin.NewMemoryCaptchaStore())
-	srv.SetLoginStateStore(admin.NewMemoryLoginStateStore())
 	srv.SetDeviceStore(admin.NewMemoryDeviceStore())
+	if kv != nil {
+		srv.SetLoginStateStore(admin.NewKVLoginStateStore(kv))
+		srv.SetTOTPReplayStore(admin.NewKVTOTPReplayStore(kv))
+	} else {
+		srv.SetLoginStateStore(admin.NewMemoryLoginStateStore())
+		srv.SetTOTPReplayStore(admin.NewMemoryTOTPReplayStore())
+	}
 
 	// 审计：注入 bootstrap 已有的 audit logger
 	if auditor != nil {
@@ -705,10 +723,9 @@ func wireAdminV142(srv *admin.Server, devMode bool, auditor audit.Auditor) {
 		log.Printf("admin web UI: audit logging enabled")
 	}
 
-	// dev mode 启用调试端点
-	if devMode {
-		srv.SetDevMode(true)
-	}
+	// dev mode 启用调试端点；生产模式启用 Secure Cookie。
+	srv.SetDevMode(devMode)
+	srv.SetSecureCookies(!devMode)
 
 	// TOTP secret：从 YVONNE_ADMIN_TOTP_SECRET env 读；空 → 跳过 TOTP。
 	if secret := os.Getenv("YVONNE_ADMIN_TOTP_SECRET"); secret != "" {

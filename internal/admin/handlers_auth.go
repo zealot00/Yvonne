@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -98,23 +99,29 @@ func newLoginErr(k loginErrorKind, format string, a ...any) *loginErr {
 
 // loginFlow 处理一次登录请求，按以下顺序校验：
 //
-//  1. dev 模式（adminToken 空）→ 直接创建 session（无 captcha/TOTP/devices）
-//  2. 检查登录态是否被锁（IP+用户）
-//  3. 设备指纹命中 → 跳过 captcha + TOTP，仍校验 adminToken
-//  4. 校验 captcha（一次性消费）
-//  5. 校验 adminToken（constant-time）
-//  6. 校验 TOTP（若 totpSecret 非空；markUsed 防重放）
-//  7. 创建 session（30 min idle + 8 h hard cap）
-//  8. 若 remember=true + 提供 device fingerprint → 写 device token
-//  9. 写审计日志
+//  1. 显式 dev 模式（s.devMode && adminToken 空）→ 直接创建 session；非 dev 模式空 token 强制拒绝（fail-closed）
+//  2. 检查登录态是否被锁（客户端 IP+UA/设备指纹 维度 + 账号跨 IP 全局维度）
+//  3. 若未命中受信任设备指纹（需重算 HMAC 指纹 + 校验 UA/IP 绑定）→ 校验一次性图形验证码（Captcha）
+//     注意：受信任设备仅跳过图形验证码，绝不跳过 adminToken 与 TOTP 二次认证！
+//  4. 校验 adminToken（constant-time）
+//  5. 校验 TOTP（若 totpSecret 非空；通过 TOTPReplayStore 防集群/单机重放）
+//  6. 创建 session（30 min idle + 8 h hard cap）
+//  7. 若 remember=true + 提供 device fingerprint → 写 device token
+//  8. 写审计日志
 //
 // 返回 session, deviceToken（nil when !remember）, error。
 func (s *Server) loginFlow(req *LoginRequest, clientIP, userAgent string) (*Session, *DeviceToken, error) {
-	// 0. 构造登录态 key
-	stateKey := "admin-web@" + clientIP
+	// 0. 构造多维登录态 key（防 NAT 互锁 + 防换 IP 绕过）
+	ipKey := "admin-web@" + clientIP
+	clientKey := loginClientKey(clientIP, userAgent, req.DeviceFingerprint)
+	accountKey := "admin-web@account"
 
-	// 1. dev 模式：全过
+	// 1. 空 token 检查：仅显式 devMode 允许免密，生产环境空 token 强制 fail-closed
 	if s.adminToken == "" {
+		if !s.devMode {
+			s.recordAudit("LoginFailure", clientIP, "admin-token-not-configured")
+			return nil, nil, newLoginErr(loginErrToken, "admin token not configured")
+		}
 		sess, err := NewSession("admin-web", s.idleTimeout, s.hardCap, false, clientIP, userAgent)
 		if err != nil {
 			return nil, nil, newLoginErr(loginErrUnknown, "create session: %v", err)
@@ -126,87 +133,148 @@ func (s *Server) loginFlow(req *LoginRequest, clientIP, userAgent string) (*Sess
 		return sess, nil, nil
 	}
 
-	// 2. 锁定检查
-	if s.loginStates.IsLocked(stateKey) {
-		s.recordAudit("LoginLockRejected", clientIP, stateKey)
+	// 2. 锁定检查（客户端粒度 + 账号跨 IP 全局粒度）
+	if s.isLoginLocked(accountKey, ipKey, clientKey) {
+		s.recordAudit("LoginLockRejected", clientIP, clientKey)
 		return nil, nil, newLoginErr(loginErrLocked, "too many failures, locked for 30 min")
 	}
 
-	// 3. 设备指纹路径（跳过 captcha + TOTP）
-	if req.DeviceFP != "" && s.devices.Exists(req.DeviceFP) {
-		// 仍校验 adminToken
-		if subtle.ConstantTimeCompare([]byte(req.AdminToken), []byte(s.adminToken)) != 1 {
-			s.loginStates.IncFailed(stateKey)
-			s.recordAudit("LoginFailure", clientIP, "device-skip wrong-token")
-			return nil, nil, newLoginErr(loginErrToken, "invalid admin token")
+	// 3. 校验图形验证码（仅当设备 token 严格校验通过时可免图形验证码，仍必须校验 adminToken 与 TOTP）
+	deviceTrusted := s.isValidDeviceToken(req, clientIP, userAgent)
+	if !deviceTrusted {
+		cap, ok := s.captchaStore.Pop(req.CaptchaID)
+		if !ok {
+			s.recordLoginFailure(accountKey, ipKey, clientKey, clientIP)
+			s.recordAudit("LoginFailure", clientIP, "captcha-missing-or-expired")
+			return nil, nil, newLoginErr(loginErrCaptcha, "captcha missing or expired")
 		}
-		sess, err := s.createSession(req.Remember, req.DeviceFingerprint, clientIP, userAgent)
-		if err != nil {
-			return nil, nil, err
+		if !ValidateCaptchaText(cap.Text, req.CaptchaText) {
+			s.recordLoginFailure(accountKey, ipKey, clientKey, clientIP)
+			s.recordAudit("LoginFailure", clientIP, "captcha-mismatch")
+			return nil, nil, newLoginErr(loginErrCaptcha, "captcha mismatch")
 		}
-		s.recordAudit("LoginSuccess", clientIP, "device-skip")
-		return sess, nil, nil
 	}
 
-	// 4. 校验 captcha
-	cap, ok := s.captchaStore.Pop(req.CaptchaID)
-	if !ok {
-		s.loginStates.IncFailed(stateKey)
-		s.recordAudit("LoginFailure", clientIP, "captcha-missing-or-expired")
-		return nil, nil, newLoginErr(loginErrCaptcha, "captcha missing or expired")
-	}
-	if !ValidateCaptchaText(cap.Text, req.CaptchaText) {
-		s.loginStates.IncFailed(stateKey)
-		s.recordAudit("LoginFailure", clientIP, "captcha-mismatch")
-		return nil, nil, newLoginErr(loginErrCaptcha, "captcha mismatch")
-	}
-
-	// 5. 校验 adminToken
+	// 4. 校验 adminToken
 	if subtle.ConstantTimeCompare([]byte(req.AdminToken), []byte(s.adminToken)) != 1 {
-		s.loginStates.IncFailed(stateKey)
-		s.recordAudit("LoginFailure", clientIP, "wrong-token")
+		s.recordLoginFailure(accountKey, ipKey, clientKey, clientIP)
+		if deviceTrusted {
+			s.recordAudit("LoginFailure", clientIP, "device-skip wrong-token")
+		} else {
+			s.recordAudit("LoginFailure", clientIP, "wrong-token")
+		}
 		return nil, nil, newLoginErr(loginErrToken, "invalid admin token")
 	}
 
-	// 6. 校验 TOTP（totpSecret 非空时）
+	// 5. 校验 TOTP（totpSecret 非空时强制要求，绝不允许凭设备 cookie 跳过 TOTP）
 	if s.totpSecret != "" {
-		// markUsed callback：把已用 code 写进 KV，TTL = 90s（±1 窗口 60s + 30s buffer）
-		// 用 in-memory map 简化：仅防当前进程重放
 		markUsed := func(t time.Time, code string) error {
-			s.totpUsedMu.Lock()
-			defer s.totpUsedMu.Unlock()
-			if s.totpUsed == nil {
-				s.totpUsed = make(map[string]time.Time)
-			}
-			now := time.Now()
-			// 清理过期
-			for k, v := range s.totpUsed {
-				if now.Sub(v) > 90*time.Second {
-					delete(s.totpUsed, k)
-				}
-			}
 			key := fmt.Sprintf("%d:%s", t.Unix()/30, code)
-			if _, exists := s.totpUsed[key]; exists {
-				return auth.ErrTOTPAlreadyUsed
-			}
-			s.totpUsed[key] = now
-			return nil
+			return s.markTOTPUsed(key, time.Now(), 90*time.Second)
 		}
 		if err := auth.ValidateTOTP(s.totpSecret, req.TOTPCode, markUsed); err != nil {
-			s.loginStates.IncFailed(stateKey)
+			s.recordLoginFailure(accountKey, ipKey, clientKey, clientIP)
 			s.recordAudit("LoginFailure", clientIP, "totp-"+err.Error())
 			return nil, nil, newLoginErr(loginErrTOTP, "invalid TOTP: %v", err)
 		}
 	}
 
 	// 成功：清失败计数 + 建 session + 可选 device token
-	s.loginStates.ResetFailed(stateKey)
+	s.resetLoginFailures(accountKey, ipKey, clientKey)
 	sess, dev, err := s.createSessionWithDevice(req.Remember, req.DeviceFingerprint, clientIP, userAgent)
 	if err != nil {
 		return nil, nil, err
 	}
-	s.recordAudit("LoginSuccess", clientIP, "2fa")
+	if deviceTrusted {
+		s.recordAudit("LoginSuccess", clientIP, "device-captcha-skip+2fa")
+	} else {
+		s.recordAudit("LoginSuccess", clientIP, "2fa")
+	}
 	return sess, dev, nil
+}
+
+// isValidDeviceToken 严格校验受信任设备令牌：
+//  1. 服务端存储中存在且未过期
+//  2. 客户端必须提供 DeviceFingerprint 属性，且服务端用 sessionSecret 重算的 HMAC 与 DeviceFP 一致
+//  3. 绑定 IP 与 User-Agent 必须一致（防止窃取 cookie 后跨机器/跨浏览器重放）
+func (s *Server) isValidDeviceToken(req *LoginRequest, clientIP, userAgent string) bool {
+	if req == nil || req.DeviceFP == "" || s.devices == nil {
+		return false
+	}
+	dev, ok := s.devices.Get(req.DeviceFP)
+	if !ok || dev == nil {
+		return false
+	}
+	if req.DeviceFingerprint == (DeviceAttributes{}) {
+		return false
+	}
+	if userAgent != "" && req.DeviceFingerprint.UA != "" && req.DeviceFingerprint.UA != userAgent {
+		return false
+	}
+	if dev.IP != "" && clientIP != "" && dev.IP != clientIP {
+		return false
+	}
+	expectedFP := DeviceFingerprint(s.sessionSecret, req.DeviceFingerprint)
+	if expectedFP == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(expectedFP), []byte(req.DeviceFP)) == 1
+}
+
+// markTOTPUsed 记录已使用的 TOTP code（优先使用注入的 TOTPReplayStore 支持集群防重放）。
+func (s *Server) markTOTPUsed(key string, now time.Time, ttl time.Duration) error {
+	if s.totpReplay != nil {
+		return s.totpReplay.MarkUsed(key, now, ttl)
+	}
+	s.totpUsedMu.Lock()
+	defer s.totpUsedMu.Unlock()
+	if s.totpUsed == nil {
+		s.totpUsed = make(map[string]time.Time)
+	}
+	for k, v := range s.totpUsed {
+		if now.Sub(v) > ttl {
+			delete(s.totpUsed, k)
+		}
+	}
+	if _, exists := s.totpUsed[key]; exists {
+		return auth.ErrTOTPAlreadyUsed
+	}
+	s.totpUsed[key] = now
+	return nil
+}
+
+func (s *Server) isLoginLocked(accountKey, ipKey, clientKey string) bool {
+	if s.loginStates == nil {
+		return false
+	}
+	if tracker, ok := s.loginStates.(AccountLockTracker); ok {
+		return tracker.IsRequestLocked(accountKey, ipKey, clientKey)
+	}
+	return s.loginStates.IsLocked(accountKey) || s.loginStates.IsLocked(clientKey) || s.loginStates.IsLocked(ipKey)
+}
+
+func (s *Server) recordLoginFailure(accountKey, ipKey, clientKey, clientIP string) {
+	if s.loginStates == nil {
+		return
+	}
+	if tracker, ok := s.loginStates.(AccountLockTracker); ok {
+		tracker.RecordFailure(accountKey, ipKey, clientKey, clientIP)
+		return
+	}
+	s.loginStates.IncFailed(clientKey)
+	if clientKey != ipKey {
+		s.loginStates.IncFailed(ipKey)
+	}
+	s.loginStates.IncFailed(accountKey)
+}
+
+func (s *Server) resetLoginFailures(accountKey, ipKey, clientKey string) {
+	if s.loginStates == nil {
+		return
+	}
+	s.loginStates.ResetFailed(clientKey)
+	s.loginStates.ResetFailed(ipKey)
+	s.loginStates.ResetFailed(accountKey)
 }
 
 // createSession 建 session，不写 device token。
@@ -245,20 +313,26 @@ func (s *Server) createSessionWithDevice(remember bool, attrs DeviceAttributes, 
 	return sess, dev, nil
 }
 
-// recordAudit 写一条审计日志（best-effort，错误不阻断登录流程）。
+// recordAudit 写一条审计日志；若写入失败则打印 CRITICAL 告警日志（禁止静默吞没）。
 func (s *Server) recordAudit(action, clientIP, detail string) {
 	if s.auditor == nil {
 		return
 	}
-	_ = s.auditor.Record(audit.LogEntry{
+	result := "success"
+	if strings.Contains(action, "Failure") || strings.Contains(action, "Rejected") {
+		result = "failure"
+	}
+	if err := s.auditor.Record(audit.LogEntry{
 		Timestamp: time.Now(),
 		ClientIP:  clientIP,
 		Actor:     "admin-web",
 		Resource:  "admin-auth",
 		Action:    action,
-		Result:    "success",
+		Result:    result,
 		Status:    detail,
-	})
+	}); err != nil {
+		log.Printf("CRITICAL: admin audit log write failed (action=%s ip=%s detail=%s): %v", action, clientIP, detail, err)
+	}
 }
 
 // =====================================================================
@@ -273,7 +347,7 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"csrf_failed"}`, http.StatusInternalServerError)
 		return
 	}
-	SetCSRFCookie(w, nonce)
+	SetCSRFCookieWithSecure(w, nonce, s.isSecureRequest(r))
 	s.writeLoginHTML(w)
 }
 
@@ -327,6 +401,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 1.5 若请求体未传 device_fp，则从 HttpOnly Cookie 读取
+	if req.DeviceFP == "" {
+		if c, err := r.Cookie(DeviceCookieName); err == nil && c.Value != "" {
+			req.DeviceFP = c.Value
+		}
+	}
+
 	// 2. 取 client IP
 	ip := clientIP(r)
 
@@ -343,8 +424,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	secure := s.isSecureRequest(r)
+
 	// 4. Set-Cookie session
-	setSessionCookie(w, sess)
+	setSessionCookieWithSecure(w, sess, secure)
 
 	// 5. 如果 remember + device → Set-Cookie device_fp
 	resp := LoginResponse{
@@ -354,7 +437,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		RememberOK: dev != nil,
 	}
 	if dev != nil {
-		setDeviceCookie(w, dev.Fingerprint)
+		setDeviceCookieWithSecure(w, dev.Fingerprint, secure)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -364,14 +447,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 // handleLogout POST /admin/api/logout 注销。
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r)
+	secure := s.isSecureRequest(r)
 	// 从 cookie 取 session ID，清掉
 	if c, err := r.Cookie(SessionCookieName); err == nil && c.Value != "" {
 		_ = s.sessions.Delete(c.Value)
 	}
 	// 清 cookie
-	clearCookie(w, SessionCookieName)
+	clearCookieWithSecure(w, SessionCookieName, secure)
 	if _, err := r.Cookie(DeviceCookieName); err == nil {
-		clearCookie(w, DeviceCookieName)
+		clearCookieWithSecure(w, DeviceCookieName, secure)
 	}
 	s.recordAudit("Logout", ip, "user")
 	w.Header().Set("Content-Type", "application/json")
@@ -410,7 +494,7 @@ func (s *Server) handleDeviceRevoke(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r)
 	if c, err := r.Cookie(DeviceCookieName); err == nil && c.Value != "" {
 		s.devices.Delete(c.Value)
-		clearCookie(w, DeviceCookieName)
+		clearCookieWithSecure(w, DeviceCookieName, s.isSecureRequest(r))
 	}
 	s.recordAudit("DeviceRevoke", ip, "user")
 	w.Header().Set("Content-Type", "application/json")
@@ -428,37 +512,69 @@ const (
 	SessionCookiePath = "/admin"
 )
 
+// isSecureRequest 判断当前请求是否应设置 Cookie Secure=true。
+// 生产环境（s.secureCookies=true）或 HTTPS / 反代 TLS 终止（X-Forwarded-Proto=https）时返回 true。
+func (s *Server) isSecureRequest(r *http.Request) bool {
+	if s.secureCookies {
+		return true
+	}
+	if r != nil {
+		if r.TLS != nil {
+			return true
+		}
+		if strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+			return true
+		}
+	}
+	return false
+}
+
 func setSessionCookie(w http.ResponseWriter, sess *Session) {
+	setSessionCookieWithSecure(w, sess, false)
+}
+
+func setSessionCookieWithSecure(w http.ResponseWriter, sess *Session, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     SessionCookieName,
 		Value:    sess.ID,
 		Path:     SessionCookiePath,
 		HttpOnly: true,
-		Secure:   false, // dev mode; 生产 bootstrap 应为 true
+		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
 		Expires:  sess.HardCapAt, // 浏览器层面 hard cap
 	})
 }
 
 func setDeviceCookie(w http.ResponseWriter, fp string) {
+	setDeviceCookieWithSecure(w, fp, false)
+}
+
+func setDeviceCookieWithSecure(w http.ResponseWriter, fp string, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     DeviceCookieName,
 		Value:    fp,
 		Path:     SessionCookiePath,
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
 		Expires:  time.Now().Add(DeviceTTL),
 	})
 }
 
 func clearCookie(w http.ResponseWriter, name string) {
+	clearCookieWithSecure(w, name, false)
+}
+
+func clearCookieWithSecure(w http.ResponseWriter, name string, secure bool) {
 	http.SetCookie(w, &http.Cookie{
-		Name:    name,
-		Value:   "",
-		Path:    SessionCookiePath,
-		Expires: time.Unix(0, 0),
-		MaxAge:  -1,
+		Name:     name,
+		Value:    "",
+		Path:     SessionCookiePath,
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteStrictMode,
+		Expires:  time.Unix(0, 0),
+		MaxAge:   -1,
 	})
 }
 
@@ -472,22 +588,25 @@ func writeLoginError(w http.ResponseWriter, status int, kind loginErrorKind, msg
 	})
 }
 
-// clientIP 优先 X-Forwarded-For（反代场景），否则 RemoteAddr。
+// clientIP 提取客户端 IP：仅当直连对端为本地回环（反代场景）时才信任 X-Forwarded-For / X-Real-IP，
+// 防止非授信直连客户端伪造 X-Forwarded-For 绕过锁定。
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// 取第一个（最近的客户端）
-		parts := strings.Split(xff, ",")
-		ip := strings.TrimSpace(parts[0])
-		if ip != "" {
-			return ip
-		}
-	}
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return strings.TrimSpace(xri)
-	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	isLoopback := host == "" || host == "127.0.0.1" || host == "::1" || host == "localhost"
+	if isLoopback {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			parts := strings.Split(xff, ",")
+			ip := strings.TrimSpace(parts[0])
+			if ip != "" {
+				return ip
+			}
+		}
+		if xri := r.Header.Get("X-Real-IP"); xri != "" {
+			return strings.TrimSpace(xri)
+		}
 	}
 	return host
 }

@@ -52,6 +52,9 @@ func Validate(cfg *Config) error {
 		if cfg.Server.Admin.BindPort <= 0 || cfg.Server.Admin.BindPort > 65535 {
 			errs = append(errs, "admin.bind_port must be in 1..65535")
 		}
+		if cfg.Server.Admin.AdminToken == "" {
+			errs = append(errs, "admin.admin_token required when admin.enabled=true")
+		}
 	}
 
 	// --- Storage ---

@@ -105,7 +105,7 @@ func (r *V1Router) mfaMiddleware(action string, next http.HandlerFunc) http.Hand
 			return
 		}
 
-		if err := auth.ValidateTOTP(state.Secret, code, nil); err != nil {
+		if err := auth.ValidateTOTP(state.Secret, code, r.markRoleTOTPUsed(policy.RoleID)); err != nil {
 			writeJSONError(w, http.StatusForbidden, "invalid mfa code")
 			return
 		}

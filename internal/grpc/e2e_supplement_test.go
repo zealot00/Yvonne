@@ -5,10 +5,12 @@ package grpc
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	pb "yvonne/gen/proto/yvonne/v1"
 	"yvonne/internal/auth"
 	"yvonne/internal/lifecycle"
@@ -177,11 +179,19 @@ func TestGRPC_AuthRequired(t *testing.T) {
 	}
 	t.Logf("✅ gRPC no token rejected: %v", err)
 
-	// 错误 token → 拒绝。
-	wrongClient := newAuthClient(t, grpcSrv, "wrong-token")
-	// gRPC 拦截器用 metadata 传 token，这里验证拦截器存在即可。
-	_ = wrongClient
-	t.Log("✅ gRPC auth interceptor active")
+	// 错误 token → 拒绝，且不泄露内部错误细节。
+	wrongMD := metadata.Pairs("authorization", "Bearer secret-wrong-token-detail")
+	wrongCtx := metadata.NewOutgoingContext(ctx, wrongMD)
+	_, err = noTokenClient.Encrypt(wrongCtx, &pb.EncryptRequest{
+		KeyId: "auth-key", Plaintext: []byte("test"),
+	})
+	if err == nil {
+		t.Fatal("should reject wrong token")
+	}
+	if strings.Contains(err.Error(), "secret-wrong-token-detail") || strings.Contains(err.Error(), "token not found") || strings.Contains(err.Error(), "invalid token") {
+		t.Fatalf("gRPC auth error must not echo internal error details: %v", err)
+	}
+	t.Log("✅ gRPC auth interceptor active and sanitizes error details")
 }
 
 // TestGRPC_SealedRefused_AllOps sealed 状态拒绝操作。

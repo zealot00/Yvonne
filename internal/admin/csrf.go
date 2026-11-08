@@ -29,15 +29,20 @@ const (
 	CSRFNonceBytes = 32
 )
 
-// SetCSRFCookie 设置 CSRF cookie。
-// secure：dev 模式 httptest 传 false；生产必须 true。
+// SetCSRFCookie 设置 CSRF cookie（默认 Secure=false，兼容单元测试与 dev 模式）。
+// 生产环境应通过 SetCSRFCookieWithSecure(w, nonce, true) 设置 Secure=true。
 func SetCSRFCookie(w http.ResponseWriter, nonce string) {
+	SetCSRFCookieWithSecure(w, nonce, false)
+}
+
+// SetCSRFCookieWithSecure 设置 CSRF cookie，由调用方指定 Secure 属性。
+func SetCSRFCookieWithSecure(w http.ResponseWriter, nonce string, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     CSRFCookieName,
 		Value:    nonce,
 		Path:     CSRFCookiePath,
 		HttpOnly: false, // 前端 JS 需要读
-		Secure:   false, // 由调用方决定；生产环境 bootstrap 应传 true
+		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
 	})
 }

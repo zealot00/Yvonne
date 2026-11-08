@@ -48,12 +48,14 @@ type Server struct {
 	devices       DeviceStore
 	auditor       audit.Auditor // 审计（可空）
 
-	devMode bool // true 时启用 /admin/api/_dev_captcha_text（E2E 测试用）
+	devMode       bool // true 时启用 /admin/api/_dev_captcha_text 及空 token 自动放行（仅 dev 模式）
+	secureCookies bool // 生产模式强制 Cookie Secure=true
 
 	idleTimeout time.Duration // 默认 30 min
 	hardCap     time.Duration // 默认 8 h
 
-	// TOTP 防重放（仅当前进程）
+	// TOTP 防重放（支持集群共享 KVStore 或进程内内存回退）
+	totpReplay TOTPReplayStore
 	totpUsedMu sync.Mutex
 	totpUsed   map[string]time.Time
 }
@@ -139,10 +141,25 @@ func (s *Server) SetHardCap(d time.Duration) {
 	s.hardCap = d
 }
 
-// SetDevMode 启用 dev mode（暴露 _dev_captcha_text 等调试端点）。
-// 生产环境必须 false。
+// SetDevMode 启用 dev mode（暴露 _dev_captcha_text 等调试端点，并允许空 adminToken 免认证）。
+// 生产环境必须 false（空 adminToken 时强制拒绝）。
 func (s *Server) SetDevMode(b bool) {
 	s.devMode = b
+}
+
+// SetSecureCookies 设置会话/设备/CSRF Cookie 的 Secure 属性（生产模式应设为 true）。
+func (s *Server) SetSecureCookies(b bool) {
+	s.secureCookies = b
+}
+
+// SecureCookies 返回当前是否启用 Secure Cookie。
+func (s *Server) SecureCookies() bool {
+	return s.secureCookies
+}
+
+// SetTOTPReplayStore 注入 TOTP 防重放存储（集群模式注入 KVTOTPReplayStore）。
+func (s *Server) SetTOTPReplayStore(store TOTPReplayStore) {
+	s.totpReplay = store
 }
 
 // StartReaper 启动后台清理 goroutine，返回 stop 函数。
@@ -165,6 +182,9 @@ func (s *Server) StartReaper(interval time.Duration) func() {
 				if s.devices != nil {
 					_ = s.devices.Reap(now)
 				}
+				if s.totpReplay != nil {
+					_ = s.totpReplay.Reap(now)
+				}
 			case <-stop:
 				ticker.Stop()
 				return
@@ -179,7 +199,11 @@ func (s *Server) StartReaper(interval time.Duration) func() {
 func (s *Server) requireAdminToken(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		if s.adminToken == "" {
-			next(w, req)
+			if s.devMode {
+				next(w, req)
+				return
+			}
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
 		auth := req.Header.Get("Authorization")

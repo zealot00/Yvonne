@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"runtime"
 	"time"
 
@@ -494,7 +495,10 @@ func (c *Core) recordAudit(ctx context.Context, action, keyID string, version in
 		Resource:  keyID,
 		Result:    status,
 	}
-	_ = c.auditLog.Record(entry)
+	if err := c.auditLog.Record(entry); err != nil {
+		log.Printf("CRITICAL: core audit log write failed for action=%s key=%s actor=%s: %v",
+			action, keyID, actor, err)
+	}
 }
 
 // ClearCache 代理 manager.ClearCache（供 EmergencySeal 回调）。

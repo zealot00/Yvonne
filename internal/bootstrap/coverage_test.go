@@ -209,7 +209,7 @@ func TestBuildAdminServer_ClusterEnabled(t *testing.T) {
 	t.Log("✅ buildAdminServer cluster enabled")
 }
 
-// TestBuildAdminServer_ClusterNoToken Cluster 模式 admin 无 token 警告。
+// TestBuildAdminServer_ClusterNoToken Cluster 模式 admin 启用但无 token 必须 panic 拒绝启动。
 func TestBuildAdminServer_ClusterNoToken(t *testing.T) {
 	mk, _ := memguard.NewSecureBufferFromRandom(32)
 	defer mk.Wipe()
@@ -222,11 +222,14 @@ func TestBuildAdminServer_ClusterNoToken(t *testing.T) {
 			Admin: config.AdminServerConfig{Enabled: true},
 		},
 	}
-	srv := buildAdminServer(cfg, vault, nil)
-	if srv == nil {
-		t.Fatal("admin server should not be nil when enabled")
-	}
-	t.Log("✅ buildAdminServer cluster no token (warning)")
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("buildAdminServer in cluster mode with empty admin_token must panic")
+		}
+		t.Logf("✅ buildAdminServer cluster no token panicked as expected: %v", r)
+	}()
+	_ = buildAdminServer(cfg, vault, nil)
 }
 
 // TestSetVaultCryptoSuite_Standard 标准密码套件。
