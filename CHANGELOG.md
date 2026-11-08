@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **gRPC 认证错误脱敏与哈希链审计**：`internal/grpc/interceptor.go` 移除向客户端回显内部认证错误细节的逻辑，统一返回通用 `"authentication failed"`；接入 `audit.Auditor` 将认证失败、Sealed 拒绝、Panic 与业务调用全部纳入 HMAC 哈希链审计，且审计写入失败时 fail-closed 返回 `codes.Internal`。
 - **HTTP 中间件 Fail-Closed 审计**：`internal/api/middleware.go` 引入 `bufferedAuditResponseRecorder` 先缓冲业务响应，待 `auditLog.Record` 落盘成功后再刷写给客户端；若审计写入失败，立即清零缓冲中的响应体（防止无审计泄露明文 DEK）、输出 `CRITICAL` 告警并返回 `500 Internal Server Error`，同时补齐 `IsEmergencySealed` 拒绝分支的审计记录。
 
+#### Fixed — Docker 与 Helm / Kubernetes 部署修复
+- **新增根目录 `Dockerfile` 与 `.dockerignore`**：基于 `golang:1.25-alpine` + `gcr.io/distroless/static-debian12:nonroot` 多阶段构建，内置 `-tags "gmsm,timetzdata"`（支持国密套件与容器内 `Asia/Shanghai` 时区），并让 `yvonne dev --addr 0.0.0.0` 下管理台同步绑定，修复容器端口映射无法访问的问题。
+- **Helm Chart 与配置 Schema 对齐**：修正 `deploy/helm/yvonne` 中 `storage.type` / `unseal.type` 字段名，补齐 ConfigMap 的 `auth`、`logging` 与 `server.grpc.tls` 渲染，并在 `statefulset.yaml` 中自动挂载 TLS Secret 及兼容 `YVONNE_ADMIN_TOKEN` / `YVONNE_SERVER_ADMIN_ADMIN_TOKEN` 环境变量。
+
 ## [1.4.2] - 2026-07-07 (Admin Web UI 双因子登录重做)
 
 ### Security — Admin Web 合规 UX
